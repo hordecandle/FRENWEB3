@@ -192,7 +192,12 @@
           <div id="s-failed" hidden>
             <h2>Something went wrong</h2>
             <p class="wiz__lead" id="fail-msg">The server didn't finish setting up.</p>
-            <div class="wiz__actions"><a class="btn" href="./">Start again</a></div>
+            <p class="wiz__progress" id="fail-detail" hidden></p>
+            <div class="wiz__actions">
+              <button class="btn" type="button" id="retry" hidden>Try the install again</button>
+              <a class="btn" id="start-again" href="./">Start again</a>
+            </div>
+            <p class="ready__note" id="fail-paid" hidden>Your server is already paid for. Press <b>Try the install again</b>: it uses the same server, so you won't pay twice. Please don't start a new order.</p>
           </div>
         </div>
       </section>

@@ -13,7 +13,12 @@ export const PLANS = ["micro-ip"];
 export const RECOMMENDED = "micro-ip";
 export const KEY_TAG = "fren-installer";
 const OS_NAME = "Ubuntu 24.04";
-const INSTALL_TIMEOUT_MS = 25 * 60_000;
+// A Netlify background function lives 15 minutes at most, so an install that is
+// still "running" after that has been killed: give up on it a little later.
+const INSTALL_TIMEOUT_MS = 17 * 60_000;
+// One automatic retry, then the person gets a "Try again" button.
+const AUTO_RETRIES = 1;
+export const CONTACT = "CONTACT-PLACEHOLDER: set the real support address";
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export class UserError extends Error {}
@@ -124,11 +129,47 @@ export function createWizard(deps) {
       }
       await save(rec);
     } else if (rec.stage === "installing" && now() - rec.installStartedAt > INSTALL_TIMEOUT_MS) {
-      rec.stage = "failed";
-      rec.error = "Installing took too long. Your server is paid for; contact us with this page's link and we'll finish it.";
-      forget(rec);
-      await save(rec);
+      await fail(rec, "Installing took longer than expected.", "timeout");
     }
+    return view(rec);
+  }
+
+  /**
+   * An install went wrong. The server is paid for, so keep the key and token:
+   * retry once on our own, then offer a button. Never a second order.
+   */
+  async function fail(rec, why, detail) {
+    rec.attempts = rec.attempts ?? 0;
+    if (rec.attempts < AUTO_RETRIES && rec.privateKey && rec.host) return restart(rec);
+    rec.stage = "failed";
+    rec.retryable = Boolean(rec.privateKey && rec.host);
+    rec.error = rec.retryable
+      ? `${why} Your server is paid for and nothing is lost. Press "Try the install again". If it keeps failing, write to ${CONTACT} and include this page's link.`
+      : `${why} Your server is paid for. Write to ${CONTACT} and include this page's link; we'll finish it.`;
+    rec.detail = detail;
+    await save(rec);
+  }
+
+  /** Run the install again on the same server. */
+  async function restart(rec) {
+    rec.attempts = (rec.attempts ?? 0) + 1;
+    rec.stage = "installing";
+    rec.installClaimed = false;
+    rec.retryable = false;
+    delete rec.detail;
+    rec.error = undefined;
+    rec.progress = rec.attempts > 1 ? "Trying the install again…" : "Hit a snag, trying again automatically…";
+    rec.installStartedAt = now();
+    await save(rec);
+    await deps.triggerInstall(rec.id);
+    return rec;
+  }
+
+  /** The "Try the install again" button. */
+  async function retry(id) {
+    const rec = await load(id);
+    if (rec.stage !== "failed" || !rec.retryable) throw new UserError("There's nothing to retry for this setup.");
+    await restart(rec);
     return view(rec);
   }
 
@@ -172,14 +213,14 @@ export function createWizard(deps) {
         rec.setupUrl = url;
         rec.progress = "Done";
       } else {
-        rec.stage = "failed";
-        rec.error = `The install stopped: ${tail(r.output)}`;
+        await fail(rec, "The install stopped before it finished.", tail(r.output));
+        return;
       }
     } catch (err) {
-      rec.stage = "failed";
-      rec.error = `Couldn't reach your server: ${err.message}`;
+      await fail(rec, "We couldn't reach your server.", err.message);
+      return;
     }
-    forget(rec);
+    forget(rec); // only after success: until then a retry needs both
     await save(rec);
   }
 
@@ -200,13 +241,13 @@ export function createWizard(deps) {
     await deps.store.set(rec.id, rec);
   }
 
-  return { plans, start, code, status, install };
+  return { plans, start, code, status, install, retry };
 }
 
 /** What the page sees: never tokens or keys. */
 export function view(rec) {
   const v = { id: rec.id, stage: rec.stage, plan: rec.plan };
-  for (const k of ["checkoutUrl", "amountUsd", "progress", "setupUrl", "error"]) if (rec[k] !== undefined) v[k] = rec[k];
+  for (const k of ["checkoutUrl", "amountUsd", "progress", "setupUrl", "error", "detail", "retryable"]) if (rec[k] !== undefined) v[k] = rec[k];
   return v;
 }
 

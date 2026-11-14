@@ -47,6 +47,11 @@
         this.save(db);
         return this.view(body.id, db[body.id]);
       }
+      if (path === "retry") {
+        db[body.id].t = Date.now() - 14000;
+        this.save(db);
+        return this.view(body.id, db[body.id]);
+      }
       if (path === "status") {
         if (!db[body.id]) throw new Error("not found");
         return this.view(body.id, db[body.id]);
@@ -173,6 +178,12 @@
       case "failed":
         show("s-failed", "build");
         $("fail-msg").textContent = d.error || "The server didn't finish setting up.";
+        // After payment the fix is a retry on the same server, never a new order.
+        $("retry").hidden = !d.retryable;
+        $("fail-paid").hidden = !d.retryable;
+        $("start-again").hidden = Boolean(d.retryable);
+        $("fail-detail").hidden = !d.detail;
+        $("fail-detail").textContent = d.detail ? `Technical detail: ${d.detail}` : "";
         return;
     }
     timer = setTimeout(poll, 5000);
@@ -206,6 +217,17 @@
     btn.disabled = on;
     if (label) btn.innerHTML = label;
   }
+
+  $("retry").addEventListener("click", async () => {
+    busy($("retry"), true);
+    try {
+      renderStage(await api("retry", { id }));
+    } catch (e) {
+      $("fail-msg").textContent = e.message;
+    } finally {
+      busy($("retry"), false);
+    }
+  });
 
   $("s-plan").addEventListener("submit", async (ev) => {
     ev.preventDefault();
