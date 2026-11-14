@@ -12,8 +12,15 @@ const SETUP_TOKEN = "s3cr3t-setup-token-0123456789abcdef";
 
 function fakeTelegram() {
   const sent: string[] = [];
+  const probes: string[] = [];
   let served = false;
   const fetchFn = (async (url: string, init?: RequestInit) => {
+    // Model providers: a free key check. Keys with "bad" in them are refused, like a real provider would.
+    if (!String(url).includes("api.telegram.org")) {
+      probes.push(String(url));
+      const h = JSON.stringify(init?.headers ?? {});
+      return new Response("{}", { status: /bad|fake/i.test(h) ? 401 : 200 });
+    }
     const [, token, method] = String(url).match(/bot([^/]+)\/(\w+)$/)!;
     const json = (v: unknown) => new Response(JSON.stringify(v));
     if (token !== TOKEN) return json({ ok: false, error_code: 401 });
@@ -28,7 +35,7 @@ function fakeTelegram() {
     sent.push(String(init?.body));
     return json({ ok: true, result: {} });
   }) as typeof fetch;
-  return { fetchFn, sent };
+  return { fetchFn, sent, probes };
 }
 
 let server: ReturnType<typeof createSetupServer> | undefined;
@@ -99,6 +106,47 @@ describe("web setup", () => {
       body: "{}",
     });
     expect(res.status).toBe(403);
+  });
+
+  it("refuses a fake model key with a plain message, saves nothing, and the real key still goes in afterwards", async () => {
+    const { call, runs, tg } = await start();
+    for (const [provider, key] of [["anthropic", "sk-ant-FAKEFAKEFAKE"], ["openrouter", "sk-or-bad-key-123456"], ["openai", "sk-fake-1234567890"], ["gemini", "AIza-bad-1234567890"]] as const) {
+      const r = await call("POST", "/api/model", { provider, apiKey: key });
+      expect(r.status).toBe(400);
+      expect(String(r.json.error)).toMatch(/says this key doesn't work/);
+      expect(JSON.stringify(r.json)).not.toContain(key);
+    }
+    expect(runs.some((r) => r.includes("onboard"))).toBe(false); // nothing saved
+    expect(tg.probes).toHaveLength(4);
+    const ok = await call("POST", "/api/model", { provider: "openrouter", apiKey: "sk-or-v1-realrealreal" });
+    expect(ok.status).toBe(200);
+    expect(runs.some((r) => r.includes("--openrouter-api-key sk-or-v1-realrealreal"))).toBe(true);
+    expect(tg.probes.at(-1)).toBe("https://openrouter.ai/api/v1/auth/key");
+  });
+
+  it("a real key that replaces a saved one is activated, not left inactive", async () => {
+    const { call, deps, runs } = await start();
+    const base = deps.run;
+    (deps as { run: typeof base }).run = async (file, args, o) => {
+      runs.push(`${file} ${args.join(" ")}`);
+      if (args[0] === "onboard") return { code: 1, stdout: "", stderr: "Replacement credential saved but inactive. Your connection is unchanged. Test and activate it with:\nopenclaw models auth activate openrouter:setup-abc --agent main\n" };
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const r = await call("POST", "/api/model", { provider: "openrouter", apiKey: "sk-or-v1-realrealreal" });
+    expect(r.status).toBe(200);
+    expect(runs).toContain("openclaw models auth activate openrouter:setup-abc --agent main");
+  });
+
+  it("says so plainly when the provider can't be reached", async () => {
+    const { call, deps } = await start();
+    const orig = deps.fetchFn;
+    (deps as { fetchFn: typeof fetch }).fetchFn = (async (u: string, i?: RequestInit) => {
+      if (!String(u).includes("api.telegram.org")) throw new Error("ENOTFOUND");
+      return orig(u, i);
+    }) as typeof fetch;
+    const r = await call("POST", "/api/model", { provider: "anthropic", apiKey: "sk-ant-0123456789" });
+    expect(r.status).toBe(400);
+    expect(String(r.json.error)).toMatch(/Couldn't reach/);
   });
 
   it("goes from model key to Telegram to wallets, backup and done", async () => {

@@ -129,14 +129,56 @@ export const MODEL_PROVIDERS = {
 } as const;
 export type ModelProvider = keyof typeof MODEL_PROVIDERS;
 
-export async function configureModelKey(deps: Pick<SetupDeps, "run" | "openclawBin">, provider: ModelProvider, apiKey: string): Promise<void> {
+/** Why a key couldn't be used: the person should hear it in plain words. */
+export class ModelKeyError extends Error {}
+
+/**
+ * Ask the provider whether this key works, before anything is saved. Each probe
+ * is a free read-only call (no model run, no cost). A rejected key says so; a
+ * provider we can't reach doesn't pass it either, so "connected" always means it.
+ */
+export async function checkModelKey(fetchFn: Fetch, provider: ModelProvider, apiKey: string): Promise<void> {
+  const p = MODEL_PROVIDERS[provider];
+  const probes: Record<ModelProvider, [string, Record<string, string>]> = {
+    anthropic: ["https://api.anthropic.com/v1/models?limit=1", { "x-api-key": apiKey, "anthropic-version": "2023-06-01" }],
+    openai: ["https://api.openai.com/v1/models", { authorization: `Bearer ${apiKey}` }],
+    // /models is public on OpenRouter; /auth/key is the call that checks the key.
+    openrouter: ["https://openrouter.ai/api/v1/auth/key", { authorization: `Bearer ${apiKey}` }],
+    gemini: ["https://generativelanguage.googleapis.com/v1beta/models?pageSize=1", { "x-goog-api-key": apiKey }],
+  };
+  const [url, headers] = probes[provider];
+  let status: number;
+  try {
+    status = (await fetchFn(url, { headers, signal: AbortSignal.timeout(15_000) })).status;
+  } catch {
+    throw new ModelKeyError(`Couldn't reach ${p.label} to check your key. Check the connection and try again.`);
+  }
+  if (status === 400 || status === 401 || status === 403) {
+    throw new ModelKeyError(`${p.label} says this key doesn't work. Copy it again from ${p.keyUrl} (the whole key) and paste it here.`);
+  }
+  if (status >= 500) throw new ModelKeyError(`${p.label} isn't answering right now. Try again in a minute.`);
+  // 2xx, or 429 (rate-limited but the key itself is fine).
+}
+
+export async function configureModelKey(deps: Pick<SetupDeps, "run" | "openclawBin" | "fetchFn">, provider: ModelProvider, apiKey: string): Promise<void> {
+  await checkModelKey(deps.fetchFn, provider, apiKey);
   const p = MODEL_PROVIDERS[provider];
   const r = await deps.run(deps.openclawBin, [
     "onboard", "--non-interactive", "--accept-risk", "--flow", "quickstart",
     "--auth-choice", p.authChoice, p.flag, apiKey,
     "--skip-channels", "--skip-daemon", "--skip-ui", "--skip-search", "--skip-health", "--skip-skills",
   ]);
-  if (r.code !== 0) throw new Error(`OpenClaw didn't accept that key: ${lastLines(r)}`);
+  if (r.code === 0) return;
+  // A key that replaces an earlier one is saved "inactive" until activated.
+  // The provider has just vouched for it above, so switch it on ourselves.
+  const out = `${r.stdout}\n${r.stderr}`;
+  const m = out.match(/models auth activate (\S+) --agent (\S+)/);
+  if (m && /Replacement credential saved but inactive/i.test(out)) {
+    const a = await deps.run(deps.openclawBin, ["models", "auth", "activate", m[1]!, "--agent", m[2]!]);
+    if (a.code === 0) return;
+    throw new Error(`OpenClaw saved the new key but couldn't switch to it: ${lastLines(a)}`);
+  }
+  throw new Error(`OpenClaw didn't accept that key: ${lastLines(r)}`);
 }
 
 function lastLines(r: { stdout: string; stderr: string }): string {

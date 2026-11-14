@@ -7,6 +7,7 @@ import { readKeystoreAddresses } from "@fren/signer";
 import {
   ackTelegram,
   configureModelKey,
+  ModelKeyError,
   configureTelegram,
   configureWhatsAppOwner,
   finishSetup,
@@ -74,7 +75,12 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       const apiKey = String(b.apiKey ?? "").trim();
       if (!(provider in MODEL_PROVIDERS)) throw new UserError("Pick a provider.");
       if (apiKey.length < 10) throw new UserError("Paste the whole API key.");
-      await configureModelKey(deps, provider, apiKey);
+      try {
+        await configureModelKey(deps, provider, apiKey);
+      } catch (err) {
+        if (err instanceof ModelKeyError) throw new UserError(err.message);
+        throw err;
+      }
       return { ok: true };
     },
 
