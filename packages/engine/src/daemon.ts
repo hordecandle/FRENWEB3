@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { SignerProcess, type SignerApi } from "@fren/signer";
 import { createApi } from "./api.js";
 import { Connection } from "@solana/web3.js";
-import { deriveApiUrl, hyperliquidApiUrl, jupiterLendApiUrl, frenPaths, loadConfig, relayApiUrl, type FrenConfig, type FrenPaths } from "./config.js";
+import { deriveApiUrl, hyperliquidApiUrl, jupiterApiUrl, jupiterLendApiUrl, frenPaths, loadConfig, relayApiUrl, type FrenConfig, type FrenPaths } from "./config.js";
 import { Fren } from "./engine.js";
 import type { Fetch } from "./http.js";
 import { GatewayLine, OwnerNotifier, TelegramLine, type Exec, type OwnerLine } from "./notify.js";
@@ -37,10 +37,10 @@ export function ownerLines(config: FrenConfig, fetchFn: Fetch, exec?: Exec): Own
 
 export function buildFren({ config, store, signer, fetchFn = fetch, exec }: BuildOptions): Fren {
   const isTestnet = config.network === "testnet";
-  const hyperliquid = new HyperliquidVenue({ fetchFn, apiUrl: hyperliquidApiUrl(config), isTestnet, store, signer });
+  const hyperliquid = new HyperliquidVenue({ fetchFn, apiUrl: hyperliquidApiUrl(config), isTestnet, store, signer, markets: { dexes: config.hyperliquidDexes } });
   const jupiter = new JupiterVenue({
     fetchFn,
-    apiUrl: config.jupiterApiUrl,
+    apiUrl: jupiterApiUrl(config),
     ...(config.jupiterApiKey ? { apiKey: config.jupiterApiKey } : {}),
     solanaRpcUrl: config.solanaRpcUrl,
     store,
