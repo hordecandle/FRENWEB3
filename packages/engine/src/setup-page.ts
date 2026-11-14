@@ -81,6 +81,15 @@ pre.qr{font-family:ui-monospace,Menlo,monospace;line-height:1;font-size:7px;lett
       </div>
 
       <div id="tg" class="hidden">
+        <div id="tg-one" class="hidden">
+          <p style="margin-top:16px">Fren makes your own Telegram bot. Tap the button, then press <b>Create</b> in Telegram. No BotFather, no tokens to copy.</p>
+          <a class="btn" id="tg-new" target="_blank" rel="noopener">Create my bot in Telegram</a>
+          <p class="muted hidden" id="tg-new-wait" style="margin-top:14px"><span class="spin"></span> Waiting for Telegram… press <b>Create</b> there, then come back.</p>
+          <p class="muted hidden" id="tg-new-alt" style="font-size:14px;margin-top:10px">Changed the bot's username in Telegram? <a id="tg-new-fallback" target="_blank" rel="noopener">Open this instead</a> and press the button there.</p>
+          <div class="err" id="tg-new-err"></div>
+        </div>
+        <details id="tg-by-hand" open>
+        <summary class="muted hidden" id="tg-by-hand-sum" style="margin-top:18px;cursor:pointer">Rather make the bot yourself with @BotFather</summary>
         <ol>
           <li>Open <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> in Telegram and send <b>/newbot</b>.</li>
           <li>Pick a name, then a username that ends in "bot".</li>
@@ -98,6 +107,7 @@ pre.qr{font-family:ui-monospace,Menlo,monospace;line-height:1;font-size:7px;lett
           <div class="row"><input id="tg-manual" inputmode="numeric" placeholder="Your Telegram user id" style="flex:1 1 200px"><button class="ghost" id="tg-manual-save" style="margin-top:0">Use this id</button></div>
         </div>
         <div class="err" id="tg-err"></div>
+        </details>
       </div>
 
       <div id="wa" class="hidden">
@@ -174,10 +184,12 @@ function mark(step, done, summary) {
 }
 let providers = [];
 let chat = null;
+let oneTap = false;
 
 async function load() {
   const s = await api("GET", "/api/state");
   providers = s.providers;
+  oneTap = !!s.oneTapBot;
   $("provider").innerHTML = providers.map((p) => '<option value="' + p.id + '">' + p.label + "</option>").join("");
   syncKeyLink();
   if (s.done) return showFinal();
@@ -200,6 +212,48 @@ document.querySelectorAll("[data-pick]").forEach((b) => b.onclick = () => {
   $("tg").classList.toggle("hidden", pick !== "telegram");
   $("wa").classList.toggle("hidden", pick !== "whatsapp");
 });
+
+// One tap: Telegram makes the owner's own bot, Fren's bot service hands its token to this page.
+async function prepareOneTap() {
+  if (!oneTap) return;
+  $("tg-one").classList.remove("hidden");
+  $("tg-by-hand").open = false;
+  $("tg-by-hand-sum").classList.remove("hidden");
+  if ($("tg-new").href) return;
+  try {
+    const r = await api("POST", "/api/telegram/new");
+    $("tg-new").href = r.link;
+    $("tg-new-fallback").href = r.fallback;
+  } catch (e) { $("tg-new-err").textContent = e.message; }
+}
+document.querySelector('[data-pick="telegram"]').addEventListener("click", prepareOneTap);
+let waitingNew = false;
+$("tg-new").addEventListener("click", (ev) => {
+  if (!$("tg-new").href) { ev.preventDefault(); return; }
+  $("tg-new-wait").classList.remove("hidden");
+  $("tg-new-alt").classList.remove("hidden");
+  if (!waitingNew) waitNew();
+});
+async function waitNew() {
+  waitingNew = true;
+  while (waitingNew && !chat) {
+    try {
+      const r = await api("POST", "/api/telegram/new/wait");
+      if (r.ready) {
+        waitingNew = false; finding = false;
+        chat = "telegram";
+        mark("chat", true, "✓ Telegram connected: @" + r.bot + ". Open it and press Start.");
+        mark("wallet", false);
+        return;
+      }
+      $("tg-new-err").textContent = "";
+    } catch (e) {
+      $("tg-new-err").textContent = e.message;
+      if (/expired/i.test(e.message)) { waitingNew = false; $("tg-new").removeAttribute("href"); $("tg-new-wait").classList.add("hidden"); prepareOneTap(); return; }
+    }
+    await new Promise((r) => setTimeout(r, 2500));
+  }
+}
 
 let finding = false;
 let lastSeen = "[]";

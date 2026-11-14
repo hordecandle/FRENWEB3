@@ -6,6 +6,7 @@ import { frenPaths, initFren, loadConfig, parseNotify } from "./config.js";
 import { startDaemon } from "./daemon.js";
 import { runSetup, systemSetupDeps } from "./setup.js";
 import { serveSetup } from "./setup-web.js";
+import { serveBotBroker } from "./managed-bot.js";
 
 const HELP = `fren: self-hosted on-chain trading agent backend
 
@@ -21,6 +22,10 @@ const HELP = `fren: self-hosted on-chain trading agent backend
   fren setup --web --token T [--port 7421] [--done-file F]
       The same setup as a page in the browser (for a VPS), on 127.0.0.1,
       for whoever has the token. Writes F when the owner finishes.
+      With FREN_BOT_BROKER set, the owner makes their Telegram bot in one tap.
+  fren bot-broker [--port 7430]
+      The shared manager bot behind one-tap Telegram bots. Needs
+      FREN_MANAGER_BOT_TOKEN (bot management on in @BotFather). Run by Fren, not owners.
   fren start
       Run the engine: signer process, local API for OpenClaw and the watcher.
   fren wallet
@@ -92,6 +97,18 @@ Next: \`fren start\`, then install the OpenClaw plugin (see README), or run \`fr
         return;
       }
       await runSetup(systemSetupDeps(paths), { server: values.server ?? false });
+      return;
+    }
+    case "bot-broker": {
+      const { values } = parseArgs({ args: rest, options: { port: { type: "string" }, host: { type: "string" } } });
+      const managerToken = process.env.FREN_MANAGER_BOT_TOKEN;
+      if (!managerToken) throw new Error("Set FREN_MANAGER_BOT_TOKEN (the manager bot's token) in the environment.");
+      await serveBotBroker({
+        managerToken,
+        fetchFn: fetch,
+        ...(values.port ? { port: Number(values.port) } : {}),
+        ...(values.host ? { host: values.host } : {}),
+      });
       return;
     }
     case "start":
