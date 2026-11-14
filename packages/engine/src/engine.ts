@@ -253,7 +253,12 @@ export class Fren {
     const p = this.d.store.takePending(code.trim().toUpperCase());
     if (!p) return "That code is wrong or expired.";
     if (p.kind === "limits") {
-      this.d.store.setLimits(JSON.parse(p.payload) as Limits);
+      // Only the fields the owner asked to change, laid over the limits as they
+      // are now. A code issued earlier never undoes a later /stop or a later
+      // tightening of other fields.
+      const changes = JSON.parse(p.payload) as Partial<Limits>;
+      delete changes.paused;
+      this.d.store.setLimits({ ...this.limits(), ...changes });
       return `✅ Limits updated.\n${describeLimits(this.limits())}`;
     }
     if (p.kind === "resume") {
@@ -295,7 +300,7 @@ export class Fren {
       this.d.store.setLimits(next);
       return { text: `✅ Limits updated.\n${describeLimits(next)}` };
     }
-    return this.issueCode("limits", JSON.stringify(next), `Loosen your limits to:\n${describeLimits(next)}`);
+    return this.issueCode("limits", JSON.stringify(changedFields(current, next)), `Loosen your limits to:\n${describeLimits(next)}`);
   }
 
   async requestResume(): Promise<OwnerRequestResult> {
@@ -308,6 +313,8 @@ export class Fren {
   async stop(flatten: boolean): Promise<string> {
     const limits = this.limits();
     this.d.store.setLimits({ ...limits, paused: true });
+    // Codes handed out before the stop (loosen limits, fund, plans) die with it.
+    this.d.store.dropAllPending();
     let cancelled = 0;
     for (const status of ["active", "pending_confirm"] as const) {
       for (const p of this.d.store.plansWithStatus(status)) {
@@ -695,4 +702,14 @@ function describePosition(p: PositionView): string {
   if (p.venue === "polymarket") return `${size} shares of ${p.symbol} worth ${fmtUsd(p.valueUsd)}${pnl}`;
   if (p.venue === "yield") return `${fmtUsd(p.valueUsd)} USDC lent on ${p.symbol}${p.pnlUsd !== null && p.pnlUsd > 0.005 ? ` (+${fmtUsd(p.pnlUsd)} interest)` : ""}`;
   return `${p.size} ${p.symbol} worth ${fmtUsd(p.valueUsd)}${pnl}`;
+}
+
+/** The limits that differ between two sets. `paused` is never carried: only /stop and /resume touch it. */
+function changedFields(from: Limits, to: Limits): Partial<Limits> {
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(to) as (keyof Limits)[]) {
+    if (k === "paused") continue;
+    if (JSON.stringify(from[k]) !== JSON.stringify(to[k])) out[k] = to[k];
+  }
+  return out as Partial<Limits>;
 }

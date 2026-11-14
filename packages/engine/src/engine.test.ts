@@ -123,6 +123,43 @@ describe("paper trading end to end", () => {
     expect(t.fren.limits().maxTradeUsd).toBe(5000);
   });
 
+  it("a loosen-limits code from before /stop does not switch Fren back on (H3)", async () => {
+    const loosen = await t.fren.changeLimits("maxTradeUsd=5000");
+    expect(loosen.codeSentPrivately).toBe(true);
+    const oldCode = codeFrom(t.notifier);
+    await t.fren.stop(false);
+    expect(t.fren.limits().paused).toBe(true);
+    expect(await t.fren.approve(oldCode)).toMatch(/wrong or expired/);
+    expect(t.fren.limits().paused).toBe(true);
+    expect(t.fren.limits().maxTradeUsd).not.toBe(5000);
+    expect((await t.fren.submit(goldLong(10, 2))).verdict).toBe("rejected");
+    // Back on only with /resume and its own code.
+    await t.fren.requestResume();
+    await t.fren.approve(codeFrom(t.notifier));
+    expect(t.fren.limits().paused).toBe(false);
+  });
+
+  it("a loosen code applies only its own field: an earlier tightening elsewhere survives (H3)", async () => {
+    await t.fren.changeLimits("maxTradeUsd=5000");
+    const code = codeFrom(t.notifier);
+    await t.fren.changeLimits("maxLeverage=2");
+    expect(t.fren.limits().maxLeverage).toBe(2);
+    await t.fren.approve(code);
+    expect(t.fren.limits().maxTradeUsd).toBe(5000);
+    expect(t.fren.limits().maxLeverage).toBe(2);
+  });
+
+  it("a code that was already pending cannot un-stop even if it slipped past /stop", async () => {
+    await t.fren.changeLimits("maxTradeUsd=5000");
+    const code = codeFrom(t.notifier);
+    await t.fren.stop(false);
+    // Simulate an old build's code being re-issued with a full snapshot incl. paused=false.
+    t.store.putPending({ code: "OLDONE", kind: "limits", payload: JSON.stringify({ ...t.fren.limits(), paused: false }), expiresAt: new Date(Date.now() + 60_000).toISOString() });
+    await t.fren.approve("OLDONE");
+    expect(t.fren.limits().paused).toBe(true);
+    expect(code).toBeTruthy();
+  });
+
   it("buys a verified token by ticker, refuses an ambiguous unverified ticker, and flags an unverified CA", async () => {
     const buy = (token: string, usd = 20) => ({
       request: `buy ${token}`,

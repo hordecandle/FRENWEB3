@@ -292,6 +292,10 @@ export class Store {
     return { code: row.code!, kind: row.kind as PendingKind, payload: row.payload!, expiresAt: row.expires_at! };
   }
 
+  dropAllPending() {
+    this.db.prepare("DELETE FROM pending").run();
+  }
+
   dropPendingForPlan(planId: string) {
     this.db.prepare("DELETE FROM pending WHERE kind = 'plan' AND payload = ?").run(planId);
   }
