@@ -160,7 +160,23 @@ export async function checkModelKey(fetchFn: Fetch, provider: ModelProvider, api
   // 2xx, or 429 (rate-limited but the key itself is fine).
 }
 
+/**
+ * A fixed fast model instead of the provider's "auto" router: measured on the
+ * same ten requests, replies took ~12 s instead of ~24 s (FIXES_1.md § 5).
+ * Only providers where the name was checked; others keep OpenClaw's default.
+ */
+export const FAST_MODELS: Partial<Record<ModelProvider, string>> = {
+  openrouter: "openrouter/anthropic/claude-haiku-4.5",
+  anthropic: "anthropic/claude-haiku-4-5",
+};
+
 export async function configureModelKey(deps: Pick<SetupDeps, "run" | "openclawBin" | "fetchFn">, provider: ModelProvider, apiKey: string): Promise<void> {
+  await saveModelKey(deps, provider, apiKey);
+  const fast = FAST_MODELS[provider];
+  if (fast) await setConfig(deps, "agents.defaults.model.primary", JSON.stringify(fast));
+}
+
+async function saveModelKey(deps: Pick<SetupDeps, "run" | "openclawBin" | "fetchFn">, provider: ModelProvider, apiKey: string): Promise<void> {
   await checkModelKey(deps.fetchFn, provider, apiKey);
   const p = MODEL_PROVIDERS[provider];
   const r = await deps.run(deps.openclawBin, [
@@ -253,6 +269,7 @@ export async function configureTelegram(deps: Pick<SetupDeps, "run" | "openclawB
   await setConfig(deps, "channels.telegram.allowFrom", JSON.stringify([ownerId]));
   await setConfig(deps, "channels.telegram.dmPolicy", "allowlist");
   await setConfig(deps, "commands.ownerAllowFrom", JSON.stringify([`telegram:${ownerId}`]));
+  await setConfig(deps, "agents.defaults.typingMode", JSON.stringify("instant")); // "typing…" right away, not after the model's first token
   await mustRun(deps, deps.openclawBin, ["channels", "add", "--channel", "telegram", "--token", token], "add the Telegram channel");
   await telegram(deps.fetchFn, token, "sendMessage", { chat_id: ownerId, text: "✅ Fren found you. Setup is finishing; I'll be ready in a minute." });
   return { telegram: { botToken: token, ownerChatId: ownerId } };
