@@ -3,7 +3,22 @@
   const $ = (id) => document.getElementById(id);
   const params = new URLSearchParams(location.search);
   const MOCK = params.has("mock");
+  // v2 rail: 1 Server · 2 Pay · 3 Install · 4 AI brain · 5 Telegram → Live (FLOW_V2.md)
   const STEPS = ["plan", "pay", "build", "ready"];
+  const RAIL = ["Server", "Pay", "Install", "AI brain", "Telegram"];
+  const CHECK = '<svg class="ic" style="width:13px;height:13px;stroke-width:2.6"><use href="#i-check"/></svg>';
+  function drawRail(now) {
+    let h = "";
+    RAIL.forEach((name, i) => {
+      const n = i + 1;
+      const st = n < now ? "done" : n === now ? "now" : "";
+      h += `<li class="${st}"><span class="n"><i>${n < now ? CHECK : n}</i><span>${name}</span></span><span class="bar"></span></li>`;
+    });
+    h += `<li class="live"><span class="n"><i><svg viewBox="0 0 116 80" style="width:13px;fill:currentColor"><use href="#mark"/></svg></i><span>Live</span></span></li>`;
+    $("rail").innerHTML = h;
+    $("rail").setAttribute("aria-label", `Step ${now} of 5`);
+    $("top-step").innerHTML = `Step <b>${now}</b> of 5`;
+  }
   const SCREENS = ["s-plan", "s-code", "s-pay", "s-build", "s-ready", "s-failed"];
   const FALLBACK_PLANS = [
     { slug: "micro-ip", name: "Micro", priceUsd: 10, vcpu: 2, ramGb: 2, recommended: true },
@@ -98,11 +113,7 @@
   // ---- UI ----
   function show(screen, step) {
     SCREENS.forEach((s) => ($(s).hidden = s !== screen));
-    const at = STEPS.indexOf(step);
-    document.querySelectorAll("#rail li").forEach((li, i) => {
-      li.classList.toggle("is-now", i === at);
-      li.classList.toggle("is-done", i < at);
-    });
+    drawRail(STEPS.indexOf(step) + 1);
   }
 
   function remember(nid) {
@@ -118,28 +129,26 @@
     const box = $("plans");
     box.replaceChildren();
     const card = document.createElement("div");
-    card.className = "plan plan--only";
+    card.className = "plan";
     const input = document.createElement("input");
     input.type = "radio";
     input.name = "plan";
     input.value = p.slug;
     input.checked = true;
     input.hidden = true;
+    const left = document.createElement("div");
     const name = document.createElement("b");
     name.textContent = "Fren server";
-    const price = document.createElement("span");
-    price.className = "plan__price";
-    price.append(`$${p.priceUsd}`);
+    const spec = document.createElement("small");
+    spec.textContent = p.vcpu ? `${p.vcpu} vCPU · ${p.ramGb} GB RAM · own IP · stop anytime` : "Own IP · stop anytime";
+    left.append(name, spec);
+    const price = document.createElement("div");
+    price.className = "price";
+    price.append(`$${p.priceUsd} `);
     const per = document.createElement("small");
-    per.textContent = " /month";
+    per.textContent = "/ month";
     price.append(per);
-    const spec = document.createElement("span");
-    spec.className = "plan__spec";
-    spec.textContent =
-      "Everything Fren needs to run 24/7" +
-      (p.vcpu ? `: ${p.vcpu} vCPU, ${p.ramGb} GB memory and its own IP address.` : ", with its own IP address.") +
-      " Billed monthly in crypto, stop anytime.";
-    card.append(input, name, price, spec);
+    card.append(input, left, price);
     box.append(card);
   }
 
@@ -167,23 +176,42 @@
         document.querySelectorAll("#build li").forEach((li, i) => {
           li.classList.toggle("is-done", i < at);
           li.classList.toggle("is-now", i === at);
+          li.querySelector(".dot").innerHTML = i < at ? CHECK : "";
         });
-        $("progress").textContent = d.progress || "";
+        $("bar").style.width = at === 0 ? "28%" : "62%";
+        $("progress").textContent = d.progress ? `${d.progress}. Usually 3 to 5 minutes.` : "Usually 3 to 5 minutes.";
         break;
       }
       case "ready":
         show("s-ready", "ready");
         $("setup-link").href = d.setupUrl;
+        try {
+          $("ready-host").textContent = new URL(d.setupUrl).host;
+        } catch {}
         return;
       case "failed":
         show("s-failed", "build");
-        $("fail-msg").textContent = d.error || "The server didn't finish setting up.";
         // After payment the fix is a retry on the same server, never a new order.
+        if (d.retryable) {
+          $("fail-title").textContent = "The install got stuck";
+          $("fail-msg").innerHTML =
+            "Your server is fine and already paid for. Fren just didn't finish installing. Try again on the same server: <b>you won't be charged twice.</b>";
+        } else {
+          $("fail-title").textContent = "Something went wrong";
+          $("fail-msg").textContent = d.error || "The server didn't finish setting up.";
+        }
         $("retry").hidden = !d.retryable;
         $("fail-paid").hidden = !d.retryable;
         $("start-again").hidden = Boolean(d.retryable);
-        $("fail-detail").hidden = !d.detail;
-        $("fail-detail").textContent = d.detail ? `Technical detail: ${d.detail}` : "";
+        // Support line only when a contact is configured: no contact, no line.
+        $("fail-contact").hidden = !d.contact;
+        $("fail-contact").textContent = d.contact ? `Still stuck? Write to ${d.contact} and include this page's link.` : "";
+        {
+          const log = [d.retryable ? d.error : "", d.detail].filter(Boolean).join("\n\n");
+          $("fail-more").hidden = !log;
+          $("fail-more").open = false;
+          $("fail-detail").textContent = log;
+        }
         return;
     }
     timer = setTimeout(poll, 5000);
@@ -207,6 +235,9 @@
         show("s-failed", "plan");
         $("fail-msg").textContent =
           e.status === 400 ? e.message : "We couldn't find that setup. The link may be wrong or expired.";
+        $("fail-title").textContent = "Something went wrong";
+        ["retry", "fail-paid", "fail-contact", "fail-more"].forEach((x) => ($(x).hidden = true));
+        $("start-again").hidden = false;
         return;
       }
       timer = setTimeout(poll, 8000); // network blip: keep trying
@@ -246,7 +277,7 @@
     } catch (e) {
       $("err-plan").textContent = apiDown ? NOT_OPEN : e.message;
     } finally {
-      busy(btn, false, "Continue to payment&nbsp;→");
+      busy(btn, false, 'Continue to payment<svg class="ic"><use href="#i-arrow"/></svg>');
     }
   });
 
@@ -264,6 +295,20 @@
       $("err-code").textContent = e.message;
     }
   });
+
+  async function copy(btn, text) {
+    const label = btn.querySelector("span");
+    const was = label.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      label.textContent = "Copied";
+    } catch {
+      label.textContent = "Press ⌘C";
+    }
+    setTimeout(() => (label.textContent = was), 1800);
+  }
+  $("copy-link").addEventListener("click", () => copy($("copy-link"), $("setup-link").href));
+  $("copy-detail").addEventListener("click", () => copy($("copy-detail"), $("fail-detail").textContent + "\n" + location.href));
 
   // ---- boot ----
   (async () => {
