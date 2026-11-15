@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { FrenPaths, InitOptions } from "./config.js";
 import { initFren } from "./config.js";
 import type { Fetch } from "./http.js";
+import { claimManagedBot, startManagedBot } from "./managed-bot.js";
 
 /**
  * `fren setup`: the guided first run. It asks a handful of questions and does
@@ -40,6 +41,8 @@ export interface SetupDeps {
   user: string;
   writeFile(path: string, text: string): void;
   exists(path: string): boolean;
+  /** Fren's bot broker URL (FREN_BOT_BROKER): one-tap Telegram bots instead of BotFather. */
+  botBroker?: string;
 }
 
 export interface SetupOptions {
@@ -239,6 +242,13 @@ channel step: Fren sets that up right after.
 
 async function setupTelegram(deps: SetupDeps): Promise<{ telegram: { botToken: string; ownerChatId: string } }> {
   const { io } = deps;
+  if (deps.botBroker) {
+    const line = await oneTapTelegram(deps, deps.botBroker).catch((e: Error) => {
+      io.say(`One-tap bot didn't work (${e.message}). Let's do it with BotFather.`);
+      return null;
+    });
+    if (line) return line;
+  }
   io.say(`
 Make a Telegram bot (takes a minute):
   1. Open https://t.me/BotFather and send /newbot
@@ -262,6 +272,28 @@ Make a Telegram bot (takes a minute):
   const line = await configureTelegram(deps, token, owner.id);
   io.say(`✓ Telegram linked: only ${owner.name} can use @${bot}`);
   return line;
+}
+
+/** Telegram makes the bot after one tap; Fren's broker hands its token back sealed to us. */
+async function oneTapTelegram(deps: SetupDeps, broker: string) {
+  const { io } = deps;
+  const s = await startManagedBot(deps.fetchFn, broker);
+  io.say(`
+Make your Telegram bot in one tap. Open this on the phone with Telegram and press Create:
+  ${s.link}
+`);
+  for (let i = 0; i < 300; i++) {
+    const r = await claimManagedBot(deps.fetchFn, s);
+    if (r) {
+      const bot = await telegramBot(deps.fetchFn, r.token);
+      if (!bot) throw new Error("Telegram didn't accept the new bot's token");
+      const line = await configureTelegram(deps, r.token, r.owner.id);
+      io.say(`✓ Telegram linked: only ${r.owner.name} can use @${bot}. Open it and press Start.`);
+      return line;
+    }
+    await deps.sleep(3000);
+  }
+  throw new Error("nobody pressed Create for 15 minutes");
 }
 
 /** You are the only one who can talk to the bot, and the owner for /ok, /stop and /limits. */
@@ -547,5 +579,6 @@ export function systemSetupDeps(paths: FrenPaths): SetupDeps {
       writeFileSync(path, text);
     },
     exists: existsSync,
+    ...(process.env.FREN_BOT_BROKER ? { botBroker: process.env.FREN_BOT_BROKER } : {}),
   };
 }
