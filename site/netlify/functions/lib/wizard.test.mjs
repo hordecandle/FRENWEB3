@@ -169,7 +169,8 @@ describe("VPS wizard", () => {
     await wizard.install(id, BAD, "u");
     const v = await wizard.status(id);
     expect(v).toMatchObject({ stage: "failed", retryable: true, error: expect.stringMatching(/paid for/), detail: expect.stringMatching(/Couldn't download Fren/) });
-    expect(v.error).toMatch(/CONTACT/);
+    expect(v.error).not.toMatch(/PLACEHOLDER/);
+    expect(v.contact).toBeUndefined(); // no support address configured = no contact line
     expect(JSON.stringify(v)).not.toMatch(/tok-|PRIVATE/);
     expect(db.get(id).privateKey).toBeTruthy();
     expect(db.get(id).eqvpsToken).toBeTruthy();

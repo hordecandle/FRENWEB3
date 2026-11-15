@@ -18,7 +18,8 @@ const OS_NAME = "Ubuntu 24.04";
 const INSTALL_TIMEOUT_MS = 17 * 60_000;
 // One automatic retry, then the person gets a "Try again" button.
 const AUTO_RETRIES = 1;
-export const CONTACT = "CONTACT-PLACEHOLDER: set the real support address";
+// Support address from config (FREN_SUPPORT_CONTACT). Empty = no "write to" line at all.
+export const CONTACT = (process.env.FREN_SUPPORT_CONTACT || "").trim();
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export class UserError extends Error {}
@@ -144,8 +145,10 @@ export function createWizard(deps) {
     rec.stage = "failed";
     rec.retryable = Boolean(rec.privateKey && rec.host);
     rec.error = rec.retryable
-      ? `${why} Your server is paid for and nothing is lost. Press "Try the install again". If it keeps failing, write to ${CONTACT} and include this page's link.`
-      : `${why} Your server is paid for. Write to ${CONTACT} and include this page's link; we'll finish it.`;
+      ? `${why} Your server is paid for and nothing is lost. Press "Try again".` +
+        (CONTACT ? ` If it keeps failing, write to ${CONTACT} and include this page's link.` : "")
+      : `${why} Your server is paid for.` +
+        (CONTACT ? ` Write to ${CONTACT} and include this page's link; we'll finish it.` : " Keep this page's link: it shows your order.");
     rec.detail = detail;
     await save(rec);
   }
@@ -248,6 +251,7 @@ export function createWizard(deps) {
 export function view(rec) {
   const v = { id: rec.id, stage: rec.stage, plan: rec.plan };
   for (const k of ["checkoutUrl", "amountUsd", "progress", "setupUrl", "error", "detail", "retryable"]) if (rec[k] !== undefined) v[k] = rec[k];
+  if (rec.stage === "failed" && CONTACT) v.contact = CONTACT;
   return v;
 }
 
