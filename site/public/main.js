@@ -459,8 +459,13 @@
     ((ct.hidden = !0), t.classList.remove("is-loading"));
   else {
     window.matchMedia("(hover: none)").matches && (document.getElementById("loader-skip").textContent = "Tap to skip");
-    const e = () => {
-      ct.hidden || mt();
+    const e = (ev) => {
+      if (ct.hidden) return;
+      // the tap that skips the splash must not also press whatever lies beneath it
+      const eat = (c) => (c.preventDefault(), c.stopPropagation());
+      window.addEventListener("click", eat, { capture: !0, once: !0 });
+      setTimeout(() => window.removeEventListener("click", eat, { capture: !0 }), 600);
+      mt();
     };
     (ct.addEventListener("click", e),
       window.addEventListener("keydown", e, { once: !0 }),
