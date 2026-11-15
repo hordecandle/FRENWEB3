@@ -1,4 +1,4 @@
-import { postJson, type Fetch } from "../http.js";
+import { HttpError, postJson, type Fetch } from "../http.js";
 
 /** One perp market on Hyperliquid's main dex or a builder-deployed (HIP-3) dex. */
 export interface PerpMarket {
@@ -54,25 +54,151 @@ export function assetIdFor(dexIndex: number, index: number): number {
   return dexIndex === 0 ? index : 100_000 + dexIndex * 10_000 + index;
 }
 
+export interface HyperliquidMarketsOptions {
+  /**
+   * Builder dexes (HIP-3) to load besides the main one. Hyperliquid's testnet has
+   * ~280 of them and the heavy request costs 20 rate-limit points each, so the
+   * default is just "xyz" (gold, silver, stocks). ["*"] loads every dex.
+   */
+  dexes?: string[];
+  /** How long the full market list (funding, volume, leverage) is reused. */
+  ttlMs?: number;
+  /** How long the list of dexes is reused. */
+  dexListTtlMs?: number;
+  /** First pause after a 429, doubling up to maxBackoffMs. */
+  backoffMs?: number;
+  maxBackoffMs?: number;
+  /** Oldest market list we still hand out when Hyperliquid is rate-limiting us. */
+  maxStaleMs?: number;
+  now?: () => number;
+}
+
+export const DEFAULT_HL_DEXES = ["xyz"];
+
+/** Sees Hyperliquid's rate limit (429) and answers it by backing off, never by hammering. */
 export class HyperliquidMarkets {
   private cache: { at: number; markets: PerpMarket[] } | null = null;
+  private dexCache: { at: number; dexes: ({ name: string } | null)[] } | null = null;
+  private inflight: Promise<PerpMarket[]> | null = null;
+  private strikes = 0;
+  private blockedUntil = 0;
+  /** Time of the last 429; the engine reads it. */
+  lastLimitedAt = 0;
+  private readonly dexWant: string[];
+  private readonly ttlMs: number;
+  private readonly dexListTtlMs: number;
+  private readonly backoffMs: number;
+  private readonly maxBackoffMs: number;
+  private readonly maxStaleMs: number;
+  private readonly now: () => number;
 
   constructor(
     private readonly fetchFn: Fetch,
     private readonly apiUrl: string,
-    private readonly ttlMs = 10_000,
-  ) {}
-
-  info<T>(body: Record<string, unknown>): Promise<T> {
-    return postJson<T>(this.fetchFn, `${this.apiUrl}/info`, body);
+    opts: HyperliquidMarketsOptions = {},
+  ) {
+    this.dexWant = opts.dexes ?? DEFAULT_HL_DEXES;
+    this.ttlMs = opts.ttlMs ?? 60_000;
+    this.dexListTtlMs = opts.dexListTtlMs ?? 10 * 60_000;
+    this.backoffMs = opts.backoffMs ?? 10_000;
+    this.maxBackoffMs = opts.maxBackoffMs ?? 120_000;
+    this.maxStaleMs = opts.maxStaleMs ?? 5 * 60_000;
+    this.now = opts.now ?? Date.now;
   }
 
-  async all(force = false): Promise<PerpMarket[]> {
-    if (!force && this.cache && Date.now() - this.cache.at < this.ttlMs) return this.cache.markets;
-    const dexes = await this.info<({ name: string } | null)[]>({ type: "perpDexs" });
+  /** Seconds until we'll talk to Hyperliquid again, or 0. */
+  get retryInSec(): number {
+    return Math.max(0, Math.ceil((this.blockedUntil - this.now()) / 1000));
+  }
+
+  async info<T>(body: Record<string, unknown>): Promise<T> {
+    const wait = this.blockedUntil - this.now();
+    if (wait > 0) throw new HttpError(`Hyperliquid is rate-limiting us; waiting ${Math.ceil(wait / 1000)}s before asking again`, 429, "");
+    try {
+      const out = await postJson<T>(this.fetchFn, `${this.apiUrl}/info`, body);
+      this.strikes = 0;
+      return out;
+    } catch (err) {
+      if (err instanceof HttpError && err.status === 429) {
+        this.strikes++;
+        this.lastLimitedAt = this.now();
+        this.blockedUntil = this.now() + Math.min(this.maxBackoffMs, this.backoffMs * 2 ** (this.strikes - 1));
+      }
+      throw err;
+    }
+  }
+
+  private async dexList(): Promise<({ name: string } | null)[]> {
+    if (this.dexCache && this.now() - this.dexCache.at < this.dexListTtlMs) return this.dexCache.dexes;
+    try {
+      const dexes = await this.info<({ name: string } | null)[]>({ type: "perpDexs" });
+      this.dexCache = { at: this.now(), dexes };
+      return dexes;
+    } catch (err) {
+      if (this.dexCache) return this.dexCache.dexes;
+      throw err;
+    }
+  }
+
+  /** The dexes we load: the main one plus the wanted builder dexes that exist. */
+  private async wantedDexes(): Promise<{ name: string; index: number }[]> {
+    const list = await this.dexList();
+    return list.flatMap((d, index) => {
+      const name = d?.name ?? "";
+      return name === "" || this.dexWant.includes("*") || this.dexWant.includes(name) ? [{ name, index }] : [];
+    });
+  }
+
+  /** Names of the dexes this instance loads ("" is the main one). */
+  async dexNames(): Promise<string[]> {
+    return (await this.wantedDexes()).map((d) => d.name);
+  }
+
+  /**
+   * Fresh mid prices, one light request per dex (2 points each instead of 20).
+   * Throws when Hyperliquid can't be reached: the caller must treat that as
+   * "blind", not as "price unchanged".
+   */
+  async mids(): Promise<Map<string, number>> {
+    const dexes = await this.wantedDexes();
+    const out = new Map<string, number>();
     const lists = await Promise.all(
-      dexes.map(async (dex, dexIndex) => {
-        const dexName = dex?.name ?? "";
+      dexes.map((d) => this.info<Record<string, string>>({ type: "allMids", ...(d.name ? { dex: d.name } : {}) })),
+    );
+    for (const l of lists) {
+      for (const [name, px] of Object.entries(l)) {
+        if (name.startsWith("@") || name.startsWith("#")) continue; // spot and outcome markets
+        const n = Number(px);
+        if (Number.isFinite(n) && n > 0) out.set(name, n);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Every market of the loaded dexes with leverage, funding and volume. Reused
+   * for ttlMs; when Hyperliquid answers 429 we keep serving the last list for up
+   * to maxStaleMs rather than failing every request.
+   */
+  async all(force = false): Promise<PerpMarket[]> {
+    if (!force && this.cache && this.now() - this.cache.at < this.ttlMs) return this.cache.markets;
+    if (!this.inflight) {
+      this.inflight = this.load().finally(() => {
+        this.inflight = null;
+      });
+    }
+    try {
+      return await this.inflight;
+    } catch (err) {
+      if (this.cache && this.now() - this.cache.at < this.maxStaleMs) return this.cache.markets;
+      throw err;
+    }
+  }
+
+  private async load(): Promise<PerpMarket[]> {
+    const dexes = await this.wantedDexes();
+    const lists = await Promise.all(
+      dexes.map(async ({ name: dexName, index: dexIndex }) => {
         const [meta, ctxs] = await this.info<[{ universe: MetaUniverse[] }, AssetCtx[]]>({
           type: "metaAndAssetCtxs",
           ...(dexName ? { dex: dexName } : {}),
@@ -101,7 +227,7 @@ export class HyperliquidMarkets {
       }),
     );
     const markets = lists.flat();
-    this.cache = { at: Date.now(), markets };
+    this.cache = { at: this.now(), markets };
     return markets;
   }
 

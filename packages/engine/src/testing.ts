@@ -251,6 +251,12 @@ export class FakeVenues {
     return err(`fake: no Derive method ${method}`);
   }
 
+  /** Set to 429 to make Hyperliquid (hl.test) or Jupiter (jup.test) rate-limit every request. */
+  hlStatus = 200;
+  jupStatus = 200;
+  /** Requests seen per Hyperliquid info type, e.g. { allMids: 3, metaAndAssetCtxs: 1 }. */
+  readonly hlCalls: Record<string, number> = {};
+
   setMid(name: string, mid: number) {
     const m = [...this.main, ...Object.values(this.builder).flat()].find((x) => x.name === name);
     if (!m) throw new Error(`no fake market ${name}`);
@@ -290,7 +296,15 @@ export class FakeVenues {
       const headers = Object.fromEntries(["X-DeriveWallet", "X-DeriveTimestamp", "X-DeriveSignature"].flatMap((k) => (h.get(k) ? [[k, h.get(k)!]] : [])));
       return json(this.derive(url.pathname.slice(1), body, headers));
     }
+    if (url.hostname === "jup.test" && this.jupStatus !== 200) return json({ error: "Rate limit exceeded" }, this.jupStatus);
     if (url.pathname === "/info") {
+      this.hlCalls[String(body.type)] = (this.hlCalls[String(body.type)] ?? 0) + 1;
+      if (this.hlStatus !== 200) return new Response("<html>429 Too Many Requests</html>", { status: this.hlStatus });
+      if (body.type === "allMids") {
+        const dex = (body.dex as string | undefined) ?? "";
+        const list = dex ? (this.builder[dex] ?? []) : this.main;
+        return json(Object.fromEntries([...list.map((m) => [m.name, String(m.mid)]), ["@107", "1.5"]]));
+      }
       if (body.type === "perpDexs") return json([null, ...Object.keys(this.builder).map((name) => ({ name, fullName: name }))]);
       if (body.type === "metaAndAssetCtxs") {
         const dex = (body.dex as string | undefined) ?? "";
@@ -481,6 +495,8 @@ export interface TestFrenOptions {
   evmBalances?: Record<string, bigint>;
   /** Polymarket's region check; defaults to "allowed". */
   geoblocked?: () => Promise<boolean>;
+  /** Overrides for the Hyperliquid market cache (dexes, ttl, backoff). */
+  hlMarkets?: import("./venues/hyperliquid-markets.js").HyperliquidMarketsOptions;
 }
 
 /** The whole engine wired to fakes: Hyperliquid, Jupiter, pump.fun, Relay, Derive and Polymarket. */
@@ -523,7 +539,15 @@ export function buildTestFren(opts: TestFrenOptions = {}) {
   });
   const poly = new FakePolymarketData();
   const polyTrader = new FakePolymarketTrader(poly);
-  const hyperliquid = new HyperliquidVenue({ fetchFn: fake.fetch, apiUrl: "https://hl.test", isTestnet: true, store, signer });
+  const clock = { t: 1_700_000_000_000 };
+  const hyperliquid = new HyperliquidVenue({
+    fetchFn: fake.fetch,
+    apiUrl: "https://hl.test",
+    isTestnet: true,
+    store,
+    signer,
+    markets: { ttlMs: 0, now: () => clock.t, ...opts.hlMarkets },
+  });
   const derive = new DeriveVenue({
     fetchFn: fake.fetch,
     apiUrl: "https://derive.test",
@@ -539,12 +563,12 @@ export function buildTestFren(opts: TestFrenOptions = {}) {
     signer,
     isTestnet: true,
     hyperliquid,
-    jupiter: new JupiterVenue({ fetchFn: fake.fetch, apiUrl: "https://jup.test", solanaRpcUrl: "https://rpc.test", store, signer, pumpFun: pump }),
+    jupiter: new JupiterVenue({ fetchFn: fake.fetch, apiUrl: "https://jup.test", solanaRpcUrl: "https://rpc.test", store, signer, pumpFun: pump, retryDelayMs: 0 }),
     relay,
     derive,
     polymarket,
     yield: yieldVenue,
   });
   if (opts.live) store.setLimits({ ...store.getLimits(), mode: "live" });
-  return { fake, pump, poly, polyTrader, derive, polymarket, yield: yieldVenue, solanaSent, evmBalances, store, notifier, fren, evmTxs };
+  return { clock, fake, pump, poly, polyTrader, derive, polymarket, yield: yieldVenue, solanaSent, evmBalances, store, notifier, fren, evmTxs };
 }

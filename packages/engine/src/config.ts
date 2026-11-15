@@ -10,8 +10,17 @@ export const FrenConfig = z.object({
   network: z.enum(["mainnet", "testnet"]).default("testnet"),
   solanaRpcUrl: z.string().url().default("https://api.mainnet-beta.solana.com"),
   hyperliquidApiUrl: z.string().url().optional(),
-  /** Jupiter API base. Works without a key at a low rate limit; set jupiterApiKey (free at portal.jup.ag) for snipes. */
-  jupiterApiUrl: z.string().url().default("https://api.jup.ag"),
+  /**
+   * Hyperliquid builder dexes to load besides the main one. Testnet has ~280 and
+   * asking all of them every few seconds gets the IP rate-limited, so the
+   * default is "xyz" (gold, silver, stocks). ["*"] loads all.
+   */
+  hyperliquidDexes: z.array(z.string()).default(["xyz"]),
+  /**
+   * Jupiter API base. Leave unset: with a key (free at portal.jup.ag) it is
+   * api.jup.ag, without one it is the keyless lite-api.jup.ag.
+   */
+  jupiterApiUrl: z.string().url().optional(),
   jupiterApiKey: z.string().optional(),
   /** Relay API, for tokens on Base, Robinhood Chain and Arbitrum. */
   relayApiUrl: z.string().url().optional(),
@@ -98,9 +107,15 @@ export function deriveApiUrl(cfg: FrenConfig): string {
   return cfg.network === "mainnet" ? "https://api.derive.xyz/v3" : "https://testnet.api.derive.xyz/v3";
 }
 
-/** Jupiter Lend: the keyed API when there's a Jupiter key, else Jupiter's keyless host. */
+/** Jupiter API: the keyed host when there's a Jupiter key (jupiterApiKey in the config), else the keyless one. */
+export function jupiterApiUrl(cfg: FrenConfig): string {
+  if (cfg.jupiterApiUrl) return cfg.jupiterApiUrl;
+  return cfg.jupiterApiKey ? "https://api.jup.ag" : "https://lite-api.jup.ag";
+}
+
+/** Jupiter Lend, on the same host as the rest of the Jupiter API. */
 export function jupiterLendApiUrl(cfg: FrenConfig): string {
-  return cfg.jupiterApiKey ? `${cfg.jupiterApiUrl}/lend/v1` : "https://lite-api.jup.ag/lend/v1";
+  return `${jupiterApiUrl(cfg)}/lend/v1`;
 }
 
 /** `channel:target`, e.g. whatsapp:+15551234567. */

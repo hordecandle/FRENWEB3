@@ -2,13 +2,29 @@ import { ComputeBudgetProgram, Connection, PublicKey, SystemProgram, Transaction
 import { JITO_TIP_ACCOUNTS } from "@fren/signer";
 import { price as fmtPrice, shortToken, usd as fmtUsd, type PlanStep, type ResolvedStep, type SwapLeg } from "@fren/core";
 import type { SignerApi } from "@fren/signer";
-import { getJson, postJson, type Fetch } from "../http.js";
+import { getJson, HttpError, postJson, type Fetch } from "../http.js";
 import type { Store } from "../store.js";
 import { curveUsdPrice, pumpFunNotes, type PumpCurve, type PumpFunApi } from "./pumpfun.js";
 import { VenueError, type ExecContext, type ExecResult, type PositionView, type SpotVenueAdapter } from "./types.js";
 
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
+
+/**
+ * Tokens whose mint and decimals never change. They are never looked up: when
+ * Jupiter rate-limits us, SOL must still be SOL with 9 decimals (a wrong guess
+ * once booked $30 of SOL as 383 coins at $0.078).
+ */
+export const KNOWN_TOKENS: Record<string, { mint: string; symbol: string; name: string; decimals: number }> = {
+  SOL: { mint: SOL_MINT, symbol: "SOL", name: "Wrapped SOL", decimals: 9 },
+  USDC: { mint: USDC_MINT, symbol: "USDC", name: "USD Coin", decimals: 6 },
+};
+
+function knownToken(query: string): TokenInfo | null {
+  const key = query.trim().replace(/^\$/, "");
+  const k = Object.values(KNOWN_TOKENS).find((t) => t.mint === key || t.symbol === key.toUpperCase());
+  return k ? { ...k, verified: true, usdPrice: null, liquidityUsd: null } : null;
+}
 
 export interface TokenInfo {
   mint: string;
@@ -57,6 +73,8 @@ export interface JupiterVenueOptions {
   jitoUrl?: string;
   /** Jito tip for snipes, in lamports. */
   snipeTipLamports?: number;
+  /** Pause before the first retry after a 429 (doubles for the second). Default 800 ms. */
+  retryDelayMs?: number;
 }
 
 /** Default Jito tip on a snipe: 0.001 SOL. The signer refuses anything over its own cap. */
@@ -69,6 +87,19 @@ export class JupiterVenue implements SpotVenueAdapter {
 
   constructor(private readonly o: JupiterVenueOptions) {
     this.connection = new Connection(o.solanaRpcUrl, { commitment: "confirmed", fetch: o.fetchFn });
+  }
+
+  /** GET with two retries after a 429; any other failure, or a third 429, is thrown as it is. */
+  private async get<T>(url: string): Promise<T> {
+    const delay = this.o.retryDelayMs ?? 800;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await getJson<T>(this.o.fetchFn, url, this.headers());
+      } catch (err) {
+        if (!(err instanceof HttpError) || err.status !== 429 || attempt >= 2) throw err;
+        await new Promise((r) => setTimeout(r, delay * 2 ** attempt));
+      }
+    }
   }
 
   private headers(): Record<string, string> {
@@ -88,11 +119,7 @@ export class JupiterVenue implements SpotVenueAdapter {
   }
 
   async searchTokens(query: string): Promise<TokenInfo[]> {
-    const list = await getJson<JupToken[]>(
-      this.o.fetchFn,
-      `${this.o.apiUrl}/tokens/v2/search?query=${encodeURIComponent(query)}`,
-      this.headers(),
-    );
+    const list = await this.get<JupToken[]>(`${this.o.apiUrl}/tokens/v2/search?query=${encodeURIComponent(query)}`);
     return list.map((t) => this.toInfo(t));
   }
 
@@ -103,6 +130,8 @@ export class JupiterVenue implements SpotVenueAdapter {
    */
   async token(query: string): Promise<TokenInfo> {
     const key = query.trim();
+    const known = knownToken(key);
+    if (known) return known;
     const cached = this.tokenCache.get(key.toUpperCase());
     if (cached) return cached;
     const results = await this.searchTokens(key);
@@ -123,6 +152,8 @@ export class JupiterVenue implements SpotVenueAdapter {
       }
     }
     this.tokenCache.set(key.toUpperCase(), found);
+    // The engine later asks again by the contract address.
+    this.tokenCache.set(found.mint.toUpperCase(), found);
     return found;
   }
 
@@ -130,27 +161,49 @@ export class JupiterVenue implements SpotVenueAdapter {
    * For a launch snipe the token may trade before Jupiter's token list knows
    * it. A mint the owner gave us is enough; decimals come from the chain.
    */
-  private async tokenOrBare(query: string, mode: "paper" | "live"): Promise<TokenInfo> {
+  /** Decimals of a mint, read from the chain. Null when the mint doesn't exist yet or the RPC doesn't answer. */
+  private async chainDecimals(mint: string): Promise<number | null> {
+    const info = await Promise.resolve()
+      .then(() => this.connection.getParsedAccountInfo(new PublicKey(mint)))
+      .catch(() => null);
+    const parsed = (info?.value?.data as { parsed?: { info?: { decimals?: number } } } | undefined)?.parsed;
+    return typeof parsed?.info?.decimals === "number" ? parsed.info.decimals : null;
+  }
+
+  /**
+   * A token Jupiter's list doesn't know (a launch snipe, or a lookup that
+   * failed). Decimals come from the chain; pump.fun coins (mint ends in "pump")
+   * may use their fixed 6 before they exist. Anything else we can't confirm is
+   * refused: guessing decimals once made a price 1000x wrong.
+   */
+  private async bareToken(mint: string): Promise<TokenInfo> {
+    let decimals = await this.chainDecimals(mint);
+    if (decimals === null && mint.endsWith("pump")) decimals = 6;
+    if (decimals === null) {
+      throw new VenueError(`I couldn't confirm the price data for ${shortToken(mint)} right now (Jupiter and the Solana RPC didn't answer), so I won't trade it. Try again in a minute.`);
+    }
+    return { mint, symbol: shortToken(mint), name: "", decimals, verified: false, usdPrice: null, liquidityUsd: null };
+  }
+
+  private async tokenOrBare(query: string): Promise<TokenInfo> {
     try {
       return await this.token(query);
     } catch (err) {
       const mint = query.trim();
       if (!isMint(mint)) throw err;
-      let decimals = 6; // pump.fun coins all use 6
-      if (mode === "live") {
-        const info = await this.connection.getParsedAccountInfo(new PublicKey(mint)).catch(() => null);
-        const parsed = (info?.value?.data as { parsed?: { info?: { decimals?: number } } } | undefined)?.parsed;
-        if (parsed?.info?.decimals !== undefined) decimals = parsed.info.decimals;
+      // "Jupiter doesn't know this token" may be a young coin; a rate limit or outage is not an answer.
+      if (err instanceof HttpError && !(err.status === 404)) {
+        const viaChain = await this.bareToken(mint).catch(() => null);
+        if (viaChain) return viaChain;
+        throw new VenueError(`Jupiter isn't answering right now (${err.status}), so I can't price ${shortToken(mint)}. Nothing was bought. Try again in a minute.`);
       }
-      return { mint, symbol: shortToken(mint), name: "", decimals, verified: false, usdPrice: null, liquidityUsd: null };
+      return this.bareToken(mint);
     }
   }
 
   private async quote(inputMint: string, outputMint: string, amount: bigint, slippageBps: number): Promise<JupQuote> {
-    return getJson<JupQuote>(
-      this.o.fetchFn,
+    return this.get<JupQuote>(
       `${this.o.apiUrl}/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amount}&slippageBps=${slippageBps}&restrictIntermediateTokens=true`,
-      this.headers(),
     );
   }
 
@@ -190,11 +243,7 @@ export class JupiterVenue implements SpotVenueAdapter {
   async prices(mints: string[]): Promise<Map<string, number>> {
     const out = new Map<string, number>();
     if (mints.length === 0) return out;
-    const res = await getJson<Record<string, { usdPrice: number } | null>>(
-      this.o.fetchFn,
-      `${this.o.apiUrl}/price/v3?ids=${mints.join(",")}`,
-      this.headers(),
-    );
+    const res = await this.get<Record<string, { usdPrice: number } | null>>(`${this.o.apiUrl}/price/v3?ids=${mints.join(",")}`);
     for (const [mint, v] of Object.entries(res)) if (v) out.set(mint, v.usdPrice);
     return out;
   }
@@ -209,7 +258,7 @@ export class JupiterVenue implements SpotVenueAdapter {
     } catch (err) {
       // A snipe targets a coin that doesn't exist yet; the address is all there is.
       if (!snipe || !isMint(leg.token.trim())) throw err;
-      t = { mint: leg.token.trim(), symbol: shortToken(leg.token.trim()), name: "", decimals: 6, verified: false, usdPrice: null, liquidityUsd: null };
+      t = await this.bareToken(leg.token.trim());
     }
     if (t.mint === USDC_MINT) throw new VenueError("That's USDC already; pick the token to buy or sell.");
     const canonical = {
@@ -233,7 +282,7 @@ export class JupiterVenue implements SpotVenueAdapter {
   async execute(r: ResolvedStep, ctx: ExecContext): Promise<ExecResult> {
     const leg = r.step.leg;
     if (leg.kind !== "swap") throw new VenueError(`Jupiter cannot run a ${leg.kind} leg.`);
-    const t = await this.tokenOrBare(leg.token, ctx.mode);
+    const t = await this.tokenOrBare(leg.token);
     return ctx.mode === "paper" ? this.paperSwap(leg, t, ctx) : this.liveSwap(leg, t, ctx);
   }
 

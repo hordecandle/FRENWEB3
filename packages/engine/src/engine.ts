@@ -354,19 +354,70 @@ export class Fren {
 
   private async snapshot(): Promise<MarketSnapshot> {
     const snap: MarketSnapshot = { now: new Date(), prices: new Map(), funding: new Map() };
-    const markets = await this.d.hyperliquid.markets.all(true).catch(() => []);
-    for (const m of markets) {
-      snap.prices.set(snapshotKey("hyperliquid", m.name), m.midPx);
-      snap.funding.set(snapshotKey("hyperliquid", m.name), m.fundingHourlyPct);
+    // Prices come from one light request. If it fails the watcher is blind, and
+    // the owner hears about it: a missing price must never look like "no news".
+    let hlOk = true;
+    try {
+      const mids = await this.d.hyperliquid.markets.mids();
+      for (const [name, px] of mids) snap.prices.set(snapshotKey("hyperliquid", name), px);
+      // Funding and the rare market without a mid come from the cached list, if it is current.
+      const markets = await this.d.hyperliquid.markets.all().catch(() => []);
+      for (const m of markets) {
+        const k = snapshotKey("hyperliquid", m.name);
+        if (!snap.prices.has(k)) snap.prices.set(k, m.midPx);
+        snap.funding.set(k, m.fundingHourlyPct);
+      }
+    } catch {
+      hlOk = false;
     }
+    await this.feedCheck("Hyperliquid", hlOk, this.watchesHyperliquid(), this.d.hyperliquid.markets.retryInSec);
     const mints = new Set<string>();
     for (const p of this.d.store.plansWithStatus("active")) {
       for (const st of p.plan.steps) for (const c of st.when) if (c.type === "price" && c.venue === "jupiter") mints.add(c.market);
     }
-    const px = await this.d.jupiter.prices([...mints]).catch(() => new Map<string, number>());
+    let jupOk = true;
+    const px = await this.d.jupiter.prices([...mints]).catch(() => {
+      jupOk = false;
+      return new Map<string, number>();
+    });
+    await this.feedCheck("Jupiter", jupOk, mints.size > 0, 0);
     for (const [mint, v] of px) snap.prices.set(snapshotKey("jupiter", mint), v);
     snap.tradable = await this.tradableNow();
     return snap;
+  }
+
+  /** True when something depends on live Hyperliquid prices: an open position or a waiting condition. */
+  private watchesHyperliquid(): boolean {
+    if (this.d.store.paperPositions().length > 0 || this.liveOpenPositions > 0) return true;
+    return this.d.store.plansWithStatus("active").some((p) => p.plan.steps.some((st) => st.when.some((c) => c.type !== "time" && c.type !== "tradable" && c.venue === "hyperliquid")));
+  }
+
+  private feeds = new Map<string, { fails: number; warned: boolean }>();
+
+  /**
+   * Two failed passes in a row (≈ 30 s) while something is being watched: tell
+   * the owner stops and conditions are not being watched. Once the prices are
+   * back, say so. One message per outage, not one per pass.
+   */
+  private async feedCheck(name: string, ok: boolean, watching: boolean, retryInSec: number): Promise<void> {
+    const f = this.feeds.get(name) ?? { fails: 0, warned: false };
+    this.feeds.set(name, f);
+    if (ok) {
+      f.fails = 0;
+      if (f.warned) {
+        f.warned = false;
+        await this.d.notifier.alert(`✅ ${name} prices are back. Stops and conditions are being watched again.`);
+      }
+      return;
+    }
+    f.fails++;
+    if (f.fails >= 2 && watching && !f.warned) {
+      f.warned = true;
+      const retry = retryInSec > 0 ? ` I'll retry in about ${retryInSec}s.` : " I keep retrying.";
+      await this.d.notifier.alert(
+        `⚠️ I can't get ${name} prices right now (rate-limited or unreachable). Until they're back I can't watch your stops, targets and conditions, so nothing will fire on its own.${retry}`,
+      );
+    }
   }
 
   /** Which waiting snipe targets trade right now. Only asks about tokens someone is waiting on. */
