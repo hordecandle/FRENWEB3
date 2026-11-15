@@ -457,7 +457,51 @@
     e || window.scrollY > 40)
   )
     ((ct.hidden = !0), t.classList.remove("is-loading"));
-  else mt(); // v2: no splash, hero reveals at once
+  else {
+    window.matchMedia("(hover: none)").matches && (document.getElementById("loader-skip").textContent = "Tap to skip");
+    const e = () => {
+      ct.hidden || mt();
+    };
+    (ct.addEventListener("click", e),
+      window.addEventListener("keydown", e, { once: !0 }),
+      window.addEventListener("wheel", e, { once: !0, passive: !0 }),
+      window.addEventListener("touchstart", e, { once: !0, passive: !0 }),
+      (async function () {
+        const e = ht.querySelector(".pupil"),
+          s = (t, s) => {
+            (e.setAttribute("cx", 84 + t), e.setAttribute("cy", 40 + s));
+          };
+        (await n(300),
+          ct.classList.add("is-awake"),
+          await n(480),
+          s(-8, 0),
+          await n(400),
+          s(8, 0),
+          await n(400),
+          ct.classList.add("is-blink"),
+          await n(110),
+          ct.classList.remove("is-blink"),
+          await n(160),
+          ct.classList.add("is-gm"),
+          await n(800),
+          ct.classList.add("is-gm-out"),
+          await n(260),
+          t.classList.add("is-rising"),
+          await n(780));
+        const o = pt.querySelector(".pupil");
+        ((e.style.transition = "none"),
+          e.setAttribute("cx", o.getAttribute("cx")),
+          e.setAttribute("cy", o.getAttribute("cy")),
+          (pt.style.visibility = "hidden"));
+        const i = ht.getBoundingClientRect(),
+          a = pt.getBoundingClientRect();
+        ((ht.style.transition = "transform .85s cubic-bezier(.6,0,.2,1)"),
+          (ht.style.transform = `translate(${a.left - i.left}px, ${a.top - i.top}px) scale(${a.width / i.width})`),
+          await n(860),
+          t.classList.add("is-catch"),
+          mt());
+      })().catch(e));
+  }
   const xt = new IntersectionObserver(
     (t) => {
       t.forEach((t) => {

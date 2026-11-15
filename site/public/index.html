@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="is-loading">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -44,7 +44,7 @@
         />
       </defs>
     </svg>
-    <div class="loader" id="loader" aria-hidden="true" hidden>
+    <div class="loader" id="loader" aria-hidden="true">
       <div class="loader__stage">
         <svg class="loader__mark" id="loader-mark" viewBox="0 0 116 80" fill="none">
           <use href="#fren-head" fill="currentColor" />
@@ -53,6 +53,7 @@
         </svg>
         <span class="loader__gm">gm</span>
       </div>
+      <span class="loader__skip" id="loader-skip">Press Esc to skip</span>
     </div>
     <div class="progress" id="progress" aria-hidden="true">
       <span><i></i></span><span><i></i></span><span><i></i></span>
