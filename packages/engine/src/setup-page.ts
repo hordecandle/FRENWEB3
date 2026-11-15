@@ -83,6 +83,8 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .btn--sm{min-height:36px;padding:7px 14px;font-size:14px;box-shadow:var(--sh-btn-sm)}
 .btn--xl{min-height:60px;padding:14px 30px;font-size:19px;border-radius:14px;box-shadow:3px 4px 0 var(--ink)}
 .btn[disabled]{opacity:.45;pointer-events:none}
+.waitbox{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--muted);font-weight:300}
+.waitbox[hidden]{display:none}
 .link{background:none;border:0;padding:0;font:inherit;font-size:14px;color:var(--muted);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
 @media (max-width:520px){.actions .btn:not(.btn--sm){width:100%}}
 
@@ -170,8 +172,8 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .check .box .ic{width:14px;height:14px;stroke-width:2.6}
 
 /* ===== Final ===== */
-.final{max-width:var(--page);margin:0 auto;padding:clamp(48px,9vh,96px) 24px 64px;text-align:center}
-.final h1{font-size:clamp(44px,7vw,80px);font-weight:500;letter-spacing:-.045em;line-height:1}
+.final{max-width:880px;margin:0 auto;padding:clamp(48px,9vh,96px) 24px 64px;text-align:center}
+.final h1{white-space:nowrap;font-size:clamp(34px,7vw,80px);font-weight:500;letter-spacing:-.045em;line-height:1}
 .final .lead{max-width:30em;margin:16px auto 0}
 .handle{display:inline-flex;align-items:center;gap:12px;margin-top:36px;border:1px solid var(--ink);border-radius:var(--r-chip);padding:8px 20px 8px 8px;box-shadow:var(--sh-btn)}
 .handle .av{width:44px;height:44px;border-radius:50%;background:var(--ink);display:grid;place-items:center}
@@ -327,7 +329,7 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
       <div class="note"><svg class="ic"><use href="#i-dl"/></svg><span><b>Download your backup.</b> It's the only copy of your keys off this server. Lose the server without it, and the money in these wallets is gone.</span></div>
       <div class="actions" style="margin-top:14px"><a class="btn btn--2 btn--sm" href="/api/backup" id="backup"><svg class="ic ic--s"><use href="#i-dl"/></svg>Download wallet backup</a></div>
       <label class="check"><input type="checkbox" id="saved"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span>I saved my backup somewhere safe and offline.</label>
-      <div class="actions"><button class="btn" id="go" disabled>Start Fren<svg class="ic"><use href="#i-arrow"/></svg></button></div>
+      <div class="actions"><button class="btn" id="go" disabled>Start Fren<svg class="ic"><use href="#i-arrow"/></svg></button><span class="waitbox" id="go-hint"><svg class="ic ic--s"><use href="#i-check"/></svg>Tick the box above to continue</span></div>
       <p class="err" id="w-err"></p>
     </section>
   </div>
@@ -379,7 +381,7 @@ function rail(now) {
     const n = i + 1, st = n < now ? "done" : n === now ? "now" : "";
     h += '<li class="' + st + '"><span class="n"><i>' + (n < now ? CHECK : n) + '</i><span>' + name + '</span></span><span class="bar"></span></li>';
   });
-  const ls = now > 6 ? "done" : now === 6 ? "now" : "";
+  const ls = now > 6 ? "done" : "";
   h += '<li class="live ' + ls + '"><span class="n"><i>' + (now > 6 ? CHECK : '<svg viewBox="0 0 116 80" style="width:13px;fill:currentColor"><use href="#mark"/></svg>') + '</i><span>Live</span></span></li>';
   $("rail").innerHTML = h;
   $("rail").setAttribute("aria-label", "Step " + Math.min(now, 5) + " of 5");
@@ -560,7 +562,7 @@ function showWallets(f) {
   $("a-evm").textContent = f.addresses.evm;
   screen("wallet");
 }
-$("saved").onchange = () => { $("go").disabled = !$("saved").checked; };
+$("saved").onchange = () => { $("go").disabled = !$("saved").checked; $("go-hint").hidden = $("saved").checked; };
 $("go").onclick = () => busy($("go"), $("w-err"), async () => {
   await api("POST", "/api/done");
   showFinal();

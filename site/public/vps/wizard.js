@@ -79,7 +79,7 @@
       if (s < 8) return { ...base, stage: "awaiting_payment" };
       if (s < 14) return { ...base, stage: "provisioning", progress: "Booting Ubuntu 24.04" };
       if (s < 22) return { ...base, stage: "installing", progress: "Installing Fren and starting the service" };
-      return { ...base, stage: "ready", setupUrl: "https://203-0-113-7.sslip.io/setup?t=mocktoken" };
+      return { ...base, stage: "ready", setupUrl: "https://51.75.123.45.sslip.io/setup?t=mocktoken" };
     },
   };
 
@@ -113,6 +113,10 @@
   // ---- UI ----
   function show(screen, step) {
     SCREENS.forEach((s) => ($(s).hidden = s !== screen));
+    // On the result screens one action is enough: no FAQ or footer under the card.
+    const quiet = screen === "s-ready" || screen === "s-failed";
+    $("faq").hidden = quiet;
+    document.querySelector(".foot").hidden = quiet;
     drawRail(STEPS.indexOf(step) + 1);
   }
 
