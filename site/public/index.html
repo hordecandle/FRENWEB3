@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="is-loading">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -44,7 +44,7 @@
         />
       </defs>
     </svg>
-    <div class="loader" id="loader" aria-hidden="true">
+    <div class="loader" id="loader" aria-hidden="true" hidden>
       <div class="loader__stage">
         <svg class="loader__mark" id="loader-mark" viewBox="0 0 116 80" fill="none">
           <use href="#fren-head" fill="currentColor" />
@@ -67,7 +67,7 @@
             <use href="#fren-word" fill="currentColor" />
           </svg>
         </a>
-        <a class="btn btn--sm" href="#setup">Get your Fren</a>
+        <a class="btn btn--sm" href="vps/">Get your Fren</a>
       </div>
     </header>
     <main>
@@ -83,7 +83,7 @@
               keys never leave your box.
             </p>
             <div class="cta__buttons">
-              <a class="btn" href="#setup"
+              <a class="btn" href="vps/?chat=telegram"
                 ><svg
                   class="btn__ic"
                   width="20"
@@ -105,9 +105,9 @@
                     stroke-linecap="round"
                     stroke-linejoin="round"
                   /></svg
-                >Telegram</a
+                >Get Fren on Telegram</a
               >
-              <a class="btn" href="#setup"
+              <a class="btn" href="vps/?chat=whatsapp"
                 ><svg
                   class="btn__ic"
                   width="20"
@@ -126,9 +126,11 @@
                     d="M9.1 7.9c.3-.3.7-.3 1-.1l.9 1.9c.1.3 0 .6-.2.8l-.6.6a6.2 6.2 0 0 0 2.9 2.9l.6-.6c.2-.2.5-.3.8-.2l1.9.9c.2.3.2.7-.1 1-.9.9-2.2 1.1-3.3.5a9.4 9.4 0 0 1-4.4-4.4c-.6-1.1-.4-2.4.5-3.3Z"
                     fill="currentColor"
                   /></svg
-                >WhatsApp</a
+                >On WhatsApp</a
               >
             </div>
+            <div class="facts"><span>$10 a month server</span><span>No KYC</span><span>About 10 minutes</span><span>No terminal</span></div>
+            <p class="hero__alt">Have a computer that stays on? <a href="#setup">Run it there instead</a></p>
           </div>
           <div class="dotfield" id="dotfield" aria-hidden="true"></div>
           <div class="dotfield dotfield--fin" id="dotfield-fin" aria-hidden="true"></div>
@@ -304,7 +306,7 @@
                     </div>
                     <div class="chat__ctas">
                       <p class="chat__trust">Self-custody · Your caps · Confirm codes · Kill switch</p>
-                      <a class="btn" href="#setup"
+                      <a class="btn" href="vps/?chat=telegram"
                         ><svg
                           class="btn__ic"
                           width="20"
@@ -328,7 +330,7 @@
                           /></svg
                         >Telegram</a
                       >
-                      <a class="btn" href="#setup"
+                      <a class="btn" href="vps/?chat=whatsapp"
                         ><svg
                           class="btn__ic"
                           width="20"
@@ -363,6 +365,20 @@
             <span class="float__in float--fren">gm! I’m Fren. What are we trading today?</span>
           </div>
           <div class="float float--you" id="lets">Let’s make some moves</div>
+        </div>
+      </section>
+      <section class="steps5" id="steps" aria-labelledby="steps-title">
+        <div class="wrap">
+          <h2 id="steps-title">Five steps, all in your browser</h2>
+          <p>Nothing to install by hand. Here is everything we'll ask for, up front.</p>
+          <ol>
+            <li><b>Server</b><span>Your own server, rented in your name. Just an email, no ID.</span></li>
+            <li><b>Pay</b><span>$10 a month in USDC, USDT, BTC or XMR.</span></li>
+            <li><b>Install</b><span>We set Fren up for you. A few minutes, no terminal.</span></li>
+            <li class="key"><b>AI brain</b><span>Bring an AI key. You pay the model company directly, usually a few dollars a month.</span></li>
+            <li><b>Telegram</b><span>One tap makes your own bot. Then say gm.</span></li>
+          </ol>
+          <div class="end"><a class="btn" href="vps/">Get your Fren&nbsp;→</a><small>Starts in paper mode. No real money moves until you say so.</small></div>
         </div>
       </section>
       <section class="setup" id="setup" aria-labelledby="setup-title">
