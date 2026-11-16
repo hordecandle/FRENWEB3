@@ -16,7 +16,8 @@ import {
 } from "./derive.js";
 import { signPolymarketTypedData, type PolyTypedData } from "./polymarket.js";
 import { addressesOf, type Addresses, type KeyMaterial } from "./keystore.js";
-import { SignerRuleError, checkHyperliquidAction, checkSolanaTransaction, type SolanaTxReport } from "./rules.js";
+import { checkHyperliquidAction, checkSolanaTransaction, type SolanaTxReport } from "./rules.js";
+import { fetchLookupTables, simulateAndCheck } from "./solana-sim.js";
 
 export type { Signature };
 
@@ -67,7 +68,10 @@ export interface SignerApi {
 }
 
 export interface SignerOptions {
-  /** Solana RPC used only for pre-sign simulation. Omit to skip simulation (tests, paper). */
+  /**
+   * Solana RPC for lookup tables and pre-sign simulation. Omit only in tests:
+   * without it the token-account checks don't run.
+   */
   solanaRpcUrl?: string;
   /**
    * Arbitrum RPC for Hyperliquid deposits. If unset, the deposit uses the
@@ -130,29 +134,14 @@ export function createSigner(keys: KeyMaterial, options: SignerOptions = {}): Si
 
     async solSignTransaction(req) {
       const tx = VersionedTransaction.deserialize(Buffer.from(req.txBase64, "base64"));
+      const lookupTables = connection ? await fetchLookupTables(connection, tx) : [];
       const report: SolSignResult["report"] = checkSolanaTransaction(tx, sol.publicKey, {
         ...(req.jitoTipLamports !== undefined ? { jitoTipLamports: req.jitoTipLamports } : {}),
+        lookupTables,
       });
 
       if (connection) {
-        const before = await connection.getBalance(sol.publicKey, "confirmed");
-        const sim = await connection.simulateTransaction(tx, {
-          sigVerify: false,
-          replaceRecentBlockhash: true,
-          accounts: { encoding: "base64", addresses: [sol.publicKey.toBase58()] },
-        });
-        if (sim.value.err) {
-          throw new SignerRuleError(`Simulation failed: ${JSON.stringify(sim.value.err)}`);
-        }
-        const after = sim.value.accounts?.[0]?.lamports;
-        if (after === undefined) throw new SignerRuleError("Simulation did not return the wallet balance.");
-        const delta = after - before;
-        report.simulatedSolDeltaLamports = delta;
-        if (-delta > req.maxSolSpendLamports) {
-          throw new SignerRuleError(
-            `Simulation shows the wallet losing ${-delta} lamports, more than the ${req.maxSolSpendLamports} allowed.`,
-          );
-        }
+        report.simulatedSolDeltaLamports = await simulateAndCheck(connection, tx, sol.publicKey, report, lookupTables, req.maxSolSpendLamports);
       }
 
       tx.sign([sol]);

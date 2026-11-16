@@ -1,4 +1,4 @@
-import { createWalletClient, decodeFunctionData, http, type Chain, type PrivateKeyAccount } from "viem";
+import { createPublicClient, createWalletClient, decodeFunctionData, erc20Abi, http, type Chain, type PrivateKeyAccount } from "viem";
 import { arbitrum, arbitrumSepolia, base, baseSepolia, robinhood, robinhoodTestnet } from "viem/chains";
 import { SignerRuleError } from "./rules.js";
 
@@ -87,8 +87,30 @@ const ERC20_APPROVE = [
 
 const APPROVE_SELECTOR = "0x095ea7b3";
 
-/** Approvals must be for a real amount, never "unlimited". 10^30 raw is far above any balance Fren handles. */
+/**
+ * Outer cap: approvals must be for a real amount, never "unlimited". The real
+ * cap is the wallet's balance of that token, checked on-chain right before
+ * sending (`approvalWithinBalance`).
+ */
 export const MAX_APPROVAL_RAW = 10n ** 30n;
+
+/**
+ * An approval may not exceed what the wallet holds of that token now, so a
+ * leftover allowance can never reach funds that arrive later. Zero (revoking)
+ * is always allowed. The engine approves exact amounts, so this never blocks it.
+ */
+export async function approvalWithinBalance(
+  req: EvmTxRequest,
+  owner: `0x${string}`,
+  balanceOf: (token: `0x${string}`, owner: `0x${string}`) => Promise<bigint>,
+): Promise<void> {
+  if (req.data.slice(0, 10).toLowerCase() !== APPROVE_SELECTOR) return;
+  const { args } = decodeFunctionData({ abi: ERC20_APPROVE, data: req.data });
+  const amount = args[1];
+  if (amount === 0n) return;
+  const balance = await balanceOf(req.to, owner);
+  if (amount > balance) throw new SignerRuleError(`Approval of ${amount} is more than the wallet's balance of ${balance} for that token.`);
+}
 
 export interface EvmTxRequest {
   chainId: number;
@@ -144,7 +166,10 @@ export async function sendEvmTransaction(
 ): Promise<`0x${string}`> {
   checkEvmTransaction(req, account.address);
   const net = EVM_CHAINS[req.chainId]!;
-  const client = createWalletClient({ account, chain: net.chain, transport: http(rpcOverrides[req.chainId] ?? net.rpc) });
+  const transport = http(rpcOverrides[req.chainId] ?? net.rpc);
+  const reader = createPublicClient({ chain: net.chain, transport });
+  await approvalWithinBalance(req, account.address, (token, who) => reader.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [who] }));
+  const client = createWalletClient({ account, chain: net.chain, transport });
   return client.sendTransaction({
     to: req.to,
     data: req.data,

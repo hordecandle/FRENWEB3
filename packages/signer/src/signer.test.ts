@@ -76,15 +76,16 @@ describe("solana rules", () => {
   const stranger = Keypair.generate().publicKey;
   const wsol = associatedTokenAddress(owner, new PublicKey("So11111111111111111111111111111111111111112"), SOLANA_PROGRAMS.token);
 
-  it("allows wrapping SOL into the wallet's own account plus a Jupiter route", () => {
-    const tx = txFor(owner, [
+  it("allows wrapping SOL into the wallet's own account, but not an unknown Jupiter instruction", () => {
+    const wrap = [
       ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }),
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000 }),
       SystemProgram.transfer({ fromPubkey: owner, toPubkey: wsol, lamports: 1_000_000 }),
-      new TransactionInstruction({ programId: new PublicKey(SOLANA_PROGRAMS.jupiterV6), keys: [], data: Buffer.from([1, 2, 3]) }),
-    ]);
-    const report = checkSolanaTransaction(tx, owner);
-    expect(report.priorityFeeLamports).toBe(300);
+    ];
+    expect(checkSolanaTransaction(txFor(owner, wrap), owner).priorityFeeLamports).toBe(300);
+    // Real Jupiter routes are checked against API fixtures in solana-h1.test.ts.
+    const junk = new TransactionInstruction({ programId: new PublicKey(SOLANA_PROGRAMS.jupiterV6), keys: [], data: Buffer.from([1, 2, 3]) });
+    expect(() => checkSolanaTransaction(txFor(owner, [...wrap, junk]), owner)).toThrow(/Jupiter instruction/);
   });
 
   it("refuses a SOL transfer to someone else", () => {
