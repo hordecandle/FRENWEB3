@@ -2076,3 +2076,4 @@ html.is-killed .plq {
 .steps5 li span{display:block;margin-top:6px;color:var(--muted);font-size:14px;font-weight:300;line-height:1.5}
 .steps5 .end{margin-top:24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .steps5 .end small{color:var(--muted);font-size:14px}
+@media (width<480px){.hero__chats{font-size:12.5px;gap:5px}.hero__chats span{margin-left:2px;white-space:nowrap}}
