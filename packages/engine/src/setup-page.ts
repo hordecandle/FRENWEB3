@@ -372,8 +372,8 @@ async function busy(btn, errEl, fn) {
   $("trust-ip").textContent = m ? m.slice(1).join(".") : h;
 })();
 
-// Rail: 1 Server · 2 Pay · 3 Install · 4 AI brain · 5 Telegram → Live. now 6 = Live is current, 7 = all done.
-const RAIL = ["Server", "Pay", "Install", "AI brain", "Telegram"];
+// Rail: 1 Server · 2 Pay · 3 Install · 4 AI brain · 5 Chat → Live. now 6 = Live is current, 7 = all done.
+const RAIL = ["Server", "Pay", "Install", "AI brain", "Chat"];
 const CHECK = '<svg class="ic" style="width:13px;height:13px;stroke-width:2.6"><use href="#i-check"/></svg>';
 function rail(now) {
   let h = "";
@@ -405,11 +405,12 @@ async function load() {
   providers = s.providers.slice().sort((a, b) => (b.id === "openrouter") - (a.id === "openrouter"));
   oneTap = !!s.oneTapBot;
   bot = s.telegramBot;
+  chat = s.channel || null; // a reload keeps the chat that was really connected
   $("provider").innerHTML = providers.map((p) => '<option value="' + p.id + '">' + esc(p.label.replace(/ [(]any model[)]$/, "")) + (p.id === "openrouter" ? " (recommended)" : "") + "</option>").join("");
   syncKeyLink();
   if (s.done) return showFinal();
   if (s.finished) return showWallets(s.finished);
-  if (s.channel) { chat = s.channel; return showConnected(); }
+  if (s.channel) return showConnected();
   if (s.modelReady) return showChat();
   screen("model");
 }
@@ -570,18 +571,18 @@ $("go").onclick = () => busy($("go"), $("w-err"), async () => {
 function showFinal() {
   $("page").classList.add("hidden");
   rail(7);
-  const tg = chat !== "whatsapp" && (bot || chat === "telegram");
-  if (tg && bot) {
+  const wa = chat === "whatsapp";
+  if (wa) {
+    // WhatsApp: no t.me anywhere, and no link that goes nowhere. Just say what to do.
+    $("final-text").textContent = "It's waiting for you in WhatsApp. Open WhatsApp on your phone and say gm to Fren.";
+    $("final-handle").classList.add("hidden");
+    $("final-open").classList.add("hidden");
+  } else if (bot) {
     $("final-bot").textContent = "@" + bot;
     $("final-open").href = "https://t.me/" + bot;
-  } else if (!tg) {
-    $("final-text").textContent = "It's waiting for you in WhatsApp.";
-    $("final-handle").classList.add("hidden");
-    $("final-open").href = "https://wa.me/";
-    $("final-open").querySelector("use").setAttribute("href", "#i-wa");
-    $("final-open-text").textContent = "Open WhatsApp";
   } else {
     $("final-handle").classList.add("hidden");
+    $("final-open").classList.add("hidden");
   }
   $("final").classList.remove("hidden");
   scrollTo(0, 0);

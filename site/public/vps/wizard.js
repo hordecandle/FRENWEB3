@@ -3,9 +3,9 @@
   const $ = (id) => document.getElementById(id);
   const params = new URLSearchParams(location.search);
   const MOCK = params.has("mock");
-  // v2 rail: 1 Server · 2 Pay · 3 Install · 4 AI brain · 5 Telegram → Live (FLOW_V2.md)
+  // v2 rail: 1 Server · 2 Pay · 3 Install · 4 AI brain · 5 Chat → Live (FLOW_V2.md)
   const STEPS = ["plan", "pay", "build", "ready"];
-  const RAIL = ["Server", "Pay", "Install", "AI brain", "Telegram"];
+  const RAIL = ["Server", "Pay", "Install", "AI brain", "Chat"];
   const CHECK = '<svg class="ic" style="width:13px;height:13px;stroke-width:2.6"><use href="#i-check"/></svg>';
   function drawRail(now) {
     let h = "";

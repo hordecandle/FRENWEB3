@@ -2044,8 +2044,14 @@ html.is-killed .plq {
 /* ===== v2 (FLOW_V2.md): facts, alt link, five steps ===== */
 .facts{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:22px}
 .facts span{border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:500;background:var(--bg)}
-.hero__alt{margin:14px 0 0;font-size:14px;color:var(--muted);text-align:center}
-.hero__alt a{color:inherit;text-underline-offset:3px}
+.hero__chats{margin:14px 0 0;display:flex;align-items:center;justify-content:center;gap:6px;font-size:14px;color:var(--muted)}
+.hero__chats .cta__ic{flex:none}
+.hero__chats span{margin-left:4px}
+.steps5__limits{margin:18px 0 0;max-width:640px;color:var(--muted);font-size:13px;line-height:1.5}
+/* v3: the big closing heading is the one action of that screen */
+.scene.is-final .fin a{pointer-events:auto;color:inherit;text-decoration:none;cursor:pointer;border-radius:12px}
+.scene.is-final .fin a:hover{text-decoration:underline;text-decoration-thickness:.06em;text-underline-offset:.1em}
+.fin a:focus-visible{outline:2px solid var(--ink);outline-offset:6px}
 .steps5{padding:64px 0 72px;border-top:1px solid var(--line)}
 .steps5 h2{margin:0;font-size:clamp(28px,3.4vw,44px);font-weight:500;letter-spacing:-.03em}
 .steps5 .wrap>p{color:var(--muted);margin:10px 0 0;font-size:17px;font-weight:300}

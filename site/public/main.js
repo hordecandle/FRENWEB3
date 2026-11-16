@@ -528,19 +528,3 @@
       !e && p && u(...p));
   });
 })();
-(() => {
-  "use strict";
-  const btn = document.getElementById("cmd-copy"),
-    cmd = document.getElementById("cmd-text");
-  if (!btn || !cmd) return;
-  btn.addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(cmd.textContent.trim());
-      btn.textContent = "Copied";
-    } catch {
-      getSelection().selectAllChildren(cmd);
-      btn.textContent = "Press ⌘C";
-    }
-    setTimeout(() => (btn.textContent = "Copy"), 1800);
-  });
-})();
