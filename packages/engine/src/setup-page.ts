@@ -182,6 +182,7 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .final .actions{justify-content:center;margin-top:28px}
 .say{margin:40px auto 0;max-width:420px;text-align:left}
 .say h3{font-size:14px;font-weight:500;text-align:center;margin-top:26px;color:var(--muted)}
+.say h3:first-child{margin-top:0}
 .tries{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:12px}
 .tries span{border:1px solid var(--ink);border-radius:var(--r-chip);padding:6px 12px;font-size:14px}
 .bubbles{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
@@ -336,14 +337,10 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
 
 <section class="final hidden" id="final">
   <h1>Your Fren is <span class="plq">live.</span></h1>
-  <p class="lead" id="final-text">It's waiting for you in Telegram.</p>
+  <p class="lead hidden" id="final-text"></p>
   <div class="handle" id="final-handle"><span class="av"><svg viewBox="0 0 116 80"><use href="#mark"/></svg></span><b id="final-bot">@your_bot</b></div>
   <div class="actions"><a class="btn btn--xl" id="final-open" target="_blank" rel="noopener"><svg class="ic"><use href="#i-tg"/></svg><span id="final-open-text">Open in Telegram</span></a></div>
   <div class="say">
-    <div class="bubbles">
-      <span class="bub">gm</span>
-      <span class="bub bub--fren">gm! I'm Fren. What are we trading today?</span>
-    </div>
     <h3>Say gm. Then try:</h3>
     <div class="tries"><span>what's my wallet</span><span>long BTC 5x with $20</span><span>stop everything</span></div>
   </div>
@@ -567,18 +564,20 @@ $("go").onclick = () => busy($("go"), $("w-err"), async () => {
 });
 function showFinal() {
   $("page").classList.add("hidden");
-  rail(7);
+  $("rail").classList.add("hidden"); document.querySelector(".top__step").classList.add("hidden");
   const wa = chat === "whatsapp";
   if (wa) {
     // WhatsApp: no t.me anywhere, and no link that goes nowhere. Just say what to do.
     $("final-text").textContent = "It's waiting for you in WhatsApp. Open WhatsApp on your phone and say gm to Fren.";
+    $("final-text").classList.remove("hidden");
     $("final-handle").classList.add("hidden");
     $("final-open").classList.add("hidden");
   } else if (bot) {
     $("final-bot").textContent = "@" + bot;
     $("final-open").href = "https://t.me/" + bot;
   } else {
-    $("final-text").textContent = "It's waiting for you in Telegram. Open your new bot there and say gm.";
+    $("final-text").textContent = "Open your new bot in Telegram and say gm.";
+    $("final-text").classList.remove("hidden");
     $("final-handle").classList.add("hidden");
     $("final-open").classList.add("hidden");
   }
