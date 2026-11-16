@@ -17,7 +17,8 @@ import { claimManagedBot, startManagedBot } from "./managed-bot.js";
  */
 
 export interface Prompt {
-  ask(question: string, fallback?: string): Promise<string>;
+  /** `secret`: the answer isn't echoed (AI keys, bot tokens). */
+  ask(question: string, fallback?: string, opts?: { secret?: boolean }): Promise<string>;
   say(text: string): void;
   close(): void;
 }
@@ -72,39 +73,57 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
     }
     io.say(`✓ OpenClaw ${oc}`);
 
+    // Same three steps, order and words as the setup page in the browser
+    // (setup-page.ts): AI key, chat, wallets.
+    io.say(stepTitle(1, "AI key"));
     await modelLogin(deps, opts);
 
+    io.say(stepTitle(2, "Chat"));
     const channel = await choose(io, "Where do you want to talk to Fren?", [
-      ["telegram", "Telegram (recommended: approval codes go on a private line the AI never sees)"],
-      ["whatsapp", "WhatsApp"],
+      ["telegram", "Telegram (recommended). Confirm codes come on a separate line the AI never sees."],
+      ["whatsapp", "WhatsApp. Needs a spare number for Fren."],
     ]);
     const line = channel === "telegram" ? await setupTelegram(deps) : await setupWhatsApp(deps);
 
-    const network = await choose(io, "Which network?", [
-      ["mainnet", "Mainnet: real prices, play money until you switch to live (recommended)"],
-      ["testnet", "Testnet: Hyperliquid testnet, for trying things out"],
+    io.say(stepTitle(3, "Wallets"));
+    io.say("Last thing: Fren makes two wallets for you, right here on this computer.");
+    const network = await choose(io, "Network", [
+      ["mainnet", "Mainnet (recommended): real prices, pretend money until you switch to live."],
+      ["testnet", "Testnet: a practice network for developers."],
     ]);
-    const jupiterApiKey = (await io.ask("Jupiter API key for fast launch snipes (free at portal.jup.ag, Enter to skip)", "")).trim();
+    const jupiterApiKey = (await io.ask("Jupiter key (optional, makes fast buys of brand-new Solana coins more reliable; free at portal.jup.ag; Enter to skip)", "")).trim();
 
-    io.say("Creating wallets and installing the Fren plugin into OpenClaw…");
+    io.say("Making your wallets…");
     const { addresses } = await finishSetup(deps, { network, jupiterApiKey, line });
-    io.say(`✓ Wallets ready in ${deps.paths.home} (encrypted; keys never leave this machine)\n✓ Plugin installed`);
+    io.say(`
+✓ Your wallets are ready
+  Fren starts in paper mode: real prices, pretend money. No real money moves until you say so.
+
+  Solana · spot, meme coins and Solana yield
+    ${addresses.solana}
+  Arbitrum and Base · perps, bets and coins on these chains
+    ${addresses.evm}
+  To trade for real later: send USDC here, plus a little SOL and a little ETH (on Arbitrum or Base) to pay network fees.
+
+  Your backup is these two files. Anyone with them controls these wallets; lose them and the money is gone:
+    ${deps.paths.keystore}
+    ${deps.paths.passphrase}
+  Copy both somewhere safe and offline (a USB stick, a password manager).
+`);
+    for (;;) {
+      if (await yes(io, "I saved my backup somewhere safe and offline", false)) break;
+      io.say("Copy the two files above first, then type y.");
+    }
 
     if (!opts.server) await installServices(deps);
 
+    const where = channel === "telegram" ? "Open your bot in Telegram and say gm" : "Text Fren's number on WhatsApp and say gm";
     io.say(`
-  ✓ Fren is set up (${network}, paper mode: no real money moves until you say so).
+  ✓ Your Fren is live.
+  ${where}. Try "what's my wallet", "long BTC 5x with $20", "stop everything".
 
-  Fund it by sending USDC to:
-    Solana (spot, meme coins, Solana yield):   ${addresses.solana}
-    Arbitrum or Base (perps, bets, EVM coins):  ${addresses.evm}
-  plus a little SOL (~0.05) for Solana fees and ETH on Arbitrum or Base for gas.
-
-  Then message your bot: "what's my wallet", "long BTC 5x with $20", "stop everything".
-  When you're ready for real money: /limits mode=live
-
-  Back up ${deps.paths.keystore} and ${deps.paths.passphrase} somewhere safe.
-  Lose them and the funds in these wallets are gone.
+  Paper mode: real prices, pretend money, until you switch to live.
+  When you're ready for real money, send it: /limits mode=live
 `);
     return { channel, network, addresses };
   } finally {
@@ -224,14 +243,54 @@ export async function openclawVersion(deps: SetupDeps): Promise<string | null> {
   }
 }
 
-/** OpenClaw's onboarding picks the AI model and logs in. Skipped when a model already has auth. */
+function stepTitle(n: number, name: string): string {
+  return `\n━━ Step ${n} of 3 · ${name} ━━`;
+}
+
+/**
+ * The AI key, as on the setup page: pick the AI company, paste a key, Fren
+ * checks it with one tiny request before saving. "Something else" hands over
+ * to OpenClaw's own login (accounts and providers the page doesn't list).
+ */
 async function modelLogin(deps: SetupDeps, opts: SetupOptions): Promise<void> {
+  const { io } = deps;
   const ready = await modelReady(deps);
-  if (ready && !(await yes(deps.io, "OpenClaw already has an AI model set up. Change it?", false))) return;
-  deps.io.say(`
-Next, OpenClaw asks which AI model Fren should think with, and logs you in
-(an Anthropic, OpenAI or OpenRouter account, or an API key). Skip its chat
-channel step: Fren sets that up right after.
+  if (ready && !(await yes(io, "Fren already has an AI key. Change it?", false))) return;
+  io.say("Fren thinks with an AI model. You add your own AI key, so you pay the AI company directly for what you use and nobody in between sees your chats.");
+  const order: ModelProvider[] = ["openrouter", "anthropic", "openai", "gemini"];
+  const name = (p: ModelProvider) => MODEL_PROVIDERS[p].label.replace(/ \(any model\)$/, "");
+  const provider = await choose<ModelProvider | "other">(io, "AI company", [
+    ...order.map((p): [ModelProvider, string] => [p, p === "openrouter" ? `${name(p)} (recommended): one key, any model` : name(p)]),
+    ["other", "Something else: sign in with OpenClaw's own setup"],
+  ]);
+  if (provider !== "other") {
+    const p = MODEL_PROVIDERS[provider];
+    io.say(
+      provider === "openrouter"
+        ? `\nGet a key on OpenRouter: ${p.keyUrl}\n  1. Sign in with Google or email.\n  2. Add a few dollars of credit.\n  3. Create a key and paste it below.`
+        : `\nGet a key on ${name(provider)}: ${p.keyUrl}\n  1. Sign in.\n  2. Add a few dollars of credit or pick a plan.\n  3. Create a key and paste it below.`,
+    );
+    io.say("It stays on this computer. We check it works with one tiny request.");
+    for (;;) {
+      const key = (await io.ask("AI key (hidden while you paste)", undefined, { secret: true })).trim();
+      if (key.length < 10) {
+        io.say("Paste the whole key.");
+        continue;
+      }
+      io.say("Checking…");
+      try {
+        await configureModelKey(deps, provider, key);
+        io.say(`✓ AI key works (${name(provider)})`);
+        return;
+      } catch (err) {
+        if (!(err instanceof ModelKeyError)) throw err;
+        io.say(err.message);
+      }
+    }
+  }
+  io.say(`
+OpenClaw now asks which AI model Fren should think with, and logs you in.
+Skip its chat channel step: Fren sets that up right after.
 `);
   const args = ["onboard", "--flow", "quickstart", "--skip-channels", "--skip-ui", "--skip-search"];
   // On a VPS the installer runs the gateway as a system service; locally OpenClaw installs its own.
@@ -250,10 +309,10 @@ async function setupTelegram(deps: SetupDeps): Promise<{ telegram: { botToken: s
     if (line) return line;
   }
   io.say(`
-Make a Telegram bot (takes a minute):
-  1. Open https://t.me/BotFather and send /newbot
-  2. Pick a name and a username ending in "bot"
-  3. Copy the token it gives you (looks like 123456789:AA...)
+Make your bot with @BotFather (takes a minute):
+  1. Open https://t.me/BotFather in Telegram and send /newbot.
+  2. Pick a name, then a username that ends in "bot".
+  3. Copy the token it sends you (looks like 123456789:AA...) and paste it here.
 `);
   let token = "";
   let bot = "";
@@ -342,13 +401,13 @@ export async function ackTelegram(fetchFn: Fetch, token: string, offset: number)
  */
 export async function findTelegramOwner(deps: Pick<SetupDeps, "io" | "fetchFn" | "sleep">, token: string, bot: string): Promise<{ id: string; name: string }> {
   const { io } = deps;
-  io.say(`Now open https://t.me/${bot} on your phone and press Start (or send it any message).`);
+  io.say(`Now open your bot and press Start, so Fren knows it's you: https://t.me/${bot}`);
   let offset = 0;
   const deadline = Date.now() + 5 * 60_000;
   while (Date.now() < deadline) {
     const r = await pollTelegramOwner(deps.fetchFn, token, offset);
     if (r.busy) {
-      io.say("OpenClaw is already reading this bot, so I can't spot your message.");
+      io.say("Another app is already connected to this bot. Enter your Telegram ID below instead.");
       break;
     }
     if (r.offset === offset && !r.candidates.length) {
@@ -363,11 +422,11 @@ export async function findTelegramOwner(deps: Pick<SetupDeps, "io" | "fetchFn" |
       }
     }
   }
-  io.say("Message @userinfobot on Telegram and it replies with your numeric user id.");
+  io.say("Not working? Message @userinfobot on Telegram (https://t.me/userinfobot), copy the Id it shows, and paste it here.");
   for (;;) {
-    const id = (await io.ask("Your Telegram user id")).trim();
+    const id = (await io.ask("Your Telegram ID")).trim();
     if (/^\d{1,15}$/.test(id)) return { id, name: id };
-    io.say("That's the number @userinfobot shows as Id, digits only.");
+    io.say("Use the number @userinfobot shows as Id, digits only.");
   }
 }
 
@@ -394,23 +453,24 @@ async function telegram<T>(fetchFn: Fetch, token: string, method: string, body?:
 async function setupWhatsApp(deps: SetupDeps): Promise<{ notify: { channel: string; to: string }[] }> {
   const { io } = deps;
   io.say(`
-WhatsApp works best with a spare number for Fren (an old phone or a second
-SIM with WhatsApp on it). You chat with that number from your own phone.
-You can also link your own number and talk to Fren in "Message yourself".
+Fren needs its own WhatsApp: a spare number, like an old phone or a second SIM.
+You scan one QR code, then text Fren from your usual phone.
 `);
   let mine = "";
   for (;;) {
-    mine = normalizePhone(await io.ask("Your own WhatsApp number, with country code (e.g. +447700900123)")) ?? "";
+    mine = normalizePhone(await io.ask("Your usual WhatsApp number (the one you'll text Fren from), with country code, e.g. +447700900123")) ?? "";
     if (mine) break;
     io.say("Start with + and your country code, digits only after that.");
   }
-  io.say(`
-OpenClaw adds WhatsApp next. Say yes to installing its WhatsApp plugin and to
-"Link WhatsApp now", then on the phone with Fren's WhatsApp:
-  Settings → Linked devices → Link a device, and scan the QR code.
-`);
-  await mustRun(deps, deps.openclawBin, ["channels", "add", "--channel", "whatsapp"], "add the WhatsApp channel", true);
+  // The same non-interactive steps as the setup page, so OpenClaw asks nothing here.
+  io.say("Getting WhatsApp ready (the first time can take about a minute)…");
+  await mustRun(deps, deps.openclawBin, ["plugins", "install", "@openclaw/whatsapp", "--force"], "install OpenClaw's WhatsApp plugin");
+  await mustRun(deps, deps.openclawBin, ["channels", "add", "--channel", "whatsapp", "--account", "default"], "add WhatsApp");
   if (!deps.exists(whatsappCreds(deps.home))) {
+    io.say(`
+On the spare phone (Fren's WhatsApp): Settings → Linked devices → Link a device, then scan the QR code below.
+It refreshes by itself every few seconds.
+`);
     await mustRun(deps, deps.openclawBin, ["channels", "login", "--channel", "whatsapp"], "link WhatsApp", true);
   }
   const line = await configureWhatsAppOwner(deps, mine);
@@ -542,8 +602,24 @@ export function systemSetupDeps(paths: FrenPaths): SetupDeps {
   return {
     paths,
     io: {
-      ask: async (q, fallback) => {
-        const a = await terminal().question(fallback ? `${q} (${fallback}): ` : `${q}: `);
+      ask: async (q, fallback, o) => {
+        const prompt = fallback ? `${q} (${fallback}): ` : `${q}: `;
+        let a = "";
+        if (o?.secret && process.stdin.isTTY) {
+          // Print the question, then keep readline from echoing what's typed or pasted.
+          const r = terminal() as unknown as { _writeToOutput: (s: string) => void; question(q: string): Promise<string> };
+          process.stdout.write(prompt);
+          const echo = r._writeToOutput;
+          r._writeToOutput = () => {};
+          try {
+            a = await r.question("");
+          } finally {
+            r._writeToOutput = echo;
+            process.stdout.write(a ? "••••••\n" : "\n");
+          }
+        } else {
+          a = await terminal().question(prompt);
+        }
         return a.trim() === "" && fallback !== undefined ? fallback : a;
       },
       say: (t) => console.log(t),
