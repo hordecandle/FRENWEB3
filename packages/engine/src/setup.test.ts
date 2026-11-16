@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -87,6 +87,17 @@ const startMessage = {
 };
 
 describe("fren setup", () => {
+  it("stops before any question when the keys are locked away with the engine user", async () => {
+    const { run, runs } = fakeRunner(false);
+    const io = scriptedIo([]);
+    const d = deps({ io, run, fetchFn: fakeTelegram([]).fetchFn });
+    mkdirSync(d.paths.home, { recursive: true });
+    writeFileSync(join(d.paths.home, "engine.json"), JSON.stringify({ engineUser: "fren-engine", frenHome: "/var/lib/fren-engine/.fren" }));
+    await expect(runSetup(d, { server: true })).rejects.toThrow(/locked away/);
+    expect(io.out.some((l) => l.startsWith("?"))).toBe(false);
+    expect(runs).toEqual([]);
+  });
+
   it("links Telegram with the owner as the only sender, creates wallets and installs the plugin", async () => {
     const tg = fakeTelegram([startMessage]);
     const { run, runs } = fakeRunner(false);
@@ -114,6 +125,12 @@ describe("fren setup", () => {
     expect(runs).toContain(`openclaw config set commands.ownerAllowFrom ["telegram:777000123"]`);
     expect(runs).toContain(`openclaw channels add --channel telegram --token ${TOKEN}`);
     expect(runs).toContain("openclaw plugins install --link --accept-capabilities --force /app/packages/openclaw-plugin");
+    // C1: the agent gets chat and Fren's tools, no shell, files, browser or admin.
+    expect(runs).toContain(`openclaw config set tools.profile "messaging"`);
+    expect(runs).toContain(`openclaw config set tools.alsoAllow ["fren","web_search"]`);
+    const deny = runs.find((r) => r.startsWith("openclaw config set tools.deny "));
+    expect(JSON.parse(deny!.slice("openclaw config set tools.deny ".length))).toEqual(expect.arrayContaining(["group:runtime", "group:fs", "group:automation"]));
+    expect(runs).toContain("openclaw config set tools.elevated.enabled false");
     // Server mode: the VPS installer owns the services.
     expect(runs.some((r) => r.startsWith("systemctl") || r.startsWith("openclaw daemon"))).toBe(false);
 

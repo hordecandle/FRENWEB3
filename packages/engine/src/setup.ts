@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, platform, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -62,6 +62,8 @@ const E164 = /^\+[1-9]\d{6,14}$/;
 export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<SetupResult> {
   const { io } = deps;
   try {
+    // Isolated: say so before the questions, not after five minutes of them.
+    if (isolatedMarker(deps.paths)) throw new Error(LOCKED_AWAY);
     io.say(`
   ┌───────────────────────────────────────────┐
   │  Fren setup: a few questions, ~5 minutes  │
@@ -223,14 +225,52 @@ function lastLines(r: { stdout: string; stderr: string }): string {
   return (r.stderr || r.stdout).trim().split("\n").slice(-3).join("\n");
 }
 
+const LOCKED_AWAY = "Fren's keys are locked away with the engine user. Run `sudo fren isolate --undo` first, then setup, then `sudo fren isolate` (on a VPS `sudo fren setup` does all three).";
+
 /** Wallets, config and the plugin: the last step of both setups. */
 export async function finishSetup(
   deps: Pick<SetupDeps, "run" | "openclawBin" | "paths" | "pluginDir">,
   o: { network: "mainnet" | "testnet"; jupiterApiKey?: string; line: Pick<InitOptions, "telegram" | "notify"> },
 ) {
+  if (isolatedMarker(deps.paths)) {
+    // Wallets live with the engine's own user now; a fresh initFren here would
+    // quietly make new ones.
+    throw new Error(LOCKED_AWAY);
+  }
   const res = initFren(deps.paths, { network: o.network, ...(o.jupiterApiKey ? { jupiterApiKey: o.jupiterApiKey } : {}), ...o.line });
   await mustRun(deps, deps.openclawBin, ["plugins", "install", "--link", "--accept-capabilities", "--force", deps.pluginDir], "install the Fren plugin");
+  await lockDownAgentTools(deps);
   return res;
+}
+
+/**
+ * The agent chats and calls Fren's tools, nothing else: no shell, no code
+ * runner, no file tools, no browser, no gateway or plugin admin. A prompt
+ * injection then has no tool that reads the keystore, the passphrase, the API
+ * token or the database from disk (SECURITY_REVIEW C1). Deny beats allow in
+ * OpenClaw, so a later `tools.allow` can't quietly undo it.
+ */
+export const AGENT_TOOL_POLICY = {
+  profile: "messaging",
+  alsoAllow: ["fren", "web_search"],
+  deny: ["group:runtime", "group:fs", "group:ui", "group:nodes", "group:automation", "web_fetch", "sessions_spawn", "subagents"],
+} as const;
+
+export async function lockDownAgentTools(deps: Pick<SetupDeps, "run" | "openclawBin">): Promise<void> {
+  await setConfig(deps, "tools.profile", JSON.stringify(AGENT_TOOL_POLICY.profile));
+  await setConfig(deps, "tools.alsoAllow", JSON.stringify(AGENT_TOOL_POLICY.alsoAllow));
+  await setConfig(deps, "tools.deny", JSON.stringify(AGENT_TOOL_POLICY.deny));
+  // Elevated mode is OpenClaw's escape hatch to host exec: keep it shut.
+  await setConfig(deps, "tools.elevated.enabled", "false");
+}
+
+/** Written by `fren isolate` into the agent's ~/.fren: where the engine's files went. */
+export function isolatedMarker(paths: Pick<FrenPaths, "home">): { engineUser: string; frenHome: string } | null {
+  try {
+    return JSON.parse(readFileSync(join(paths.home, "engine.json"), "utf8")) as { engineUser: string; frenHome: string };
+  } catch {
+    return null;
+  }
 }
 
 export async function openclawVersion(deps: SetupDeps): Promise<string | null> {

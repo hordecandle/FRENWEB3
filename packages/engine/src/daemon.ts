@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { isolatedMarker } from "./setup.js";
 import { SignerProcess, type SignerApi } from "@fren/signer";
 import { createApi } from "./api.js";
 import { Connection } from "@solana/web3.js";
@@ -96,6 +97,8 @@ export function buildFren({ config, store, signer, fetchFn = fetch, exec }: Buil
 }
 
 export async function startDaemon(paths: FrenPaths = frenPaths()) {
+  const iso = isolatedMarker(paths);
+  if (iso) throw new Error(`Fren's engine runs as ${iso.engineUser} now (keys in ${iso.frenHome}). Start it with: sudo systemctl start fren`);
   const config = loadConfig(paths);
   if (!existsSync(paths.apiToken)) throw new Error(`No API token at ${paths.apiToken}. Run \`fren init\` first.`);
   const token = readFileSync(paths.apiToken, "utf8").trim();
