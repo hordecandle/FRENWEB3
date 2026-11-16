@@ -7,7 +7,7 @@
   --r-btn:12px; --r-field:12px; --r-card:22px; --r-note:14px; --r-chip:999px;
   --sh-btn:2px 3px 0 var(--ink); --sh-btn-sm:1.5px 2px 0 var(--ink); --sh-card:4px 5px 0 var(--ink);
   --ease:cubic-bezier(.2,.8,.2,1);
-  --header:64px; --cta-gap:28px; --cap-gap:16px; --page:640px; --wide:1120px;
+  --header:64px; --cta-gap:40px; --cap-gap:24px; --page:640px; --wide:1120px;
 }
 *,:before,:after{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;font-size:16px}
@@ -122,7 +122,9 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .hint{margin-top:10px;font-size:13px;color:var(--muted);font-weight:300}
 /* round 8: caption under a button = 16px, caption lines 8px apart */
 .actions + .hint,.actions + .msg,.actions + .err{margin-top:var(--cap-gap)}
-.hint + .hint{margin-top:8px}
+.hint + .hint{margin-top:12px}
+.hint{line-height:1.6}
+@media (width<480px){:root{--cta-gap:32px}}
 .textlink{background:none;border:0;padding:0;font:inherit;color:var(--ink);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
 .textlink:hover{color:var(--muted)}
 

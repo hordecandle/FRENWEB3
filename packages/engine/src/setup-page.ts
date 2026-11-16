@@ -15,7 +15,7 @@ export const SETUP_PAGE = `<!doctype html>
 /* ===== Tokens (из site/public/styles.css лендинга, без изменений цвета) ===== */
 :root{
   --bg:#fff; --soft:#f5f5f5; --ink:#000; --ink-2:#2a2a2a; --muted:#5e5e5e; --faint:#cfcfcf; --line:#e3e3e3;
-  --blue:#a5caff; --ok:#1f8a4c; --bad:#b42318; --cta-gap:28px; --cap-gap:16px;
+  --blue:#a5caff; --ok:#1f8a4c; --bad:#b42318; --cta-gap:40px; --cap-gap:24px;
   --font:"Geologica",system-ui,sans-serif; --mono:ui-monospace,"SF Mono",Menlo,monospace;
   --r-btn:12px; --r-field:12px; --r-card:22px; --r-note:14px; --r-chip:999px;
   --sh-btn:2px 3px 0 var(--ink); --sh-btn-sm:1.5px 2px 0 var(--ink); --sh-card:4px 5px 0 var(--ink);
@@ -134,7 +134,9 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .hint{margin-top:10px;font-size:13px;color:var(--muted);font-weight:300}
 /* round 8: caption under a button = 16px, caption lines 8px apart */
 .actions + .hint,.actions + .msg,.actions + .err{margin-top:var(--cap-gap)}
-.hint + .hint{margin-top:8px}
+.hint + .hint{margin-top:12px}
+.hint{line-height:1.6}
+@media (width<480px){:root{--cta-gap:32px}}
 
 /* ===== Error details ===== */
 .details{margin-top:20px;border-top:1px solid var(--line);padding-top:14px}
