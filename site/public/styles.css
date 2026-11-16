@@ -310,6 +310,9 @@ html.is-revealing .hero .btn:nth-child(2) {
 html.is-revealing #hello .float__in {
   animation: helloIn 0.5s var(--spring) backwards 0.95s;
 }
+html.is-revealing .hero__chats {
+  animation: fadeUp 0.6s var(--ease) backwards 0.9s;
+}
 html.is-revealing .hint {
   animation: 0.6s 1.3s backwards fadeUp;
 }
@@ -521,7 +524,8 @@ html.is-catch .progress {
 html.is-loading .dotfield {
   opacity: 0 !important;
 }
-html.is-revealing .dotfield {
+/* the closing-scene dots stay hidden while the hero appears (they used to flash in the wrong place) */
+html.is-revealing .dotfield:not(.dotfield--fin) {
   animation: 1.2s 0.3s backwards fadeIn;
 }
 .dotfield--fin {
@@ -2069,3 +2073,4 @@ html.is-killed .plq {
 .hero .hero__sub{margin-bottom:48px}
 @media (width<480px){.hero .hero__sub{margin-bottom:36px}}
 .hero .hero__sub{max-width:38em}
+.steps5__paper{margin-top:24px}

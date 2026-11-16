@@ -68,7 +68,7 @@
             <use href="#fren-word" fill="currentColor" />
           </svg>
         </a>
-        <a class="btn btn--sm" href="vps/">Get your Fren</a>
+        <a class="btn btn--sm" href="#setup">Get your Fren</a>
       </div>
     </header>
     <main>
@@ -83,7 +83,7 @@
               Tell it what to trade in plain words, right in Telegram or WhatsApp. It runs on your own server, so your keys stay with you.
             </p>
             <div class="cta__buttons">
-              <a class="btn" href="vps/">Get your Fren&nbsp;→</a>
+              <a class="btn" href="#setup">Get your Fren&nbsp;→</a>
             </div>
             <p class="hero__chats"><span>$10/month</span></p>
                       </div>
@@ -261,7 +261,7 @@
                     </div>
                     <div class="chat__ctas">
                       <p class="chat__trust">Your keys · Your limits · Confirm codes · Kill switch</p>
-                      <a class="btn" href="vps/">Get your Fren&nbsp;→</a>
+                      <a class="btn" href="#setup">Get your Fren&nbsp;→</a>
                     </div>
                   </div>
                 </div>
@@ -289,9 +289,50 @@
             <li class="key"><b>AI brain</b><span>Get an AI key (we show you how). You pay the AI company directly, usually a few dollars a month.</span></li>
             <li><b>Chat</b><span>Pick Telegram or WhatsApp, then say gm.</span></li>
           </ol>
-          <div class="end"><a class="btn" href="vps/">Get your Fren&nbsp;→</a><small>Starts in paper mode: real prices, pretend money. No real money moves until you say so.</small></div>
+          <p class="steps5__limits steps5__paper">Starts in paper mode: real prices, pretend money. No real money moves until you say so.</p>
           <p class="steps5__limits">No ID needed. Nothing to install.</p>
           <p class="steps5__limits">Safe limits from day one: $500 a trade, 20x max leverage, and a confirm code for anything over $100. Change them whenever you want.</p>
+        </div>
+      </section>
+      <section class="setup" id="setup" aria-labelledby="setup-title">
+        <div class="wrap">
+          <p class="setup__eyebrow">Get your Fren</p>
+          <h2 class="setup__title" id="setup-title">Pick where your <span class="plq">Fren</span> lives.</h2>
+          <p class="setup__sub">
+            Fren runs on a machine you own, so your keys stay with you. Pick one, then text it on Telegram or WhatsApp.
+          </p>
+          <div class="setup__grid">
+            <article class="way way--vps">
+              <span class="way__tag">Easiest · always on</span>
+              <h3>On a cloud server</h3>
+              <p class="way__desc">
+                Runs 24/7, even when your laptop sleeps. We rent a server in your name for $10 a month (USDC, USDT,
+                BTC or XMR, no ID) and set Fren up for you. All in your browser.
+              </p>
+              <a class="btn btn--wide" href="vps/" id="vps-cta">Set up in your browser&nbsp;→</a>
+            </article>
+            <article class="way way--local">
+              <span class="way__tag">On your own computer</span>
+              <h3>On your computer</h3>
+              <p class="way__desc">
+                One command on Mac, Linux or Windows (WSL). No server fee. Fren runs while your computer is on, and asks
+                the same questions right in your terminal.
+              </p>
+              <div class="cmd">
+                <code class="cmd__text" id="cmd-text">curl -fsSL https://getfren.netlify.app/install.sh | bash</code>
+                <button type="button" class="cmd__copy" id="cmd-copy" aria-label="Copy install command">Copy</button>
+              </div>
+              <ol class="way__steps">
+                <li>Paste it in your terminal</li>
+                <li>Add your AI key, then pick Telegram or WhatsApp</li>
+                <li>Start in paper mode</li>
+              </ol>
+            </article>
+          </div>
+          <p class="setup__note">
+            Every Fren starts in paper mode with safe limits: $500 a trade, 20x max leverage, and a confirm code for
+            anything over $100. Change them whenever you want.
+          </p>
         </div>
       </section>
           </main>
