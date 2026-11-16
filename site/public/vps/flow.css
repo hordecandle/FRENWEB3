@@ -120,6 +120,8 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .progress{margin-top:16px;height:6px;border-radius:99px;background:var(--soft);overflow:hidden}
 .progress i{display:block;height:100%;width:62%;background:var(--ink);border-radius:99px}
 .hint{margin-top:10px;font-size:13px;color:var(--muted);font-weight:300}
+.textlink{background:none;border:0;padding:0;font:inherit;color:var(--ink);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.textlink:hover{color:var(--muted)}
 
 /* ===== Error details ===== */
 .details{margin-top:20px;border-top:1px solid var(--line);padding-top:14px}

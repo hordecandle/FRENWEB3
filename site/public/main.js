@@ -548,13 +548,26 @@
     cmd = document.getElementById("cmd-text");
   if (!btn || !cmd) return;
   btn.addEventListener("click", async () => {
+    const text = cmd.textContent.trim();
+    let ok = false;
     try {
-      await navigator.clipboard.writeText(cmd.textContent.trim());
-      btn.textContent = "Copied";
+      await navigator.clipboard.writeText(text);
+      ok = true;
     } catch {
-      getSelection().selectAllChildren(cmd);
-      btn.textContent = "Press ⌘C";
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      try {
+        ok = document.execCommand("copy");
+      } catch {}
+      ta.remove();
     }
-    setTimeout(() => (btn.textContent = "Copy"), 1800);
+    if (!ok) getSelection().selectAllChildren(cmd);
+    btn.textContent = ok ? "Copied" : "Select and copy";
+    setTimeout(() => (btn.textContent = "Copy"), 2000);
   });
 })();

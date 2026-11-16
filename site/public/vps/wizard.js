@@ -300,16 +300,33 @@
     }
   });
 
-  async function copy(btn, text) {
-    const label = btn.querySelector("span");
-    const was = label.textContent;
+  // http по IP (стенд) не даёт navigator.clipboard, поэтому запасной путь через выделение и execCommand
+  async function copyText(text) {
     try {
       await navigator.clipboard.writeText(text);
-      label.textContent = "Copied";
-    } catch {
-      label.textContent = "Press ⌘C";
-    }
-    setTimeout(() => (label.textContent = was), 1800);
+      return true;
+    } catch {}
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {}
+    ta.remove();
+    return ok;
+  }
+  async function copy(btn, text) {
+    const label = btn.querySelector("span");
+    const was = label.dataset.was || label.textContent;
+    label.dataset.was = was;
+    label.textContent = (await copyText(text)) ? "Copied" : "Select and copy";
+    clearTimeout(btn._t);
+    btn._t = setTimeout(() => (label.textContent = was), 2000);
   }
   $("copy-link").addEventListener("click", () => copy($("copy-link"), $("setup-link").href));
   $("copy-detail").addEventListener("click", () => copy($("copy-detail"), $("fail-detail").textContent + "\n" + location.href));
