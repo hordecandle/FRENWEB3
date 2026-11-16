@@ -2050,7 +2050,7 @@ html.is-killed .plq {
 .facts span{border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:500;background:var(--bg)}
 .hero__chats{margin:22px 0 0;display:flex;align-items:center;justify-content:center;gap:6px;font-size:14px;color:var(--muted)}
 .hero__chats .cta__ic{flex:none}
-.hero__chats span{margin-left:4px}
+.hero__chats>span{margin-left:4px}
 .steps5__limits{margin:18px 0 0;max-width:640px;color:var(--muted);font-size:13px;line-height:1.5}
 @media (width<860px){
   .chat__final{padding:18px 12px 22px}
@@ -2069,7 +2069,7 @@ html.is-killed .plq {
 .steps5 li span{display:block;margin-top:6px;color:var(--muted);font-size:14px;font-weight:300;line-height:1.5}
 .steps5 .end{margin-top:24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .steps5 .end small{color:var(--muted);font-size:14px}
-@media (width<480px){.hero__chats{font-size:13px;margin-top:18px}.hero__chats span{margin-left:0;white-space:nowrap}}
+@media (width<480px){.hero__chats{font-size:13px;margin-top:18px}.hero__chats span{margin-left:0}.hero__chats .nb{white-space:nowrap}.hero__chats>span{text-align:center}}
 .hero .hero__sub{margin-bottom:48px}
 @media (width<480px){.hero .hero__sub{margin-bottom:36px}}
 .hero .hero__sub{max-width:38em}
