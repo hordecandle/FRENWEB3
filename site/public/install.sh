@@ -310,7 +310,7 @@ if [ "\$(id -u)" = 0 ]; then
       # Setup writes the keys as $SERVICE_USER, then they're sealed away again.
       systemctl stop fren-openclaw.service fren.service 2>/dev/null
       if [ -f $SERVICE_HOME/.fren/engine.json ]; then "$NODE_BIN" "$FREN_CLI" isolate --agent-user $SERVICE_USER --undo || exit 1; fi
-      as_agent "\$@"; rc=\$?
+      as_agent "\$@" --server; rc=\$?
       "$NODE_BIN" "$FREN_CLI" isolate --agent-user $SERVICE_USER --service || exit 1
       systemctl restart fren-openclaw.service
       exit \$rc ;;
