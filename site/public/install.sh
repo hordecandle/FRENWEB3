@@ -14,6 +14,8 @@
 #   --ref REF      Branch or tag to install (default: main). Env: FREN_REF
 #   --repo URL     Git repository (default: GitHub). Env: FREN_REPO
 #   --dir DIR      Where the code goes (default: ~/.fren-app). Env: FREN_APP_DIR
+#   --tarball URL  Download this .tar.gz instead of using git (default when git
+#                  isn't usable, e.g. a Mac without developer tools). Env: FREN_TARBALL
 #   --web          With --server: serve the setup as a private HTTPS page
 #                  (https://<ip>.sslip.io/setup) instead of asking questions
 #                  here, and print its one-time link as FREN_SETUP_URL=...
@@ -27,6 +29,7 @@ main() {
 FREN_REPO="${FREN_REPO:-https://github.com/beeonchain/frenweb3.git}"
 FREN_REF="${FREN_REF:-main}"
 FREN_APP_DIR="${FREN_APP_DIR:-}"
+FREN_TARBALL="${FREN_TARBALL:-}"
 SERVER=0
 SETUP=1
 WEB=0
@@ -49,6 +52,7 @@ while [[ $# -gt 0 ]]; do
     --ref) FREN_REF="${2:?--ref needs a value}"; shift ;;
     --repo) FREN_REPO="${2:?--repo needs a value}"; shift ;;
     --dir) FREN_APP_DIR="${2:?--dir needs a value}"; shift ;;
+    --tarball) FREN_TARBALL="${2:?--tarball needs a value}"; shift ;;
     -h|--help) sed -n '2,20p' "$0" 2>/dev/null || true; exit 0 ;;
     *) die "Unknown option: $1 (try --help)" ;;
   esac
@@ -116,22 +120,31 @@ pkg_install() {
   fi
 }
 
+# git that actually works. On a Mac without the developer tools /usr/bin/git is
+# only a stub that pops up an installer; then Fren comes as a tarball instead.
+git_ok() {
+  have git || return 1
+  [[ $OS == macos ]] && ! xcode-select -p >/dev/null 2>&1 && return 1
+  return 0
+}
+
 step "Checking the basics"
 missing=()
-for t in git curl; do have "$t" || missing+=("$t"); done
+have curl || missing+=(curl)
+[[ $OS == linux ]] && ! have git && missing+=(git)
 if [[ $OS == linux ]] && ! have make; then
   # A few dependencies compile small native helpers.
   if have apt-get; then missing+=(build-essential); elif have apk; then missing+=(build-base); else missing+=(make gcc gcc-c++); fi
 fi
 if [[ ${#missing[@]} -gt 0 ]]; then
   if [[ $OS == macos ]]; then
-    have git || die "Install the Xcode command line tools first: xcode-select --install"
+    die "Fren needs ${missing[*]}. Install it and run this again."
   else
     echo "Installing ${missing[*]}…"
     pkg_install "${missing[@]}" ca-certificates || die "Couldn't install ${missing[*]}. Install them and run this again."
   fi
 fi
-echo "✓ git, curl"
+if git_ok; then echo "✓ git, curl"; else echo "✓ curl (no git: Fren comes as a download)"; fi
 
 if [[ $SERVER -eq 1 ]]; then
   if ! id "$SERVICE_USER" >/dev/null 2>&1; then
@@ -199,10 +212,29 @@ openclaw_ok() {
   [[ -n "$v" ]] && version_ge "$v" "$OPENCLAW_MIN"
 }
 
+# A Mac with Node from nodejs.org has a global npm folder only root can write
+# to, and OpenClaw's installer fixes that only on Linux (it fails with EACCES).
+# Same fix as OpenClaw's: global packages go to ~/.npm-global instead.
+NPM_PREFIX_CHANGED=0
+fix_npm_prefix() {
+  [[ $OS == macos ]] && have npm || return 0
+  local prefix
+  prefix="$(npm prefix -g 2>/dev/null)" || return 0
+  if [[ -d "$prefix/lib/node_modules" ]]; then [[ -w "$prefix/lib/node_modules" ]] && return 0
+  elif [[ -w "$prefix" ]]; then return 0; fi
+  mkdir -p "$HOME/.npm-global"
+  npm config set prefix "$HOME/.npm-global"
+  export NPM_CONFIG_PREFIX="$HOME/.npm-global"
+  PATH="$HOME/.npm-global/bin:$PATH"; export PATH
+  NPM_PREFIX_CHANGED=1
+  echo "✓ npm installs global tools into ~/.npm-global (the system folder needs an admin)"
+}
+
 step "Node and OpenClaw"
 add_node_paths
 pick_node || true
 if ! node_ok || ! openclaw_ok; then
+  fix_npm_prefix
   echo "Installing OpenClaw (and Node $NODE_MIN+ if needed) with OpenClaw's own installer…"
   # Locally it may ask before touching an existing nvm; on a server it just installs.
   oc_flags=(--no-onboard)
@@ -221,8 +253,26 @@ if [[ -z "$FREN_APP_DIR" ]]; then
   if [[ $SERVER -eq 1 ]]; then FREN_APP_DIR="$SERVICE_HOME/.fren-app"; else FREN_APP_DIR="$HOME/.fren-app"; fi
 fi
 
+if [[ -z "$FREN_TARBALL" ]] && ! git_ok; then
+  [[ "$FREN_REPO" =~ ^https://github\.com/([^/]+/[^/.]+)(\.git)?$ ]] \
+    || die "No git here and $FREN_REPO isn't on GitHub. Install git (on a Mac: xcode-select --install) and run this again."
+  FREN_TARBALL="https://codeload.github.com/${BASH_REMATCH[1]}/tar.gz/$FREN_REF"
+fi
+
 step "Downloading Fren ($FREN_REF)"
-if [[ -d "$FREN_APP_DIR/.git" ]]; then
+if [[ -n "$FREN_TARBALL" ]]; then
+  # A plain download, for machines without a working git.
+  if [[ -e "$FREN_APP_DIR" ]]; then
+    [[ -f "$FREN_APP_DIR/.fren-download" ]] || die "$FREN_APP_DIR exists but isn't a Fren download. Move it away or pass --dir."
+    rm -rf "$FREN_APP_DIR"
+  fi
+  [[ $SERVER -eq 1 ]] && install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$(dirname "$FREN_APP_DIR")"
+  as_fren mkdir -p "$FREN_APP_DIR"
+  curl -fsSL --max-time 300 "$FREN_TARBALL" | as_fren tar -xz -C "$FREN_APP_DIR" --strip-components 1 \
+    || die "Couldn't download Fren from $FREN_TARBALL."
+  printf '%s\n' "$FREN_TARBALL" | as_fren tee "$FREN_APP_DIR/.fren-download" >/dev/null
+  echo "✓ Downloaded $FREN_REF"
+elif [[ -d "$FREN_APP_DIR/.git" ]]; then
   as_fren git -C "$FREN_APP_DIR" fetch --quiet --depth 1 origin "$FREN_REF"
   as_fren git -C "$FREN_APP_DIR" checkout --quiet --force FETCH_HEAD
 else
@@ -231,7 +281,7 @@ else
   as_fren git clone --quiet --depth 1 --branch "$FREN_REF" "$FREN_REPO" "$FREN_APP_DIR" \
     || die "Couldn't download Fren from $FREN_REPO."
 fi
-echo "✓ $(as_fren git -C "$FREN_APP_DIR" log -1 --format='%h %s')"
+[[ -n "$FREN_TARBALL" ]] || echo "✓ $(as_fren git -C "$FREN_APP_DIR" log -1 --format='%h %s')"
 
 step "Building Fren (a couple of minutes)"
 (
@@ -260,17 +310,25 @@ EOF
 else
   mkdir -p "$HOME/.local/bin"
   FREN_BIN="$HOME/.local/bin/fren"
+  # OpenClaw by full path, so `fren` works in a new window whatever its PATH.
   cat >"$FREN_BIN" <<EOF
 #!/bin/sh
-exec "$NODE_BIN" "$FREN_CLI" "\$@"
+OPENCLAW_BIN="\${OPENCLAW_BIN:-$OPENCLAW_BIN}" exec "$NODE_BIN" "$FREN_CLI" "\$@"
 EOF
   chmod 755 "$FREN_BIN"
-  if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+  # A new Mac has no ~/.zshrc yet, and zsh is its shell: make one.
+  if [[ $OS == macos && ! -e "$HOME/.zshrc" ]]; then touch "$HOME/.zshrc"; fi
+  add_path_line() {
+    local dir="$1" rc
     for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
-      [[ -f "$rc" ]] && ! grep -q '.local/bin' "$rc" && printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >>"$rc"
+      if [[ -f "$rc" ]] && ! grep -qF "$dir" "$rc"; then
+        printf '\nexport PATH="$HOME/%s:$PATH"\n' "$dir" >>"$rc"
+      fi
     done
-    export PATH="$HOME/.local/bin:$PATH"
-  fi
+  }
+  add_path_line .local/bin
+  if [[ $NPM_PREFIX_CHANGED -eq 1 ]]; then add_path_line .npm-global/bin; fi
+  [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] || export PATH="$HOME/.local/bin:$PATH"
 fi
 echo "✓ fren command: $FREN_BIN"
 
