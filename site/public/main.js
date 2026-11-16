@@ -185,9 +185,9 @@
       F = 0.95 * s,
       M = 0.42 * s,
       C = H.length * M,
-      $ = o ? Math.min(0.8, (s - r - 150) / l) : Math.min(0.9, (s - r - 60) / l),
+      $ = o ? Math.min(0.9, (s - r - 190) / l) : Math.min(0.9, (s - r - 60) / l),
       E = (e - a * $) / 2,
-      k = o ? s - l * $ - 18 : r + (s - r - l * $) / 2,
+      k = o ? r + 170 : r + (s - r - l * $) / 2,
       S = 1.2 * s,
       A = s + v + b + F + C + S + 0.35 * s;
     f.style.height = A + "px";

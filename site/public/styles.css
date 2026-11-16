@@ -2048,10 +2048,22 @@ html.is-killed .plq {
 .hero__chats .cta__ic{flex:none}
 .hero__chats span{margin-left:4px}
 .steps5__limits{margin:18px 0 0;max-width:640px;color:var(--muted);font-size:13px;line-height:1.5}
-/* v3: the big closing heading is the one action of that screen */
+/* v3: the big closing heading is the one action of that screen; both halves react together */
 .scene.is-final .fin a{pointer-events:auto;color:inherit;text-decoration:none;cursor:pointer;border-radius:12px}
-.scene.is-final .fin a:hover{text-decoration:underline;text-decoration-thickness:.06em;text-underline-offset:.1em}
+.scene.is-final .fin:hover .fin__l,.scene.is-final .fin:hover .fin__r,
+.scene.is-final .fin:has(a:focus-visible) .fin__l,.scene.is-final .fin:has(a:focus-visible) .fin__r{text-decoration:underline;text-decoration-thickness:.06em;text-underline-offset:.1em}
+.fin__r .arr{transition:transform .2s var(--ease)}
+.scene.is-final .fin:hover .arr,.scene.is-final .fin:has(a:focus-visible) .arr{transform:translateX(7px)}
+.fin:has(a:focus-visible) .fin__l,.fin:has(a:focus-visible) .fin__r{outline:2px solid var(--ink);outline-offset:6px}
 .fin a:focus-visible{outline:2px solid var(--ink);outline-offset:6px}
+/* phone-sized screens: heading is also backed by a plain pill button under it */
+.fin__btn{display:none}
+@media (width<860px){
+  .scene.is-final .fin__btn{display:inline-flex;position:absolute;top:146px;left:0;right:0;margin:0 auto;width:max-content;white-space:nowrap;min-height:48px;font-size:17px;pointer-events:auto;animation:fadeUp .5s var(--ease) both .5s}
+  .chat__final{padding:18px 12px 22px}
+  .chat__say{max-width:100%;font-size:16px;padding:11px 14px 12px}
+  .chat__you{max-width:92%}
+}
 .steps5{padding:64px 0 72px;border-top:1px solid var(--line)}
 .steps5 h2{margin:0;font-size:clamp(28px,3.4vw,44px);font-weight:500;letter-spacing:-.03em}
 .steps5 .wrap>p{color:var(--muted);margin:10px 0 0;font-size:17px;font-weight:300}

@@ -144,7 +144,7 @@
     const name = document.createElement("b");
     name.textContent = "Fren server";
     const spec = document.createElement("small");
-    spec.textContent = "Sized for Fren · own address · stop anytime";
+    spec.textContent = "Sized for Fren · own\u00a0address · stop\u00a0anytime";
     left.append(name, spec);
     const price = document.createElement("div");
     price.className = "price";
