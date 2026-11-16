@@ -1,12 +1,17 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { readKeystoreAddresses } from "@fren/signer";
 import { frenPaths, initFren, loadConfig, parseNotify } from "./config.js";
 import { startDaemon } from "./daemon.js";
-import { runSetup, systemSetupDeps } from "./setup.js";
+import { ENGINE_USER, isolate, isolatedEngineUnit } from "./isolate.js";
+import { isolatedMarker, runSetup, systemSetupDeps } from "./setup.js";
 import { serveSetup } from "./setup-web.js";
 import { serveBotBroker } from "./managed-bot.js";
+import type { Runner } from "./setup.js";
 
 const HELP = `fren: self-hosted on-chain trading agent backend
 
@@ -32,6 +37,11 @@ const HELP = `fren: self-hosted on-chain trading agent backend
       Print wallet addresses.
   fren status
       Ask the running engine for positions and watched conditions.
+  sudo fren isolate [--agent-user U] [--service] [--undo]
+      Linux: move the keystore, passphrase, database and config to a separate
+      system user (fren-engine) that the AI agent's user can't read; the agent
+      keeps only a copy of the API token. --service runs the engine as that
+      user under systemd. --undo moves the files back (to run setup again).
 `;
 
 async function main() {
@@ -114,21 +124,115 @@ Next: \`fren start\`, then install the OpenClaw plugin (see README), or run \`fr
     case "start":
       await startDaemon(paths);
       return;
+    case "isolate": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          "agent-user": { type: "string" },
+          "engine-user": { type: "string" },
+          undo: { type: "boolean", default: false },
+          service: { type: "boolean", default: false },
+        },
+      });
+      const agentUser = values["agent-user"] ?? process.env.SUDO_USER ?? "fren";
+      const agentHome = execFileSync("getent", ["passwd", agentUser], { encoding: "utf8" }).split(":")[5]!;
+      const deps = systemSetupDeps(paths);
+      const engineUser = values["engine-user"] ?? ENGINE_USER;
+      const res = await isolate(
+        { run: deps.run, say: (t) => console.log(t), uid: process.getuid?.() ?? -1, platform: process.platform },
+        { agentUser, agentHome, engineUser, undo: values.undo ?? false },
+      );
+      if (values.service && !values.undo) await installIsolatedService(deps.run, agentUser, engineUser, res.engineFrenHome);
+      return;
+    }
     case "wallet": {
+      if (isolatedMarker(paths)) {
+        // The keystore is the engine user's now: ask the engine.
+        console.log(await askEngine(paths, "/wallet"));
+        return;
+      }
       const a = readKeystoreAddresses(paths.keystore);
       console.log(`Solana: ${a.solana}\nEVM:    ${a.evm}\nAgent:  ${a.hlAgent}`);
       return;
     }
-    case "status": {
-      const cfg = loadConfig(paths);
-      const token = readFileSync(paths.apiToken, "utf8").trim();
-      const res = await fetch(`http://${cfg.api.host}:${cfg.api.port}/status`, { headers: { authorization: `Bearer ${token}` } });
-      console.log(((await res.json()) as { text: string }).text);
+    case "status":
+      console.log(await askEngine(paths, "/status"));
       return;
-    }
     default:
       console.log(HELP);
   }
+}
+
+async function askEngine(paths: ReturnType<typeof frenPaths>, route: string): Promise<string> {
+  const cfg = loadConfig(paths); // after `fren isolate` there's no config here: defaults
+  const token = readFileSync(paths.apiToken, "utf8").trim();
+  const res = await fetch(`http://${cfg.api.host}:${cfg.api.port}${route}`, { headers: { authorization: `Bearer ${token}` } });
+  return ((await res.json()) as { text: string }).text;
+}
+
+/**
+ * Root-owned code only: the engine must not run a node or a Fren that the
+ * agent's user can rewrite, or that user gets the keys anyway. A runtime that
+ * isn't root-owned all the way up is copied to /opt/fren first.
+ */
+async function installIsolatedService(run: Runner, agentUser: string, engineUser: string, engineFrenHome: string) {
+  const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  let node = process.execPath;
+  let cli = join(appDir, "packages/engine/dist/cli.js");
+  if (!rootOwned(node) || !rootOwned(appDir)) {
+    await mustRun(run, "rm", ["-rf", "/opt/fren"]);
+    await mustRun(run, "mkdir", ["-p", "/opt/fren/bin"]);
+    await mustRun(run, "cp", [node, "/opt/fren/bin/node"]);
+    await mustRun(run, "cp", ["-a", appDir, "/opt/fren/app"]);
+    await mustRun(run, "chown", ["-R", "root:root", "/opt/fren"]);
+    await mustRun(run, "chmod", ["-R", "go-w,a+rX", "/opt/fren"]);
+    node = "/opt/fren/bin/node";
+    cli = "/opt/fren/app/packages/engine/dist/cli.js";
+    console.log("✓ Copied Fren and Node to /opt/fren (root-owned: the agent's user can't change what the engine runs)");
+  }
+  // The engine sends WhatsApp and other gateway messages with `openclaw`; only a
+  // root-owned one goes on its PATH (else the plugin delivers them instead).
+  const dirs = [dirname(node)];
+  const oc = whichRootOwned("openclaw");
+  if (oc) dirs.push(dirname(oc));
+  const pathEnv = [...dirs, "/usr/local/bin", "/usr/bin", "/bin"].join(":");
+  const engineHome = dirname(engineFrenHome);
+  writeFileSync("/etc/systemd/system/fren.service", isolatedEngineUnit({ node, cli, pathEnv, engineUser, engineHome }));
+  // A desktop install had the engine as a user service: that one stops for good.
+  const uid = execFileSync("id", ["-u", agentUser], { encoding: "utf8" }).trim();
+  await run("runuser", ["-u", agentUser, "--", "env", `XDG_RUNTIME_DIR=/run/user/${uid}`, "systemctl", "--user", "disable", "--now", "fren.service"]);
+  await mustRun(run, "systemctl", ["daemon-reload"]);
+  await mustRun(run, "systemctl", ["enable", "fren.service"]);
+  await mustRun(run, "systemctl", ["restart", "fren.service"]);
+  console.log(`✓ Fren engine runs as ${engineUser} (systemd: fren.service)`);
+}
+
+function whichRootOwned(bin: string): string | null {
+  for (const dir of (process.env.PATH ?? "").split(":")) {
+    if (!dir) continue;
+    try {
+      const p = join(dir, bin);
+      statSync(p);
+      return rootOwned(p) && rootOwned(realpathSync(p)) ? p : null;
+    } catch {
+      /* not here */
+    }
+  }
+  return null;
+}
+
+/** The path and every folder above it belong to root and only root can write them. */
+function rootOwned(p: string): boolean {
+  for (let cur = resolve(p); ; cur = dirname(cur)) {
+    const st = statSync(cur);
+    if (st.uid !== 0 || (st.mode & 0o022) !== 0) return false;
+    if (cur === "/") return true;
+  }
+}
+
+async function mustRun(run: Runner, file: string, args: string[]) {
+  const r = await run(file, args);
+  if (r.code !== 0) throw new Error(`${file} ${args.join(" ")} failed: ${(r.stderr || r.stdout).trim()}`);
 }
 
 main().catch((err: Error) => {

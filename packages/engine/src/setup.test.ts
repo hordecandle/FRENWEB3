@@ -114,6 +114,12 @@ describe("fren setup", () => {
     expect(runs).toContain(`openclaw config set commands.ownerAllowFrom ["telegram:777000123"]`);
     expect(runs).toContain(`openclaw channels add --channel telegram --token ${TOKEN}`);
     expect(runs).toContain("openclaw plugins install --link --accept-capabilities --force /app/packages/openclaw-plugin");
+    // C1: the agent gets chat and Fren's tools, no shell, files, browser or admin.
+    expect(runs).toContain(`openclaw config set tools.profile "messaging"`);
+    expect(runs).toContain(`openclaw config set tools.alsoAllow ["fren","web_search"]`);
+    const deny = runs.find((r) => r.startsWith("openclaw config set tools.deny "));
+    expect(JSON.parse(deny!.slice("openclaw config set tools.deny ".length))).toEqual(expect.arrayContaining(["group:runtime", "group:fs", "group:automation"]));
+    expect(runs).toContain("openclaw config set tools.elevated.enabled false");
     // Server mode: the VPS installer owns the services.
     expect(runs.some((r) => r.startsWith("systemctl") || r.startsWith("openclaw daemon"))).toBe(false);
 

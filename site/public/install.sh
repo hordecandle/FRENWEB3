@@ -300,9 +300,22 @@ if [[ $SERVER -eq 1 ]]; then
   FREN_BIN=/usr/local/bin/fren
   cat >"$FREN_BIN" <<EOF
 #!/bin/sh
-# Fren runs as the $SERVICE_USER user; this wrapper switches to it.
+# Fren's agent side runs as $SERVICE_USER, the engine and its keys as fren-engine
+# (\`fren isolate\`); as root this wrapper switches to the right one.
 if [ "\$(id -u)" = 0 ]; then
-  exec runuser -u $SERVICE_USER -- env HOME=$SERVICE_HOME PATH="$PATH" "$NODE_BIN" "$FREN_CLI" "\$@"
+  as_agent() { runuser -u $SERVICE_USER -- env HOME=$SERVICE_HOME PATH="$PATH" "$NODE_BIN" "$FREN_CLI" "\$@"; }
+  case "\$1" in
+    isolate) shift; exec "$NODE_BIN" "$FREN_CLI" isolate --agent-user $SERVICE_USER "\$@" ;;
+    setup)
+      # Setup writes the keys as $SERVICE_USER, then they're sealed away again.
+      systemctl stop fren-openclaw.service fren.service 2>/dev/null
+      if [ -f $SERVICE_HOME/.fren/engine.json ]; then "$NODE_BIN" "$FREN_CLI" isolate --agent-user $SERVICE_USER --undo || exit 1; fi
+      as_agent "\$@"; rc=\$?
+      "$NODE_BIN" "$FREN_CLI" isolate --agent-user $SERVICE_USER --service || exit 1
+      systemctl restart fren-openclaw.service
+      exit \$rc ;;
+  esac
+  as_agent "\$@"; exit \$?
 fi
 exec "$NODE_BIN" "$FREN_CLI" "\$@"
 EOF
@@ -337,7 +350,8 @@ echo "✓ fren command: $FREN_BIN"
 write_server_units() {
   local path_env
   path_env="$(dirname "$NODE_BIN"):$(dirname "$OPENCLAW_BIN"):/usr/local/bin:/usr/bin:/bin"
-  cat >/etc/systemd/system/fren.service <<EOF
+  # Once the keys are sealed (\`fren isolate\`), fren.service is its unit: keep it.
+  [[ -f "$SERVICE_HOME/.fren/engine.json" ]] || cat >/etc/systemd/system/fren.service <<EOF
 [Unit]
 Description=Fren engine (policy, signer, watcher)
 After=network-online.target
@@ -369,6 +383,9 @@ Environment=PATH=$path_env
 ExecStart=$OPENCLAW_BIN gateway run
 Restart=always
 RestartSec=5
+# The AI agent never sees the engine's keys, not even with a bug in its tools.
+InaccessiblePaths=-/var/lib/fren-engine
+NoNewPrivileges=yes
 
 [Install]
 WantedBy=multi-user.target
@@ -452,7 +469,7 @@ Description=Start Fren and close the setup page
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'sleep 3; systemctl disable --now fren-setup.service fren-setup-caddy.service fren-setup-done.path; rm -f /etc/fren/setup.env; systemctl enable --now fren.service; systemctl enable fren-openclaw.service; systemctl restart fren-openclaw.service'
+ExecStart=/bin/sh -c 'sleep 3; systemctl disable --now fren-setup.service fren-setup-caddy.service fren-setup-done.path; rm -f /etc/fren/setup.env; $NODE_BIN $FREN_CLI isolate --agent-user $SERVICE_USER --service || exit 1; systemctl enable fren-openclaw.service; systemctl restart fren-openclaw.service'
 UNIT
   write_server_units
   systemctl enable --now fren-setup-done.path fren-setup.service fren-setup-caddy.service >/dev/null 2>&1
@@ -502,9 +519,13 @@ step "Setup"
 if [[ $SERVER -eq 1 ]]; then
   # OpenClaw and Fren don't need to be running while you answer.
   systemctl stop fren-openclaw.service fren.service 2>/dev/null || true
+  if [[ -f "$SERVICE_HOME/.fren/engine.json" ]]; then
+    "$NODE_BIN" "$FREN_CLI" isolate --agent-user "$SERVICE_USER" --undo || die "Couldn't bring Fren's files back for setup."
+  fi
   runuser -u "$SERVICE_USER" -- env HOME="$SERVICE_HOME" PATH="$PATH" "$NODE_BIN" "$FREN_CLI" setup --server </dev/tty
   write_server_units
-  systemctl enable --now fren.service >/dev/null 2>&1
+  # The engine and its keys move to their own user; the AI agent can't read them.
+  "$NODE_BIN" "$FREN_CLI" isolate --agent-user "$SERVICE_USER" --service || die "Couldn't lock Fren's keys away from the AI agent. Fren wasn't started."
   systemctl enable fren-openclaw.service >/dev/null 2>&1
   systemctl restart fren-openclaw.service
   sleep 3
@@ -517,6 +538,16 @@ if [[ $SERVER -eq 1 ]]; then
   echo "  Status:  fren status"
 else
   "$NODE_BIN" "$FREN_CLI" setup </dev/tty
+  # Linux: the engine and its keys can move to their own user, so the AI agent
+  # running as you can't read them. Needs sudo once; skipped if you say no.
+  if [[ $OS == linux ]] && have sudo && have systemctl && [[ -f "$HOME/.fren/keystore.json" ]]; then
+    printf '\nLock your wallet keys away from the AI under a separate system user? Needs your sudo password once. [Y/n] '
+    read -r ans </dev/tty || ans=n
+    if [[ ! "$ans" =~ ^[Nn] ]]; then
+      sudo "$NODE_BIN" "$FREN_CLI" isolate --agent-user "$(id -un)" --service \
+        || warn "Didn't lock the keys away. Fren still runs as you; try later with: sudo $FREN_BIN isolate --service"
+    fi
+  fi
 fi
 }
 

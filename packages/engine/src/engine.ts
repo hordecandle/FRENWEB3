@@ -72,6 +72,9 @@ export interface OwnerRequestResult {
 
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
+/** Wrong /ok codes in a row before every waiting code is dropped. */
+export const WRONG_CODE_LIMIT = 5;
+
 function newCode(): string {
   const bytes = randomBytes(6);
   return Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
@@ -248,10 +251,28 @@ export class Fren {
     return { text: `Reply /ok <code> with the code I just sent you to go ahead.`, codeSentPrivately: false, ownerCode: code };
   }
 
-  /** The /ok command. Codes only ever reach the owner, so this is the owner speaking. */
+  /** Wrong /ok codes in a row; see approve(). */
+  private wrongCodes = 0;
+
+  /**
+   * The /ok command. Codes only ever reach the owner, so this is the owner speaking.
+   * Guessing is cut off: after WRONG_CODE_LIMIT wrong codes in a row every
+   * waiting code is dropped and the owner is told on their private line.
+   */
   async approve(code: string): Promise<string> {
     const p = this.d.store.takePending(code.trim().toUpperCase());
-    if (!p) return "That code is wrong or expired.";
+    if (!p) {
+      if (++this.wrongCodes >= WRONG_CODE_LIMIT) {
+        this.wrongCodes = 0;
+        this.d.store.dropAllPending();
+        await this.d.notifier
+          .sendPrivate(`⚠️ ${WRONG_CODE_LIMIT} wrong /ok codes in a row. To be safe I cancelled every request that was waiting for a code. If that wasn't you, send /stop.`)
+          .catch(() => false);
+        return "Too many wrong codes. Every request waiting for a code was cancelled; ask again for a new one.";
+      }
+      return "That code is wrong or expired.";
+    }
+    this.wrongCodes = 0;
     if (p.kind === "limits") {
       // Only the fields the owner asked to change, laid over the limits as they
       // are now. A code issued earlier never undoes a later /stop or a later

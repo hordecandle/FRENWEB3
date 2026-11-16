@@ -160,6 +160,29 @@ describe("paper trading end to end", () => {
     expect(code).toBeTruthy();
   });
 
+  it("five wrong /ok codes in a row drop every waiting code and warn the owner (C1)", async () => {
+    await t.fren.changeLimits("maxTradeUsd=5000");
+    const real = codeFrom(t.notifier);
+    for (let i = 0; i < 4; i++) expect(await t.fren.approve("ZZZZZZ")).toMatch(/wrong or expired/);
+    expect(await t.fren.approve("ZZZZZZ")).toMatch(/Too many wrong codes/);
+    expect(t.notifier.sent.at(-1)).toMatch(/wrong \/ok codes in a row/);
+    // The real code died with the lockout.
+    expect(await t.fren.approve(real)).toMatch(/wrong or expired/);
+    expect(t.fren.limits().maxTradeUsd).not.toBe(5000);
+  });
+
+  it("a right code resets the wrong-code count", async () => {
+    for (let i = 0; i < 4; i++) await t.fren.approve("ZZZZZZ");
+    await t.fren.changeLimits("maxTradeUsd=5000");
+    await t.fren.approve(codeFrom(t.notifier));
+    expect(t.fren.limits().maxTradeUsd).toBe(5000);
+    await t.fren.changeLimits("maxTradeUsd=6000");
+    const code = codeFrom(t.notifier);
+    for (let i = 0; i < 4; i++) await t.fren.approve("ZZZZZZ");
+    await t.fren.approve(code);
+    expect(t.fren.limits().maxTradeUsd).toBe(6000);
+  });
+
   it("buys a verified token by ticker, refuses an ambiguous unverified ticker, and flags an unverified CA", async () => {
     const buy = (token: string, usd = 20) => ({
       request: `buy ${token}`,
