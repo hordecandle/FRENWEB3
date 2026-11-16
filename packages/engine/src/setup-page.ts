@@ -15,7 +15,7 @@ export const SETUP_PAGE = `<!doctype html>
 /* ===== Tokens (из site/public/styles.css лендинга, без изменений цвета) ===== */
 :root{
   --bg:#fff; --soft:#f5f5f5; --ink:#000; --ink-2:#2a2a2a; --muted:#5e5e5e; --faint:#cfcfcf; --line:#e3e3e3;
-  --blue:#a5caff; --ok:#1f8a4c; --bad:#b42318;
+  --blue:#a5caff; --ok:#1f8a4c; --bad:#b42318; --cta-gap:28px;
   --font:"Geologica",system-ui,sans-serif; --mono:ui-monospace,"SF Mono",Menlo,monospace;
   --r-btn:12px; --r-field:12px; --r-card:22px; --r-note:14px; --r-chip:999px;
   --sh-btn:2px 3px 0 var(--ink); --sh-btn-sm:1.5px 2px 0 var(--ink); --sh-card:4px 5px 0 var(--ink);
@@ -74,7 +74,7 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .plq{background:var(--blue);border-radius:.22em;padding:0 .22em .06em;display:inline-block;line-height:1.05}
 
 /* ===== Buttons ===== */
-.actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:26px}
+.actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:var(--cta-gap)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:48px;padding:11px 22px;border:1px solid var(--ink);border-radius:var(--r-btn);background:var(--blue);color:var(--ink);box-shadow:var(--sh-btn);font:inherit;font-size:16px;font-weight:500;letter-spacing:-.01em;text-decoration:none;cursor:pointer;transition:transform .12s,box-shadow .12s}
 .btn:hover{transform:translate(1px,1.5px);box-shadow:1px 1.5px 0 var(--ink)}
 .btn:active{transform:translate(2px,3px);box-shadow:0 0 0 var(--ink)}
@@ -140,12 +140,12 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .details summary .ic{width:16px;height:16px;transition:transform .2s var(--ease)}
 .details[open] summary .ic{transform:rotate(180deg)}
 .details pre{margin:12px 0 0;max-height:180px;overflow:auto;background:var(--soft);border-radius:10px;padding:12px 14px;font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--ink-2);white-space:pre-wrap}
-.details .btn{margin-top:12px}
+.details .btn{margin-top:var(--cta-gap)}
 
 /* ===== Ready mark ===== */
 .badge-ok{display:inline-grid;place-items:center;width:52px;height:52px;border-radius:50%;background:var(--blue);border:1px solid var(--ink);box-shadow:var(--sh-btn-sm);margin-bottom:18px}
 .badge-ok .ic{width:26px;height:26px;stroke-width:2.2}
-.copyrow{display:flex;gap:8px;margin-top:14px;align-items:stretch}
+.copyrow{display:flex;gap:8px;margin-top:var(--cta-gap);align-items:stretch}
 .copyrow .url{flex:1;min-width:0;font-family:var(--mono);font-size:13px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ===== Choice tiles (provider, chat) ===== */
@@ -179,7 +179,7 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .handle .av{width:44px;height:44px;border-radius:50%;background:var(--ink);display:grid;place-items:center}
 .handle .av svg{width:26px;fill:#fff}
 .handle b{font-size:clamp(20px,2.6vw,26px);font-weight:600;letter-spacing:-.02em}
-.final .actions{justify-content:center;margin-top:28px}
+.final .actions{justify-content:center}
 .say{margin:40px auto 0;max-width:420px;text-align:left}
 .say h3{font-size:14px;font-weight:500;text-align:center;margin-top:26px;color:var(--muted)}
 .say h3:first-child{margin-top:0}
@@ -248,7 +248,7 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
       <p class="lead">Fren thinks with an AI model. You add your own AI key, so you pay the AI company directly for what you use and nobody in between sees your chats.</p>
       <label class="field"><span>AI company</span><select id="provider"></select></label>
       <ol class="how" id="how"></ol>
-      <div class="actions" style="margin-top:14px"><a class="btn btn--2 btn--sm" id="keylink" target="_blank" rel="noopener"><svg class="ic ic--s"><use href="#i-key"/></svg><span id="keylink-text">Get a key</span><svg class="ic ic--s"><use href="#i-ext"/></svg></a></div>
+      <div class="actions"><a class="btn btn--2 btn--sm" id="keylink" target="_blank" rel="noopener"><svg class="ic ic--s"><use href="#i-key"/></svg><span id="keylink-text">Get a key</span><svg class="ic ic--s"><use href="#i-ext"/></svg></a></div>
       <label class="field" id="key-field"><span>AI key</span><input id="apikey" type="password" autocomplete="off" placeholder="Paste it here"><small>Stays on your server. We check it works with one tiny request.</small></label>
       <p class="msg msg--bad hidden" id="model-bad"><svg class="ic"><use href="#i-alert"/></svg><span id="model-err"></span></p>
       <div class="actions"><button class="btn" id="model-save">Check and save<svg class="ic"><use href="#i-arrow"/></svg></button></div>
@@ -327,7 +327,7 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
       <span class="lbl">Arbitrum and Base · perps, bets and coins on these chains</span><div class="addr" id="a-evm"></div>
       <p class="hint">To trade for real later: send USDC here, plus a little SOL and a little ETH (on Arbitrum or Base) to pay network fees.</p>
       <div class="note"><svg class="ic"><use href="#i-dl"/></svg><span><b>Download your backup.</b> It's the only copy of your keys off this server. Lose the server without it, and the money in these wallets is gone.</span></div>
-      <div class="actions" style="margin-top:14px"><a class="btn btn--2 btn--sm" href="/api/backup" id="backup"><svg class="ic ic--s"><use href="#i-dl"/></svg>Download wallet backup</a></div>
+      <div class="actions"><a class="btn btn--2 btn--sm" href="/api/backup" id="backup"><svg class="ic ic--s"><use href="#i-dl"/></svg>Download wallet backup</a></div>
       <label class="check"><input type="checkbox" id="saved"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span>I saved my backup somewhere safe and offline.</label>
       <div class="actions"><button class="btn" id="go" disabled>Start Fren<svg class="ic"><use href="#i-arrow"/></svg></button><span class="waitbox" id="go-hint"><svg class="ic ic--s"><use href="#i-check"/></svg>Tick the box above to continue</span></div>
       <p class="err" id="w-err"></p>

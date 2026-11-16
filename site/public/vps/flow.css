@@ -7,7 +7,7 @@
   --r-btn:12px; --r-field:12px; --r-card:22px; --r-note:14px; --r-chip:999px;
   --sh-btn:2px 3px 0 var(--ink); --sh-btn-sm:1.5px 2px 0 var(--ink); --sh-card:4px 5px 0 var(--ink);
   --ease:cubic-bezier(.2,.8,.2,1);
-  --header:64px; --page:640px; --wide:1120px;
+  --header:64px; --cta-gap:28px; --page:640px; --wide:1120px;
 }
 *,:before,:after{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;font-size:16px}
@@ -62,7 +62,7 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .plq{background:var(--blue);border-radius:.22em;padding:0 .22em .06em;display:inline-block;line-height:1.05}
 
 /* ===== Buttons ===== */
-.actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:26px}
+.actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:var(--cta-gap)}
 [hidden]{display:none!important}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:48px;padding:11px 22px;border:1px solid var(--ink);border-radius:var(--r-btn);background:var(--blue);color:var(--ink);box-shadow:var(--sh-btn);font:inherit;font-size:16px;font-weight:500;letter-spacing:-.01em;text-decoration:none;cursor:pointer;transition:transform .12s,box-shadow .12s}
 .btn:hover{transform:translate(1px,1.5px);box-shadow:1px 1.5px 0 var(--ink)}
@@ -128,12 +128,12 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .details summary .ic{width:16px;height:16px;transition:transform .2s var(--ease)}
 .details[open] summary .ic{transform:rotate(180deg)}
 .details pre{margin:12px 0 0;max-height:180px;overflow:auto;background:var(--soft);border-radius:10px;padding:12px 14px;font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--ink-2);white-space:pre-wrap}
-.details .btn{margin-top:12px}
+.details .btn{margin-top:var(--cta-gap)}
 
 /* ===== Ready mark ===== */
 .badge-ok{display:inline-grid;place-items:center;width:52px;height:52px;border-radius:50%;background:var(--blue);border:1px solid var(--ink);box-shadow:var(--sh-btn-sm);margin-bottom:18px}
 .badge-ok .ic{width:26px;height:26px;stroke-width:2.2}
-.copyrow{display:flex;gap:8px;margin-top:14px;align-items:stretch}
+.copyrow{display:flex;gap:8px;margin-top:var(--cta-gap);align-items:stretch}
 .copyrow .url{flex:1;min-width:0;font-family:var(--mono);font-size:13px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ===== Choice tiles (provider, chat) ===== */
@@ -167,7 +167,7 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .handle .av{width:44px;height:44px;border-radius:50%;background:var(--ink);display:grid;place-items:center}
 .handle .av svg{width:26px;fill:#fff}
 .handle b{font-size:clamp(20px,2.6vw,26px);font-weight:600;letter-spacing:-.02em}
-.final .actions{justify-content:center;margin-top:28px}
+.final .actions{justify-content:center}
 .say{margin:40px auto 0;max-width:420px;text-align:left}
 .say h3{font-size:14px;font-weight:500;text-align:center;margin-top:26px;color:var(--muted)}
 .tries{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:12px}
