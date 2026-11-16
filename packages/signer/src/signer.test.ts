@@ -63,6 +63,29 @@ describe("hyperliquid rules", () => {
     await expect(signer.hlDepositFromArbitrum({ amountUsd: 4, isTestnet: true })).rejects.toThrow(/at least 5 USDC/);
   });
 
+  it("withdraws from Hyperliquid only to its own address, and only above the fee", async () => {
+    const keys = generateKeys();
+    const s = createSigner(keys);
+    const res = await s.hlWithdrawToSelf({ amountUsd: 7.5, isTestnet: false });
+    expect(res.action).toMatchObject({ type: "withdraw3", hyperliquidChain: "Mainnet", destination: addressesOf(keys).evm.toLowerCase(), amount: "7.5" });
+    const { recoverTypedDataAddress } = await import("viem");
+    const { Withdraw3Types } = await import("@nktkas/hyperliquid/api/exchange");
+    const sig = res.signature;
+    const signer = await recoverTypedDataAddress({
+      domain: { name: "HyperliquidSignTransaction", version: "1", chainId: 0xa4b1, verifyingContract: "0x0000000000000000000000000000000000000000" },
+      types: Withdraw3Types,
+      primaryType: "HyperliquidTransaction:Withdraw",
+      message: { hyperliquidChain: "Mainnet", destination: res.action.destination, amount: "7.5", time: BigInt(res.nonce) },
+      signature: { r: sig.r, s: sig.s, v: BigInt(sig.v) },
+    });
+    expect(signer.toLowerCase()).toBe(addressesOf(keys).evm.toLowerCase());
+    await expect(s.hlWithdrawToSelf({ amountUsd: 1, isTestnet: true })).rejects.toThrow(/fee/);
+    await expect(s.hlWithdrawToSelf({ amountUsd: Number.NaN, isTestnet: true })).rejects.toThrow(/fee/);
+    // Extra fields can't redirect it: the request type has no destination, and one passed anyway is ignored.
+    const sneaky = await s.hlWithdrawToSelf({ amountUsd: 3, isTestnet: true, destination: "0x000000000000000000000000000000000000dead" } as never);
+    expect(sneaky.action.destination).toBe(addressesOf(keys).evm.toLowerCase());
+  });
+
   it("only approves its own agent", async () => {
     const keys = generateKeys();
     const res = await createSigner(keys).hlApproveAgent({ isTestnet: true });

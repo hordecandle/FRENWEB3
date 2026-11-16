@@ -1,7 +1,7 @@
 import { Connection, Keypair, VersionedTransaction } from "@solana/web3.js";
 import { privateKeyToAccount } from "viem/accounts";
 import { signL1Action, signUserSignedAction, type Signature } from "@nktkas/hyperliquid/signing";
-import { ApproveAgentTypes } from "@nktkas/hyperliquid/api/exchange";
+import { ApproveAgentTypes, Withdraw3Types } from "@nktkas/hyperliquid/api/exchange";
 import { depositToHyperliquid } from "./arbitrum.js";
 import { sendEvmTransaction, type EvmTxRequest } from "./evm.js";
 import {
@@ -16,7 +16,7 @@ import {
 } from "./derive.js";
 import { signPolymarketTypedData, type PolyTypedData } from "./polymarket.js";
 import { addressesOf, type Addresses, type KeyMaterial } from "./keystore.js";
-import { checkHyperliquidAction, checkSolanaTransaction, type SolanaTxReport } from "./rules.js";
+import { checkHyperliquidAction, checkSolanaTransaction, SignerRuleError, type SolanaTxReport } from "./rules.js";
 import { fetchLookupTables, simulateAndCheck } from "./solana-sim.js";
 
 export type { Signature };
@@ -55,6 +55,12 @@ export interface SignerApi {
   solSignTransaction(req: SolSignRequest): Promise<SolSignResult>;
   /** Move USDC from the wallet's own Arbitrum address into its own Hyperliquid account. */
   hlDepositFromArbitrum(req: { amountUsd: number; isTestnet: boolean }): Promise<{ txHash: `0x${string}` }>;
+  /**
+   * Withdraw USDC from the wallet's own Hyperliquid account to the same
+   * address on Arbitrum. The destination is fixed in the signer; the engine
+   * only chooses the amount. Returns the signed action for the engine to post.
+   */
+  hlWithdrawToSelf(req: { amountUsd: number; isTestnet: boolean }): Promise<HlApproveAgentResult>;
   /** Send an EVM transaction to an allow-listed contract (Relay swaps and their approvals). Never carries ETH. */
   evmSendTransaction(req: EvmTxRequest): Promise<{ txHash: `0x${string}` }>;
   /** Sign a Derive option order with the session key. The signer builds the action; it can only be a trade. */
@@ -84,6 +90,9 @@ export interface SignerOptions {
 }
 
 export const HL_AGENT_NAME = "fren";
+
+/** Hyperliquid charges 1 USDC per withdrawal; anything at or under it would arrive as nothing. */
+export const HL_WITHDRAW_FEE_USD = 1;
 
 /** Arbitrum One and Arbitrum Sepolia chain ids, matching the daemon's `evmRpcsById`. */
 const ARBITRUM_CHAIN_ID = { mainnet: 42161, testnet: 421614 } as const;
@@ -150,6 +159,24 @@ export function createSigner(keys: KeyMaterial, options: SignerOptions = {}): Si
 
     async hlDepositFromArbitrum({ amountUsd, isTestnet }) {
       return { txHash: await depositToHyperliquid(master, amountUsd, isTestnet, hlDepositRpcUrl(options, isTestnet)) };
+    },
+
+    async hlWithdrawToSelf({ amountUsd, isTestnet }) {
+      if (!(Number.isFinite(amountUsd) && amountUsd > HL_WITHDRAW_FEE_USD)) {
+        throw new SignerRuleError(`Hyperliquid withdrawals must be more than its ${HL_WITHDRAW_FEE_USD} USDC fee.`);
+      }
+      // The master key signs a withdrawal only to itself: the destination is not a parameter.
+      const nonce = Date.now();
+      const action = {
+        type: "withdraw3",
+        signatureChainId: (isTestnet ? "0x66eee" : "0xa4b1") as `0x${string}`,
+        hyperliquidChain: isTestnet ? "Testnet" : "Mainnet",
+        destination: master.address.toLowerCase(),
+        amount: String(Math.floor(amountUsd * 1e6) / 1e6),
+        time: nonce,
+      };
+      const signature = await signUserSignedAction({ wallet: master, action, types: Withdraw3Types });
+      return { action, signature, nonce };
     },
 
     async evmSendTransaction(req) {
