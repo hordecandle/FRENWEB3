@@ -236,7 +236,7 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5 5 6v5.5c0 4.3 2.9 7.6 7 9 4.1-1.4 7-4.7 7-9V6z"/><path d="m9 12 2.2 2.2L15.5 10"/></symbol>
 </svg>
 
-<div class="trust"><div class="trust__in"><svg class="ic"><use href="#i-lock"/></svg><span>Your server</span><span class="trust__ip" id="trust-ip">this server</span><span class="trust__dot">·</span><span>Secure</span><span class="trust__dot t-wide">·</span><span class="t-wide">Nothing here passes through getfren</span></div></div>
+<div class="trust"><div class="trust__in"><svg class="ic"><use href="#i-lock"/></svg><span>Your server</span><span class="trust__ip" id="trust-ip">this server</span><span class="trust__dot">·</span><span>Private link</span><span class="trust__dot t-wide">·</span><span class="t-wide">Nothing here goes through Fren's website</span></div></div>
 <header class="top"><div class="top__in"><svg class="logo" role="img" aria-label="Fren"><use href="#logo"/></svg><span class="top__step" id="top-step">Step <b>4</b> of 5</span></div></header>
 <ol class="rail" id="rail"></ol>
 <main class="page" id="page" aria-live="polite">
@@ -244,22 +244,22 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
     <section id="s-model">
       <p class="kicker">AI brain</p>
       <h2>Give Fren a brain</h2>
-      <p class="lead">Fren thinks with an AI model. You plug in your own key, so you pay the model company directly for what you use and nobody in between sees your chats.</p>
-      <label class="field"><span>Model company</span><select id="provider"></select></label>
+      <p class="lead">Fren thinks with an AI model. You add your own AI key, so you pay the AI company directly for what you use and nobody in between sees your chats.</p>
+      <label class="field"><span>AI company</span><select id="provider"></select></label>
       <ol class="how" id="how"></ol>
       <div class="actions" style="margin-top:14px"><a class="btn btn--2 btn--sm" id="keylink" target="_blank" rel="noopener"><svg class="ic ic--s"><use href="#i-key"/></svg><span id="keylink-text">Get a key</span><svg class="ic ic--s"><use href="#i-ext"/></svg></a></div>
-      <label class="field" id="key-field"><span>API key</span><input id="apikey" type="password" autocomplete="off" placeholder="Paste it here"><small>Stays on your server. We check it with one tiny request.</small></label>
+      <label class="field" id="key-field"><span>AI key</span><input id="apikey" type="password" autocomplete="off" placeholder="Paste it here"><small>Stays on your server. We check it works with one tiny request.</small></label>
       <p class="msg msg--bad hidden" id="model-bad"><svg class="ic"><use href="#i-alert"/></svg><span id="model-err"></span></p>
       <div class="actions"><button class="btn" id="model-save">Check and save<svg class="ic"><use href="#i-arrow"/></svg></button></div>
     </section>
 
     <section id="s-chat" class="hidden">
-      <p class="kicker" id="chat-kicker">Telegram</p>
+      <p class="kicker" id="chat-kicker">Chat</p>
       <h2 id="chat-title">Make your own bot</h2>
       <p class="lead" id="chat-lead">One tap. Telegram asks you to press <b>Create</b>, then come back to this tab. No BotFather, nothing to copy.</p>
       <div class="tiles" id="chat-pick">
-        <button class="tile is-on" data-pick="telegram"><b><svg class="ic"><use href="#i-tg"/></svg>Telegram <span class="rec">Recommended</span></b><small>Approval codes reach you on a private line the AI never sees.</small></button>
-        <button class="tile" data-pick="whatsapp"><b><svg class="ic"><use href="#i-wa"/></svg>WhatsApp</b><small>Best with a spare number for Fren.</small></button>
+        <button class="tile is-on" data-pick="telegram"><b><svg class="ic"><use href="#i-tg"/></svg>Telegram <span class="rec">Recommended</span></b><small>Confirm codes come on a separate line the AI never sees.</small></button>
+        <button class="tile" data-pick="whatsapp"><b><svg class="ic"><use href="#i-wa"/></svg>WhatsApp</b><small>Needs a spare number for Fren.</small></button>
       </div>
 
       <div id="tg">
@@ -284,18 +284,17 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
             <p class="hint" id="tg-wait"><span class="spin"></span> Waiting for your message…</p>
             <div id="tg-cands"></div>
             <p class="hint">Not working? Message <a href="https://t.me/userinfobot" target="_blank" rel="noopener">@userinfobot</a>, copy the Id it shows, and paste it here:</p>
-            <div class="row"><input id="tg-manual" inputmode="numeric" placeholder="Your Telegram user id"><button class="btn btn--2 btn--sm" id="tg-manual-save">Use this id</button></div>
+            <div class="row"><input id="tg-manual" inputmode="numeric" placeholder="Your Telegram ID"><button class="btn btn--2 btn--sm" id="tg-manual-save">Use this id</button></div>
           </div>
           <p class="err" id="tg-err"></p>
         </details>
       </div>
 
       <div id="wa" class="hidden">
-        <p class="lead" style="margin-top:20px">Fren gets its own WhatsApp: a spare number (an old phone or a second SIM) works best. You'll chat with it from your own phone.</p>
-        <label class="field"><span>Your own WhatsApp number, with country code</span><input id="wanum" inputmode="tel" placeholder="+447700900123"><small>The first time takes about a minute while WhatsApp support installs.</small></label>
+        <label class="field"><span>Your usual WhatsApp number (the one you'll text Fren from), with country code</span><input id="wanum" inputmode="tel" placeholder="+447700900123"><small>The first time can take about a minute.</small></label>
         <div class="actions"><button class="btn" id="wa-start">Show the QR code</button></div>
         <div id="wa-qr" class="hidden">
-          <p class="lead">On the phone with Fren's WhatsApp: <b>Settings → Linked devices → Link a device</b>, then scan:</p>
+          <p class="lead">On the spare phone (Fren's WhatsApp): <b>Settings → Linked devices → Link a device</b>, then scan:</p>
           <pre class="qr" id="wa-code">Loading…</pre>
           <p class="hint">The code refreshes by itself every few seconds.</p>
         </div>
@@ -304,7 +303,7 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
     </section>
 
     <section id="s-connected" class="hidden">
-      <p class="kicker" id="conn-kicker">Telegram</p>
+      <p class="kicker" id="conn-kicker">Chat</p>
       <h2 id="conn-title">Your bot is connected</h2>
       <div class="botchip"><span class="av"><svg viewBox="0 0 116 80"><use href="#mark"/></svg></span><div><b id="conn-bot">@your_bot</b><small id="conn-sub">Your own bot. Only you can talk to it.</small></div><svg class="ic ok"><use href="#i-check"/></svg></div>
       <p class="lead" style="margin-top:18px">Last thing: Fren makes two wallets for you, right here on your server.</p>
@@ -312,8 +311,8 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
         <div class="actions"><button class="btn" id="w-make">Make my wallets<svg class="ic"><use href="#i-arrow"/></svg></button></div>
         <details class="details">
           <summary>Advanced<svg class="ic"><use href="#i-down"/></svg></summary>
-          <label class="field"><span>Network</span><select id="network"><option value="mainnet">Mainnet (recommended)</option><option value="testnet">Testnet</option></select><small>Mainnet uses real prices with play money until you switch to live. Testnet is Hyperliquid's test network.</small></label>
-          <label class="field"><span>Jupiter API key (optional)</span><input id="jup" autocomplete="off" placeholder="Leave empty to skip"><small>For fast launch snipes. Free at portal.jup.ag.</small></label>
+          <label class="field"><span>Network</span><select id="network"><option value="mainnet">Mainnet (recommended)</option><option value="testnet">Testnet</option></select><small>Recommended: real prices, pretend money until you switch to live. Testnet is a practice network for developers.</small></label>
+          <label class="field"><span>Jupiter key (optional)</span><input id="jup" autocomplete="off" placeholder="Leave empty to skip"><small>Makes fast buys of brand-new Solana coins more reliable. Free at portal.jup.ag.</small></label>
         </details>
       </div>
       <p class="err" id="w-err0"></p>
@@ -322,10 +321,10 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
     <section id="s-wallet" class="hidden">
       <p class="kicker">Wallets</p>
       <h2>Your wallets are ready</h2>
-      <p class="msg msg--ok" style="margin-top:12px"><svg class="ic"><use href="#i-check"/></svg>Fren starts in paper mode. No real money moves until you say so.</p>
+      <p class="msg msg--ok" style="margin-top:12px"><svg class="ic"><use href="#i-check"/></svg>Fren starts in paper mode: real prices, pretend money. No real money moves until you say so.</p>
       <span class="lbl">Solana · spot, memes, yield</span><div class="addr" id="a-sol"></div>
-      <span class="lbl">Arbitrum or Base · perps, bets, EVM coins</span><div class="addr" id="a-evm"></div>
-      <p class="hint">To trade for real later: send USDC here, plus a little SOL for Solana fees and some ETH on Arbitrum or Base for gas.</p>
+      <span class="lbl">Arbitrum and Base · perps, bets and coins on these chains</span><div class="addr" id="a-evm"></div>
+      <p class="hint">To trade for real later: send USDC here, plus a little SOL and a little ETH (on Arbitrum or Base) to pay network fees.</p>
       <div class="note"><svg class="ic"><use href="#i-dl"/></svg><span><b>Download your backup.</b> It's the only copy of your keys off this server. Lose the server without it, and the money in these wallets is gone.</span></div>
       <div class="actions" style="margin-top:14px"><a class="btn btn--2 btn--sm" href="/api/backup" id="backup"><svg class="ic ic--s"><use href="#i-dl"/></svg>Download wallet backup</a></div>
       <label class="check"><input type="checkbox" id="saved"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span>I saved my backup somewhere safe and offline.</label>
@@ -348,7 +347,7 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
     <h3>Say gm. Then try:</h3>
     <div class="tries"><span>what's my wallet</span><span>long BTC 5x with $20</span><span>stop everything</span></div>
   </div>
-  <p class="paper"><svg class="ic"><use href="#i-paper"/></svg>Paper mode: trades are simulated until you switch to live.</p>
+  <p class="paper"><svg class="ic"><use href="#i-paper"/></svg>Paper mode: real prices, pretend money, until you switch to live.</p>
   <p class="closed">This setup page is now closed for good. Your Fren keeps running on your server.</p>
 </section>
 <script>
@@ -422,7 +421,7 @@ function syncKeyLink() {
   $("keylink-text").textContent = "Get a key on " + p.label.replace(/ [(]any model[)]$/, "");
   $("how").innerHTML = p.id === "openrouter"
     ? "<li>Open OpenRouter and sign in with Google or email.</li><li>Add a few dollars of credit.</li><li>Create a key and paste it below.</li>"
-    : "<li>Open " + name + " and sign in.</li><li>Add a few dollars of credit or pick a plan.</li><li>Create an API key and paste it below.</li>";
+    : "<li>Open " + name + " and sign in.</li><li>Add a few dollars of credit or pick a plan.</li><li>Create a key and paste it below.</li>";
 }
 $("provider").onchange = syncKeyLink;
 function modelErr(msg) {
@@ -447,11 +446,10 @@ function pick(p) {
   document.querySelectorAll("[data-pick]").forEach((b) => b.classList.toggle("is-on", b.dataset.pick === p));
   $("tg").classList.toggle("hidden", p !== "telegram");
   $("wa").classList.toggle("hidden", p !== "whatsapp");
-  $("chat-kicker").textContent = p === "telegram" ? "Telegram" : "WhatsApp";
-  $("chat-title").textContent = p === "telegram" ? "Make your own bot" : "Link Fren's WhatsApp";
+    $("chat-title").textContent = p === "telegram" ? "Make your own bot" : "Link Fren's WhatsApp";
   $("chat-lead").innerHTML = p === "telegram"
     ? (oneTap ? "One tap. Telegram asks you to press <b>Create</b>, then come back to this tab. No BotFather, nothing to copy." : "Make a bot with @BotFather in Telegram and paste its token here. It takes about a minute.")
-    : "Fren gets its own WhatsApp number. You scan one QR code, then chat with it from your own phone.";
+    : "Fren needs its own WhatsApp: a spare number, like an old phone or a second SIM. You scan one QR code, then text Fren from your usual phone.";
   if (p === "telegram") prepareOneTap();
 }
 document.querySelectorAll("[data-pick]").forEach((b) => b.onclick = () => pick(b.dataset.pick));
@@ -511,7 +509,7 @@ async function findLoop() {
   while (finding) {
     try {
       const r = await api("POST", "/api/telegram/find");
-      if (r.busy) { $("tg-wait").textContent = "Something else is reading this bot. Use the id box below."; finding = false; break; }
+      if (r.busy) { $("tg-wait").textContent = "Another app is already connected to this bot. Enter your Telegram ID below instead."; finding = false; break; }
       const seen = JSON.stringify(r.candidates);
       if (seen === lastSeen) continue;
       lastSeen = seen;
@@ -549,8 +547,7 @@ async function pollQr() {
 
 function showConnected() {
   const tg = chat !== "whatsapp";
-  $("conn-kicker").textContent = tg ? "Telegram" : "WhatsApp";
-  $("conn-title").textContent = tg ? "Your bot is connected" : "WhatsApp is linked";
+    $("conn-title").textContent = tg ? "Your bot is connected" : "WhatsApp is linked";
   $("conn-bot").textContent = tg ? (bot ? "@" + bot : "Your Telegram bot") : "Fren on WhatsApp";
   $("conn-sub").textContent = tg ? "Your own bot. Only you can talk to it." : "Only your own number can talk to it.";
   screen("connected");
@@ -581,6 +578,7 @@ function showFinal() {
     $("final-bot").textContent = "@" + bot;
     $("final-open").href = "https://t.me/" + bot;
   } else {
+    $("final-text").textContent = "It's waiting for you in Telegram. Open your new bot there and say gm.";
     $("final-handle").classList.add("hidden");
     $("final-open").classList.add("hidden");
   }

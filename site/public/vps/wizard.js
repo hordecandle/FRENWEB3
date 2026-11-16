@@ -29,7 +29,7 @@
   let id = params.get("id");
   let timer = null;
   let apiDown = false;
-  const NOT_OPEN = "The VPS wizard isn't open yet. Check back very soon, or use the one-line install for now.";
+  const NOT_OPEN = "Server setup isn't open yet. Please check back soon.";
 
   // ---- API (real, or a local mock when the page has ?mock) ----
   const mock = {
@@ -144,7 +144,7 @@
     const name = document.createElement("b");
     name.textContent = "Fren server";
     const spec = document.createElement("small");
-    spec.textContent = p.vcpu ? `${p.vcpu} vCPU · ${p.ramGb} GB RAM · own IP · stop anytime` : "Own IP · stop anytime";
+    spec.textContent = "Sized for Fren · own address · stop anytime";
     left.append(name, spec);
     const price = document.createElement("div");
     price.className = "price";
@@ -183,7 +183,7 @@
           li.querySelector(".dot").innerHTML = i < at ? CHECK : "";
         });
         $("bar").style.width = at === 0 ? "28%" : "62%";
-        $("progress").textContent = d.progress ? `${d.progress}. Usually 3 to 5 minutes.` : "Usually 3 to 5 minutes.";
+        $("progress").textContent = "Usually 3 to 5 minutes.";
         break;
       }
       case "ready":
@@ -202,7 +202,7 @@
             "Your server is fine and already paid for. Fren just didn't finish installing. Try again on the same server: <b>you won't be charged twice.</b>";
         } else {
           $("fail-title").textContent = "Something went wrong";
-          $("fail-msg").textContent = d.error || "The server didn't finish setting up.";
+          $("fail-msg").textContent = d.error || "The server didn't finish setting up. Press Start again to try once more.";
         }
         $("retry").hidden = !d.retryable;
         $("fail-paid").hidden = !d.retryable;
@@ -238,7 +238,7 @@
       if (e.status === 400 || e.status === 404 || e.message === "not found") {
         show("s-failed", "plan");
         $("fail-msg").textContent =
-          e.status === 400 ? e.message : "We couldn't find that setup. The link may be wrong or expired.";
+          e.status === 400 ? e.message : "We couldn't find that setup. The link may be wrong or expired. Press Start again for a new one.";
         $("fail-title").textContent = "Something went wrong";
         ["retry", "fail-paid", "fail-contact", "fail-more"].forEach((x) => ($(x).hidden = true));
         $("start-again").hidden = false;

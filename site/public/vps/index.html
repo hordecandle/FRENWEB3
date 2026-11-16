@@ -4,9 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Fren · Get your Fren</title>
-    <meta name="description" content="Rent a no-KYC server with crypto and set up Fren on it, all in your browser. From $10 a month." />
+    <meta name="description" content="Rent your own server with crypto, no ID needed, and set up Fren on it in your browser. $10 a month." />
     <meta property="og:title" content="Get your Fren" />
-    <meta property="og:description" content="No KYC, pay in crypto, no terminal. Fren runs 24/7 on a server you own." />
+    <meta property="og:description" content="No ID, pay in crypto, nothing to install. Fren runs 24/7 on your own server." />
     <meta property="og:image" content="https://getfren.netlify.app/assets/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
@@ -47,7 +47,7 @@
           <h2>Your own server</h2>
           <p class="lead">Fren runs 24/7 on a server rented in your name, even when your laptop is closed. You only need an email.</p>
           <div id="plans"></div>
-          <label class="field"><span>Your email</span><input type="email" id="email" autocomplete="email" required placeholder="you@example.com" /><small>For your server account and receipts. No ID, no KYC.</small></label>
+          <label class="field"><span>Your email</span><input type="email" id="email" autocomplete="email" required placeholder="you@example.com" /><small>For your server account and receipts. No ID needed.</small></label>
           <div class="actions"><button class="btn" type="submit" id="go">Continue to payment<svg class="ic"><use href="#i-arrow"/></svg></button></div>
           <p class="err" id="err-plan"></p>
         </form>
@@ -64,7 +64,7 @@
         <div id="s-pay" hidden>
           <p class="kicker">Pay</p>
           <h2>Pay for your server</h2>
-          <p class="lead">USDC or USDT on most chains, BTC, XMR or a card.</p>
+          <p class="lead">USDC or USDT on most chains, BTC or XMR.</p>
           <div class="pay">
             <div>
               <div class="pay__amount"><span id="amount">$10</span> <small>first month</small></div>
@@ -79,7 +79,7 @@
         <div id="s-build" hidden>
           <p class="kicker">Install</p>
           <h2>Setting up your server</h2>
-          <p class="lead">Paid, thanks. This takes a few minutes. You can close this tab and come back with the same link.</p>
+          <p class="lead">Paid, thanks. This takes a few minutes. You can close this tab: save this page's link and open it again later.</p>
           <ol class="build" id="build">
             <li data-stage="provisioning"><span class="dot"></span>Starting your server</li>
             <li data-stage="installing"><span class="dot"></span>Installing Fren</li>
@@ -92,8 +92,8 @@
         <div id="s-ready" hidden>
           <p class="kicker">AI brain</p>
           <h2>Server ready. Next: an AI brain</h2>
-          <p class="lead">Your server is up. Two steps left, on the server itself: plug in an AI brain, then connect Telegram.</p>
-          <div class="note"><svg class="ic"><use href="#i-shield"/></svg><span>The next page runs on <b>your server</b>, so the address changes to <code id="ready-host">your-ip.sslip.io</code>. That's you, not us: your keys go straight there.</span></div>
+          <p class="lead">Your server is up. Two steps left, on the server itself: add an AI key, then connect your chat.</p>
+          <div class="note"><svg class="ic"><use href="#i-shield"/></svg><span>The next page runs on <b>your server</b>, so the web address will look unusual: <code id="ready-host">your-ip.sslip.io</code>. That's normal, it's your server's address. Your keys go straight there, not through us.</span></div>
           <div class="actions">
             <a class="btn" id="setup-link" href="#" target="_blank" rel="noopener">Open your Fren setup<svg class="ic"><use href="#i-arrow"/></svg></a>
             <button class="btn btn--2" type="button" id="copy-link"><svg class="ic"><use href="#i-copy"/></svg><span>Copy link</span></button>
@@ -120,11 +120,10 @@
       </div>
     </main>
     <section class="below" id="faq">
-      <details><summary>Who holds my keys?</summary><p>You do. The keys are created on your server and never leave it. The AI plans trades but never signs them, and anything over your caps needs a confirm code from you.</p></details>
+      <details><summary>Who holds my keys?</summary><p>You do. The keys are created on your server and never leave it. The AI plans trades but never signs them, and anything over your limits needs a confirm code from you.</p></details>
       <details><summary>Can you get into my server?</summary><p>Only during install. We use a one-time key to install Fren, then delete it from the server. After that, only you can reach your Fren.</p></details>
       <details><summary>What happens if I stop paying for the server?</summary><p>The server shuts down and Fren stops trading. Your funds stay in your wallets, and your key backup lets you restore Fren anywhere.</p></details>
-      <details><summary>Does it start with real money?</summary><p>No. Every Fren starts in paper mode with $500 a trade, 20x max leverage and a confirm code for anything over $100. You turn on live trading when you're ready.</p></details>
-      <p class="alt">Have a computer that stays on? <a href="../#setup">Run it there instead</a></p>
+      <details><summary>Does it start with real money?</summary><p>No. Every Fren starts in paper mode: real prices, pretend money. Limits from day one: $500 a trade, 20x max leverage, and a confirm code for anything over $100. You switch to live when you're ready.</p></details>
     </section>
     <footer class="foot">
       <span>© 2026 Fren · <a href="../brand/">Brand</a></span>

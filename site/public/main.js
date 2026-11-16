@@ -81,7 +81,7 @@
       },
       {
         word: "buy anything",
-        desc: "Solana and pump.fun buys with CA sniping, plus Base and Robinhood Chain. One chat for every chain.",
+        desc: "Buy any coin on Solana, pump.fun, Base or Robinhood Chain. Paste a coin's address and it buys the second it can.",
         you: "Buy $50 of ETH on Base",
         fren: "Done. Your ETH is on Base.",
         status: "Bought",

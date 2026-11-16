@@ -79,8 +79,8 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
     "POST /api/model": async (b) => {
       const provider = String(b.provider ?? "") as ModelProvider;
       const apiKey = String(b.apiKey ?? "").trim();
-      if (!(provider in MODEL_PROVIDERS)) throw new UserError("Pick a provider.");
-      if (apiKey.length < 10) throw new UserError("Paste the whole API key.");
+      if (!(provider in MODEL_PROVIDERS)) throw new UserError("Pick an AI company.");
+      if (apiKey.length < 10) throw new UserError("Paste the whole key.");
       try {
         await configureModelKey(deps, provider, apiKey);
       } catch (err) {
@@ -137,7 +137,7 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       const tg = state.telegram;
       if (!tg) throw new UserError("Add the bot token first.");
       const id = String(b.id ?? "").trim();
-      if (!/^\d{1,15}$/.test(id)) throw new UserError("That's the number @userinfobot shows as Id, digits only.");
+      if (!/^\d{1,15}$/.test(id)) throw new UserError("Use the number @userinfobot shows as Id, digits only.");
       await ackTelegram(deps.fetchFn, tg.token, tg.offset);
       state.line = await configureTelegram(deps, tg.token, id);
       state.channel = "telegram";
@@ -188,7 +188,7 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
     res.setHeader("cache-control", "no-store");
     res.setHeader("x-frame-options", "DENY");
     res.setHeader("referrer-policy", "no-referrer");
-    if (!authed(req, url)) return send(res, 403, "text/plain", "This setup link isn't valid. Use the link from the Fren VPS page.");
+    if (!authed(req, url)) return send(res, 403, "text/plain", "This setup link isn't valid. Use the link from the page where you set up your server.");
 
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/setup")) {
       if (url.searchParams.has("t")) {
@@ -221,7 +221,8 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       const body = req.method === "POST" ? await readJson(req) : {};
       sendJson(res, 200, await route(body));
     } catch (err) {
-      const msg = err instanceof UserError ? err.message : `Something went wrong: ${(err as Error).message}`;
+      if (!(err instanceof UserError)) console.error(err);
+      const msg = err instanceof UserError ? err.message : "Something went wrong on your server. Try again in a minute.";
       sendJson(res, err instanceof UserError ? 400 : 500, { error: msg });
     }
   });
