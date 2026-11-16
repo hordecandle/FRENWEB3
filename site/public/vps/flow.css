@@ -32,14 +32,14 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 
 /* ===== Rail: полоса шагов ===== */
 .rail{list-style:none;margin:0 auto;padding:28px 24px 0;max-width:var(--page);display:flex;align-items:center;gap:0}
-.rail li{display:flex;align-items:center;flex:1 1 auto;min-width:0}
-.rail li:last-child{flex:0 0 auto}
-.rail .n{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 11px 0 3px;border-radius:var(--r-chip);font-size:13px;font-weight:500;color:var(--muted);white-space:nowrap}
+.rail li{display:contents}
+.rail .n{display:inline-flex;align-items:center;gap:7px;height:30px;flex:none;padding:0;border-radius:var(--r-chip);font-size:13px;font-weight:500;color:var(--muted);white-space:nowrap}
 .rail .n i{font-style:normal;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;border:1px solid var(--faint);background:var(--bg);font-size:12px;font-weight:600}
-.rail .bar{flex:1 1 auto;height:1px;background:var(--line);margin:0 4px;min-width:8px}
+.rail .bar{flex:1 1 0;height:2px;background:var(--line);margin:0 10px;min-width:8px}
 .rail .done .n{color:var(--ink)}
 .rail .done .n i{background:var(--ink);border-color:var(--ink);color:var(--bg)}
 .rail .done .bar{background:var(--ink)}
+.rail .now .n{padding:0 11px 0 3px;margin-right:2px}
 .rail .now .n{background:var(--blue);color:var(--ink);box-shadow:0 0 0 1px var(--ink),var(--sh-btn-sm)}
 .rail .now .n i{background:var(--ink);border-color:var(--ink);color:var(--bg)}
 .rail .live .n i{border-style:dashed}
@@ -49,6 +49,7 @@ h1,h2,h3,p{margin:0} a{color:inherit}
   .rail li:not(.now) .n{padding:0}
   .rail li:not(.now) .n span{display:none}
   .rail .n{height:28px}
+  .rail .bar{margin:0 6px;min-width:6px}
 }
 
 /* ===== Page + card ===== */

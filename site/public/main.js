@@ -1,5 +1,14 @@
 (() => {
   "use strict";
+  // Fee note: empty = hidden. When Bee picks the fee mechanism, put the sentence here (one edit).
+  const FEE_NOTE = "";
+  if (FEE_NOTE) {
+    const fn = document.getElementById("fee-note");
+    if (fn) {
+      fn.textContent = FEE_NOTE;
+      fn.hidden = false;
+    }
+  }
   const t = document.documentElement,
     e = window.matchMedia("(prefers-reduced-motion: reduce)").matches,
     s = (t) => document.querySelector(t),
