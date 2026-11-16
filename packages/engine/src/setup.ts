@@ -115,11 +115,11 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
       io.say("Copy the two files above first, then type y.");
     }
 
-    if (!opts.server) await installServices(deps);
+    const running = opts.server ? true : await installServices(deps);
 
     const where = channel === "telegram" ? "Open your bot in Telegram and say gm" : "Text Fren's number on WhatsApp and say gm";
     io.say(`
-  ✓ Your Fren is live.
+  ${running ? "✓ Your Fren is live." : "✓ Your Fren is set up. Start the two commands above, then it's live."}
   ${where}. Try "what's my wallet", "long BTC 5x with $20", "stop everything".
 
   Paper mode: real prices, pretend money, until you switch to live.
@@ -505,7 +505,7 @@ async function mustRun(deps: Pick<SetupDeps, "run">, file: string, args: string[
 }
 
 /** The engine as a login service (launchd on macOS, systemd --user on Linux), then a gateway restart to load the plugin. */
-async function installServices(deps: SetupDeps): Promise<void> {
+async function installServices(deps: SetupDeps): Promise<boolean> {
   const { io } = deps;
   const [node, cli] = deps.frenCommand as [string, string];
   const pathEnv = [dirname(node), dirname(await whichOr(deps, deps.openclawBin)), "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin"].join(":");
@@ -525,12 +525,12 @@ async function installServices(deps: SetupDeps): Promise<void> {
   if (engine) io.say("✓ Fren engine runs in the background and starts at login");
   else io.say(`! Couldn't install a background service here. Keep this running in its own terminal:\n    ${node} ${cli} start`);
 
-  const gw = await deps.run(deps.openclawBin, ["daemon", "restart"]);
-  if (gw.code !== 0) {
-    const installed = await deps.run(deps.openclawBin, ["daemon", "install"]);
-    if (installed.code !== 0) io.say(`! Start the OpenClaw gateway yourself: ${deps.openclawBin} gateway run`);
-  }
-  io.say("✓ OpenClaw gateway restarted with Fren loaded");
+  const gateway =
+    (await deps.run(deps.openclawBin, ["daemon", "restart"])).code === 0 ||
+    (await deps.run(deps.openclawBin, ["daemon", "install"])).code === 0;
+  if (gateway) io.say("✓ OpenClaw gateway restarted with Fren loaded");
+  else io.say(`! Couldn't start the OpenClaw gateway in the background. Keep this running in another terminal:\n    ${deps.openclawBin} gateway run`);
+  return engine && gateway;
 }
 
 async function whichOr(deps: SetupDeps, bin: string): Promise<string> {
@@ -592,6 +592,42 @@ async function yes(io: Prompt, question: string, fallback: boolean): Promise<boo
   return a.startsWith("y");
 }
 
+/** One line from the terminal without showing it (typing or pasting). Ctrl-C quits. */
+function readHidden(prompt: string): Promise<string> {
+  const stdin = process.stdin;
+  process.stdout.write(prompt);
+  stdin.setRawMode(true);
+  stdin.resume();
+  return new Promise((resolve) => {
+    let s = "";
+    let esc = false;
+    const done = () => {
+      stdin.off("data", onData);
+      stdin.setRawMode(false);
+      stdin.pause();
+    };
+    const onData = (d: Buffer) => {
+      for (const ch of d.toString("utf8")) {
+        if (esc) {
+          // Skip a terminal escape sequence (arrow keys and the like) up to its final letter.
+          if (/[A-Za-z~]/.test(ch)) esc = false;
+          continue;
+        }
+        if (ch === "\r" || ch === "\n") return done(), resolve(s);
+        if (ch === "\u0003") {
+          done();
+          process.stdout.write("\n");
+          process.exit(130);
+        }
+        if (ch === "\u001b") esc = true;
+        else if (ch === "\u007f" || ch === "\b") s = s.slice(0, -1);
+        else if (ch >= " ") s += ch;
+      }
+    };
+    stdin.on("data", onData);
+  });
+}
+
 /** The real terminal, programs and network. */
 export function systemSetupDeps(paths: FrenPaths): SetupDeps {
   // One readline at a time: it's closed while an interactive program (OpenClaw's
@@ -606,17 +642,11 @@ export function systemSetupDeps(paths: FrenPaths): SetupDeps {
         const prompt = fallback ? `${q} (${fallback}): ` : `${q}: `;
         let a = "";
         if (o?.secret && process.stdin.isTTY) {
-          // Print the question, then keep readline from echoing what's typed or pasted.
-          const r = terminal() as unknown as { _writeToOutput: (s: string) => void; question(q: string): Promise<string> };
-          process.stdout.write(prompt);
-          const echo = r._writeToOutput;
-          r._writeToOutput = () => {};
-          try {
-            a = await r.question("");
-          } finally {
-            r._writeToOutput = echo;
-            process.stdout.write(a ? "••••••\n" : "\n");
-          }
+          // Readline would echo the key; read it from the raw terminal instead.
+          rl?.close();
+          rl = undefined;
+          a = await readHidden(prompt);
+          process.stdout.write(a ? "••••••\n" : "\n");
         } else {
           a = await terminal().question(prompt);
         }

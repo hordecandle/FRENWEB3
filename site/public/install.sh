@@ -271,7 +271,7 @@ if [[ -n "$FREN_TARBALL" ]]; then
   curl -fsSL --max-time 300 "$FREN_TARBALL" | as_fren tar -xz -C "$FREN_APP_DIR" --strip-components 1 \
     || die "Couldn't download Fren from $FREN_TARBALL."
   printf '%s\n' "$FREN_TARBALL" | as_fren tee "$FREN_APP_DIR/.fren-download" >/dev/null
-  echo "✓ Downloaded $FREN_REF"
+  echo "✓ Downloaded ${FREN_TARBALL##*/}"
 elif [[ -d "$FREN_APP_DIR/.git" ]]; then
   as_fren git -C "$FREN_APP_DIR" fetch --quiet --depth 1 origin "$FREN_REF"
   as_fren git -C "$FREN_APP_DIR" checkout --quiet --force FETCH_HEAD

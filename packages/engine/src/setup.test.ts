@@ -169,9 +169,13 @@ describe("fren setup", () => {
   it("installs services locally and keeps the same wallets on a second run", async () => {
     const tg = fakeTelegram([startMessage]);
     const { run, runs } = fakeRunner(true);
-    const d = deps({ io: scriptedIo(["n", "1", TOKEN, "y", "1", "", "y"]), run, fetchFn: tg.fetchFn });
+    const io = scriptedIo(["n", "1", TOKEN, "y", "1", "", "y"]);
+    const d = deps({ io, run, fetchFn: tg.fetchFn });
     const first = await runSetup(d, { server: false });
     expect(runs).toContain("openclaw daemon restart");
+    // No systemd here: it says how to start the engine instead of claiming it's live.
+    expect(io.out.some((l) => l.includes("Your Fren is set up. Start the two commands above"))).toBe(true);
+    expect(io.out.some((l) => l.includes("Your Fren is live."))).toBe(false);
     const again = await runSetup({ ...d, io: scriptedIo(["n", "1", TOKEN, "y", "1", "", "y"]), fetchFn: fakeTelegram([startMessage]).fetchFn }, { server: false });
     expect(again.addresses).toEqual(first.addresses);
   });
