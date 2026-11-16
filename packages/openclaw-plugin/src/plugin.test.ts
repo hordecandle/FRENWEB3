@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApi } from "@fren/engine";
 import { buildTestFren, optionName } from "../../engine/src/testing.js";
-import plugin, { TOOL_NAMES } from "./index.js";
+import plugin, { TOOL_NAMES, isOwner } from "./index.js";
 
 type Registered = { tools: Map<string, (ctx: Record<string, unknown>) => any>; commands: Map<string, any> };
 
@@ -45,7 +45,7 @@ describe("OpenClaw plugin against a real engine", () => {
 
   it("registers every declared tool and the owner commands", () => {
     expect([...reg.tools.keys()].sort()).toEqual([...TOOL_NAMES].sort());
-    expect([...reg.commands.keys()].sort()).toEqual(["fren_code", "limits", "ok", "positions", "resume", "stop", "wallet"]);
+    expect([...reg.commands.keys()].sort()).toEqual(["fren_code", "fren_stop", "limits", "ok", "positions", "resume", "stop", "wallet"]);
   });
 
   it("hides trading tools from people who aren't the owner", () => {
@@ -101,8 +101,20 @@ describe("OpenClaw plugin against a real engine", () => {
     expect(await run("fren_trade", { plan })).toMatch(/📝 Paper: Bought 167 "Yes" shares/);
   });
 
-  it("stops everything from the /stop command", async () => {
-    const res = await reg.commands.get("stop").handler({ senderIsOwner: true, args: "" });
+  it("knows the owner from commands.ownerAllowFrom when OpenClaw doesn't say (2026.11+)", () => {
+    const config = { commands: { ownerAllowFrom: ["telegram:777000123", "whatsapp:+447700900123"] } };
+    expect(isOwner({ isAuthorizedSender: true, channel: "telegram", senderId: "777000123", config })).toBe(true);
+    expect(isOwner({ isAuthorizedSender: true, channel: "whatsapp", senderId: "447700900123@s.whatsapp.net", config })).toBe(true);
+    expect(isOwner({ isAuthorizedSender: true, channel: "telegram", senderId: "777000124", config })).toBe(false);
+    expect(isOwner({ isAuthorizedSender: true, channel: "whatsapp", senderId: "777000123", config })).toBe(false);
+    expect(isOwner({ isAuthorizedSender: false, channel: "telegram", senderId: "777000123", config })).toBe(false);
+    expect(isOwner({ isAuthorizedSender: true, channel: "telegram", senderId: "", config })).toBe(false);
+    expect(isOwner({ isAuthorizedSender: true, channel: "telegram", senderId: "777000123", config: {} })).toBe(false);
+    expect(isOwner({ senderIsOwner: false, isAuthorizedSender: true, channel: "telegram", senderId: "777000123", config })).toBe(false);
+  });
+
+  it("stops everything from /fren_stop (OpenClaw reserves /stop)", async () => {
+    const res = await reg.commands.get("fren_stop").handler({ senderIsOwner: true, args: "" });
     expect(res.text).toMatch(/Stopped/);
     expect(res.text).toMatch(/Closed long xyz:GOLD/);
     const resume = await reg.commands.get("resume").handler({ senderIsOwner: true });

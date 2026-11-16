@@ -11,7 +11,7 @@ It does Hyperliquid perps (crypto, gold, stocks, indices), Solana spot through J
 ```
 Telegram / WhatsApp
       │
-OpenClaw agent ── fren plugin (tools + /ok /stop /limits /resume)
+OpenClaw agent ── fren plugin (tools + /ok /fren_stop /limits /resume)
       │  plans only, no keys
       ▼
 fren engine (local HTTP API on 127.0.0.1)
@@ -89,7 +89,7 @@ Owner commands, which skip the model:
 | Command | Does |
 | --- | --- |
 | `/ok CODE` | Approve a plan or a settings change |
-| `/stop` (or `/stop keep`) | Kill switch: pause, cancel waiting plans, close leveraged positions (or keep them) |
+| `/fren_stop` (or `/fren_stop keep`) | Kill switch: pause, cancel waiting plans, close leveraged positions (or keep them) |
 | `/resume` | Turn Fren back on (sends a code) |
 | `/limits key=value …` | e.g. `/limits mode=live maxTradeUsd=2000 maxLeverage=40` (loosening sends a code) |
 | `/positions`, `/wallet` | Read-only views |

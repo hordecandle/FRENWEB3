@@ -6,7 +6,7 @@ Fren trades with real money from a chat window, inside an agent that reads tweet
 
 1. **The model only proposes.** The agent's tools submit a typed Plan or read state. No tool returns key material, approves a plan, raises a limit, or resumes after a stop.
 2. **Policy is code.** `packages/core/src/policy.ts` checks every plan against the owner's limits: per-trade and per-day spend, max leverage (the owner's and the venue's), open positions, allowed venues. It checks again when the watcher fires a conditional plan.
-3. **Approval goes around the model.** Plans over the auto-approve level, loosened limits, and resuming after `/stop` each need a 6-character code. The engine sends it straight to the owner, never through the model:
+3. **Approval goes around the model.** Plans over the auto-approve level, loosened limits, and resuming after `/fren_stop` each need a 6-character code. The engine sends it straight to the owner, never through the model:
    - on Telegram with the Bot API's `sendMessage`. Bots don't receive their own messages, so OpenClaw never sees it;
    - on WhatsApp (or Signal, Discord, iMessage...) through the OpenClaw gateway's own sender, `openclaw message send`, run without a shell. The model doesn't write or relay it, but the gateway records the message in that chat's history, so the agent can read the code afterwards.
 

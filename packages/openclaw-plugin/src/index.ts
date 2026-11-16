@@ -198,6 +198,30 @@ function ownerReply(res: OwnerResult): string {
   return `${res.text}\n\n🔐 Code: ${res.ownerCode} (send /ok ${res.ownerCode})`;
 }
 
+/** Channel ids (Telegram user id, WhatsApp number) compared as digits: "telegram:777", "+44 77…", "4477…@s.whatsapp.net". */
+const idDigits = (s: unknown) => (typeof s === "string" ? s.replace(/@.*$/, "").replace(/\D/g, "") : "");
+
+/**
+ * OpenClaw ≥2026.11 only tells bundled plugins whether the sender is the owner
+ * (ctx.senderIsOwner stays undefined for us), so when it's missing we check the
+ * allowlisted sender against commands.ownerAllowFrom, which Fren setup writes.
+ */
+export function isOwner(ctx: { senderIsOwner?: boolean; isAuthorizedSender?: boolean; channel?: string; senderId?: string; from?: string; config?: unknown }): boolean {
+  if (typeof ctx.senderIsOwner === "boolean") return ctx.senderIsOwner;
+  if (ctx.isAuthorizedSender !== true) return false;
+  const owners = (ctx.config as { commands?: { ownerAllowFrom?: unknown } } | undefined)?.commands?.ownerAllowFrom;
+  if (!Array.isArray(owners)) return false;
+  const channel = (ctx.channel ?? "").toLowerCase();
+  const sender = idDigits(ctx.senderId) || idDigits(ctx.from);
+  if (!sender) return false;
+  return owners.some((o) => {
+    if (typeof o !== "string") return false;
+    const m = o.match(/^([a-z]+):(.+)$/i);
+    if (m && m[1]!.toLowerCase() !== channel) return false;
+    return idDigits(m ? m[2] : o) === sender;
+  });
+}
+
 function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
   const ownerOnly = "Only the owner of this Fren can do that.";
   const guard = async (isOwner: boolean | undefined, run: () => Promise<string>) => {
@@ -216,32 +240,36 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
     requireAuth: true,
     exposeSenderIsOwner: true,
     handler: (ctx) =>
-      guard(ctx.senderIsOwner, async () => {
+      guard(isOwner(ctx), async () => {
         const code = (ctx.args ?? "").trim();
         if (!code) return "Send /ok followed by the code.";
         return (await client.call<{ text: string }>("POST", "/approve", { code })).text;
       }),
   });
 
-  api.registerCommand({
-    name: "stop",
-    description: "Kill switch: pause Fren and close leveraged positions. /stop keep pauses without closing.",
-    acceptsArgs: true,
-    requireAuth: true,
-    exposeSenderIsOwner: true,
-    handler: (ctx) =>
-      guard(ctx.senderIsOwner, async () => {
-        const flatten = (ctx.args ?? "").trim().toLowerCase() !== "keep";
-        return (await client.call<{ text: string }>("POST", "/stop", { flatten })).text;
-      }),
-  });
+  // OpenClaw reserves /stop for itself since 2026.11 (it only aborts the current
+  // reply), so the kill switch is /fren_stop; /stop still works on older OpenClaw.
+  for (const name of ["fren_stop", "stop"]) {
+    api.registerCommand({
+      name,
+      description: "Kill switch: pause Fren and close leveraged positions. /fren_stop keep pauses without closing.",
+      acceptsArgs: true,
+      requireAuth: true,
+      exposeSenderIsOwner: true,
+      handler: (ctx) =>
+        guard(isOwner(ctx), async () => {
+          const flatten = (ctx.args ?? "").trim().toLowerCase() !== "keep";
+          return (await client.call<{ text: string }>("POST", "/stop", { flatten })).text;
+        }),
+    });
+  }
 
   api.registerCommand({
     name: "resume",
-    description: "Turn Fren back on after /stop.",
+    description: "Turn Fren back on after /fren_stop.",
     requireAuth: true,
     exposeSenderIsOwner: true,
-    handler: (ctx) => guard(ctx.senderIsOwner, async () => ownerReply(await client.call<OwnerResult>("POST", "/resume"))),
+    handler: (ctx) => guard(isOwner(ctx), async () => ownerReply(await client.call<OwnerResult>("POST", "/resume"))),
   });
 
   api.registerCommand({
@@ -251,7 +279,7 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
     requireAuth: true,
     exposeSenderIsOwner: true,
     handler: (ctx) =>
-      guard(ctx.senderIsOwner, async () => {
+      guard(isOwner(ctx), async () => {
         const args = (ctx.args ?? "").trim();
         if (!args) return (await client.call<{ text: string }>("GET", "/limits")).text;
         return ownerReply(await client.call<OwnerResult>("POST", "/limits", { args }));
@@ -263,7 +291,7 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
     description: "Fren positions and watched conditions.",
     requireAuth: true,
     exposeSenderIsOwner: true,
-    handler: (ctx) => guard(ctx.senderIsOwner, async () => (await client.call<{ text: string }>("GET", "/status")).text),
+    handler: (ctx) => guard(isOwner(ctx), async () => (await client.call<{ text: string }>("GET", "/status")).text),
   });
 
   api.registerCommand({
@@ -271,7 +299,7 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
     description: "Fren wallet addresses and how to fund them.",
     requireAuth: true,
     exposeSenderIsOwner: true,
-    handler: (ctx) => guard(ctx.senderIsOwner, async () => (await client.call<{ text: string }>("GET", "/wallet")).text),
+    handler: (ctx) => guard(isOwner(ctx), async () => (await client.call<{ text: string }>("GET", "/wallet")).text),
   });
 
   api.registerCommand({
@@ -280,7 +308,7 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
     requireAuth: true,
     exposeSenderIsOwner: true,
     handler: (ctx) =>
-      guard(ctx.senderIsOwner, async () => {
+      guard(isOwner(ctx), async () => {
         if (!lastOwnerCode || Date.now() - lastOwnerCode.at > 10 * 60_000) return "No recent code.";
         return `🔐 Code: ${lastOwnerCode.code} (send /ok ${lastOwnerCode.code})`;
       }),

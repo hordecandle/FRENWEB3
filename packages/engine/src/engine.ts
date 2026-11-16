@@ -266,7 +266,7 @@ export class Fren {
         this.wrongCodes = 0;
         this.d.store.dropAllPending();
         await this.d.notifier
-          .sendPrivate(`⚠️ ${WRONG_CODE_LIMIT} wrong /ok codes in a row. To be safe I cancelled every request that was waiting for a code. If that wasn't you, send /stop.`)
+          .sendPrivate(`⚠️ ${WRONG_CODE_LIMIT} wrong /ok codes in a row. To be safe I cancelled every request that was waiting for a code. If that wasn't you, send /fren_stop.`)
           .catch(() => false);
         return "Too many wrong codes. Every request waiting for a code was cancelled; ask again for a new one.";
       }
