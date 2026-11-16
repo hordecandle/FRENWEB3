@@ -2,7 +2,9 @@
 
 A self-hosted [OpenClaw](https://github.com/openclaw/openclaw) agent that trades on-chain from a chat window. Tell it on Telegram or WhatsApp, "long gold 20x with $500, stop at -30%," and it finds the market, checks your limits, signs with keys that never leave your machine, and replies once with what it did.
 
-Status: **early backend**. It does Hyperliquid perps (crypto, gold, stocks, indices), Solana spot through Jupiter, pump.fun coins (on the curve and after), launch snipes, tokens on Base and Robinhood Chain through Relay, options on Derive, Polymarket bets, USDC yield on Jupiter Lend, Kamino and Aave, conditional orders, stops and targets, paper mode, and a kill switch (see [docs/ROADMAP.md](docs/ROADMAP.md) for what's next).
+Status: **beta, early backend**. Everything below runs in paper mode and on fakes in tests; none of the live venues (Hyperliquid, Jupiter, pump.fun, Relay, Derive, Polymarket, Jupiter Lend, Kamino, Aave) has placed a real order yet, so all of them are beta, and so are the Telegram and WhatsApp chat lines. Real trading is off until you switch it on.
+
+It does Hyperliquid perps (crypto, gold, stocks, indices), Solana spot through Jupiter, pump.fun coins (on the curve and after), launch snipes, tokens on Base and Robinhood Chain through Relay, options on Derive, Polymarket bets, USDC yield on Jupiter Lend, Kamino and Aave, conditional orders, stops and targets, paper mode, and a kill switch (see [docs/ROADMAP.md](docs/ROADMAP.md) for what's next).
 
 ## How it works
 
@@ -78,7 +80,7 @@ Then talk to your OpenClaw bot:
 - "snipe <CA> on Base with $100 the second it launches"
 - "short SOL $100 at 5x when funding goes above 0.02%/h"
 - "best way to bet ETH hits $4,000 by December, use $1,000" quotes the nearest Derive call and the matching Polymarket market side by side, then places the one you pick
-- "stake my USDC for the best yield" lends it wherever the rate is best (Jupiter Lend or Kamino on Solana, Aave on Arbitrum or Base). When a trade needs the cash, Fren takes it back on its own first.
+- "lend my USDC for the best yield" lends it wherever the rate is best (Jupiter Lend or Kamino on Solana, Aave on Arbitrum or Base). When a trade needs the cash, Fren takes it back on its own first.
 - "fund Polymarket with $500" moves USDC from Arbitrum to your Polymarket wallet (or "fund Derive" for options)
 - "stop everything"
 

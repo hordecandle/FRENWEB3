@@ -80,8 +80,8 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
 
     io.say(stepTitle(2, "Chat"));
     const channel = await choose(io, "Where do you want to talk to Fren?", [
-      ["telegram", "Telegram (recommended). Confirm codes come on a separate line the AI never sees."],
-      ["whatsapp", "WhatsApp. Needs a spare number for Fren."],
+      ["telegram", "Telegram (beta, recommended). Confirm codes come on a separate line the AI never sees."],
+      ["whatsapp", "WhatsApp (beta). Needs a spare number for Fren."],
     ]);
     const line = channel === "telegram" ? await setupTelegram(deps) : await setupWhatsApp(deps);
 

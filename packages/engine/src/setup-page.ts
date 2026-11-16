@@ -32,6 +32,8 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .top{position:sticky;top:0;z-index:50;background:#fff;border-bottom:1px solid var(--line)}
 .top__in{max-width:var(--wide);margin:0 auto;padding:0 24px;height:var(--header);display:flex;align-items:center;justify-content:space-between}
 .logo{width:84px;height:20px;display:block}
+.logo-a{display:flex;align-items:center;gap:8px}
+.beta{color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 7px;font-size:10px;font-weight:500;letter-spacing:.06em;line-height:1.3;text-transform:uppercase}
 .top__step{font-size:14px;font-weight:500;color:var(--muted)}
 .top__step b{color:var(--ink);font-weight:500}
 
@@ -243,7 +245,7 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
 </svg>
 
 <div class="trust"><div class="trust__in"><svg class="ic"><use href="#i-lock"/></svg><span>Your server</span><span class="trust__ip" id="trust-ip">this server</span><span class="trust__dot">·</span><span>Private link</span><span class="trust__dot t-wide">·</span><span class="t-wide">Nothing here goes through Fren's website</span></div></div>
-<header class="top"><div class="top__in"><svg class="logo" role="img" aria-label="Fren"><use href="#logo"/></svg><span class="top__step" id="top-step">Step <b>4</b> of 5</span></div></header>
+<header class="top"><div class="top__in"><span class="logo-a"><svg class="logo" role="img" aria-label="Fren"><use href="#logo"/></svg><span class="beta">Beta</span></span><span class="top__step" id="top-step">Step <b>4</b> of 5</span></div></header>
 <ol class="rail" id="rail"></ol>
 <main class="page" id="page" aria-live="polite">
   <div class="card">
@@ -264,8 +266,8 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
       <h2 id="chat-title">Make your own bot</h2>
       <p class="lead" id="chat-lead">One tap. Telegram asks you to press <b>Create</b>, then come back to this tab. No BotFather, nothing to copy.</p>
       <div class="tiles" id="chat-pick">
-        <button class="tile is-on" data-pick="telegram"><b><svg class="ic"><use href="#i-tg"/></svg>Telegram <span class="rec">Recommended</span></b><small>Confirm codes come on a separate line the AI never sees.</small></button>
-        <button class="tile" data-pick="whatsapp"><b><svg class="ic"><use href="#i-wa"/></svg>WhatsApp</b><small>Needs a spare number for Fren.</small></button>
+        <button class="tile is-on" data-pick="telegram"><b><svg class="ic"><use href="#i-tg"/></svg>Telegram <span class="rec">Recommended</span> <span class="beta">Beta</span></b><small>Confirm codes come on a separate line the AI never sees.</small></button>
+        <button class="tile" data-pick="whatsapp"><b><svg class="ic"><use href="#i-wa"/></svg>WhatsApp <span class="beta">Beta</span></b><small>Needs a spare number for Fren.</small></button>
       </div>
 
       <div id="tg">
