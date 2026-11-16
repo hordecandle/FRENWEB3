@@ -339,7 +339,7 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
   <h1>Your Fren is <span class="plq">live.</span></h1>
   <p class="lead" id="final-text">It's waiting for you in Telegram.</p>
   <div class="handle" id="final-handle"><span class="av"><svg viewBox="0 0 116 80"><use href="#mark"/></svg></span><b id="final-bot">@your_bot</b></div>
-  <div class="actions"><a class="btn btn--xl" id="final-open" href="https://t.me/" target="_blank" rel="noopener"><svg class="ic"><use href="#i-tg"/></svg><span id="final-open-text">Open in Telegram</span></a></div>
+  <div class="actions"><a class="btn btn--xl" id="final-open" target="_blank" rel="noopener"><svg class="ic"><use href="#i-tg"/></svg><span id="final-open-text">Open in Telegram</span></a></div>
   <div class="say">
     <div class="bubbles">
       <span class="bub">gm</span>
