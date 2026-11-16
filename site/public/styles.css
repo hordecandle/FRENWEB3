@@ -2061,7 +2061,7 @@ html.is-killed .plq {
 @media (width<860px){
   .scene.is-final .fin__btn{display:inline-flex;position:absolute;top:146px;left:0;right:0;margin:0 auto;width:max-content;white-space:nowrap;min-height:48px;font-size:17px;pointer-events:auto;animation:fadeUp .5s var(--ease) both .5s}
   .chat__final{padding:18px 12px 22px}
-  .chat__say{max-width:100%;font-size:16px;padding:11px 14px 12px}
+  .chat__say{max-width:100%;font-size:15px;line-height:1.4;padding:10px 12px 11px}
   .chat__you{max-width:92%}
 }
 .steps5{padding:64px 0 72px;border-top:1px solid var(--line)}
