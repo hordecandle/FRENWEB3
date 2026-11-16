@@ -16,7 +16,7 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .ic--s{width:16px;height:16px}
 
 /* ===== Header ===== */
-.top{position:sticky;top:0;z-index:50;background:#fffffff0;-webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line)}
+.top{position:sticky;top:0;z-index:50;background:#fff;border-bottom:1px solid var(--line)}
 .top__in{max-width:var(--wide);margin:0 auto;padding:0 24px;height:var(--header);display:flex;align-items:center;justify-content:space-between}
 .logo{width:84px;height:20px;display:block}
 .top__step{font-size:14px;font-weight:500;color:var(--muted)}
