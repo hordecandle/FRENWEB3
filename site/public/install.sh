@@ -308,11 +308,14 @@ if [ "\$(id -u)" = 0 ]; then
     isolate) shift; exec "$NODE_BIN" "$FREN_CLI" isolate --agent-user $SERVICE_USER "\$@" ;;
     setup)
       # Setup writes the keys as $SERVICE_USER, then they're sealed away again.
-      systemctl stop fren-openclaw.service fren.service 2>/dev/null
+      # While they're unsealed the agent stays off, even across a reboot, and
+      # Ctrl-C or a dropped SSH only ends setup: the keys are still sealed after.
+      systemctl disable --now fren-openclaw.service 2>/dev/null; systemctl stop fren.service 2>/dev/null
       if [ -f $SERVICE_HOME/.fren/engine.json ]; then "$NODE_BIN" "$FREN_CLI" isolate --agent-user $SERVICE_USER --undo || exit 1; fi
+      trap ':' INT TERM HUP
       as_agent "\$@" --server; rc=\$?
       "$NODE_BIN" "$FREN_CLI" isolate --agent-user $SERVICE_USER --service || exit 1
-      systemctl restart fren-openclaw.service
+      systemctl enable fren-openclaw.service 2>/dev/null; systemctl restart fren-openclaw.service
       exit \$rc ;;
   esac
   as_agent "\$@"; exit \$?
