@@ -69,13 +69,25 @@ export interface SignerApi {
 export interface SignerOptions {
   /** Solana RPC used only for pre-sign simulation. Omit to skip simulation (tests, paper). */
   solanaRpcUrl?: string;
-  /** Arbitrum RPC for Hyperliquid deposits. Defaults to the public endpoint. */
+  /**
+   * Arbitrum RPC for Hyperliquid deposits. If unset, the deposit uses the
+   * Arbitrum entry of `evmRpcUrls` (config `evmRpcUrls.arbitrum`), and only
+   * then the public endpoint.
+   */
   arbitrumRpcUrl?: string;
   /** RPC per EVM chain id, overriding the public defaults. */
   evmRpcUrls?: Record<number, string>;
 }
 
 export const HL_AGENT_NAME = "fren";
+
+/** Arbitrum One and Arbitrum Sepolia chain ids, matching the daemon's `evmRpcsById`. */
+const ARBITRUM_CHAIN_ID = { mainnet: 42161, testnet: 421614 } as const;
+
+/** The RPC a Hyperliquid deposit goes through; `undefined` means the public default. */
+export function hlDepositRpcUrl(options: SignerOptions, isTestnet: boolean): string | undefined {
+  return options.arbitrumRpcUrl ?? options.evmRpcUrls?.[isTestnet ? ARBITRUM_CHAIN_ID.testnet : ARBITRUM_CHAIN_ID.mainnet];
+}
 
 export function createSigner(keys: KeyMaterial, options: SignerOptions = {}): SignerApi {
   const addresses = addressesOf(keys);
@@ -148,7 +160,7 @@ export function createSigner(keys: KeyMaterial, options: SignerOptions = {}): Si
     },
 
     async hlDepositFromArbitrum({ amountUsd, isTestnet }) {
-      return { txHash: await depositToHyperliquid(master, amountUsd, isTestnet, options.arbitrumRpcUrl) };
+      return { txHash: await depositToHyperliquid(master, amountUsd, isTestnet, hlDepositRpcUrl(options, isTestnet)) };
     },
 
     async evmSendTransaction(req) {
