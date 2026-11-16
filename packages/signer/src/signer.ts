@@ -1,7 +1,7 @@
 import { Connection, Keypair, VersionedTransaction } from "@solana/web3.js";
 import { privateKeyToAccount } from "viem/accounts";
 import { signL1Action, signUserSignedAction, type Signature } from "@nktkas/hyperliquid/signing";
-import { ApproveAgentTypes } from "@nktkas/hyperliquid/api/exchange";
+import { ApproveAgentTypes, Withdraw3Types } from "@nktkas/hyperliquid/api/exchange";
 import { depositToHyperliquid } from "./arbitrum.js";
 import { sendEvmTransaction, type EvmTxRequest } from "./evm.js";
 import {
@@ -16,7 +16,8 @@ import {
 } from "./derive.js";
 import { signPolymarketTypedData, type PolyTypedData } from "./polymarket.js";
 import { addressesOf, type Addresses, type KeyMaterial } from "./keystore.js";
-import { SignerRuleError, checkHyperliquidAction, checkSolanaTransaction, type SolanaTxReport } from "./rules.js";
+import { checkHyperliquidAction, checkSolanaTransaction, SignerRuleError, type SolanaTxReport } from "./rules.js";
+import { fetchLookupTables, simulateAndCheck } from "./solana-sim.js";
 
 export type { Signature };
 
@@ -54,6 +55,12 @@ export interface SignerApi {
   solSignTransaction(req: SolSignRequest): Promise<SolSignResult>;
   /** Move USDC from the wallet's own Arbitrum address into its own Hyperliquid account. */
   hlDepositFromArbitrum(req: { amountUsd: number; isTestnet: boolean }): Promise<{ txHash: `0x${string}` }>;
+  /**
+   * Withdraw USDC from the wallet's own Hyperliquid account to the same
+   * address on Arbitrum. The destination is fixed in the signer; the engine
+   * only chooses the amount. Returns the signed action for the engine to post.
+   */
+  hlWithdrawToSelf(req: { amountUsd: number; isTestnet: boolean }): Promise<HlApproveAgentResult>;
   /** Send an EVM transaction to an allow-listed contract (Relay swaps and their approvals). Never carries ETH. */
   evmSendTransaction(req: EvmTxRequest): Promise<{ txHash: `0x${string}` }>;
   /** Sign a Derive option order with the session key. The signer builds the action; it can only be a trade. */
@@ -67,15 +74,33 @@ export interface SignerApi {
 }
 
 export interface SignerOptions {
-  /** Solana RPC used only for pre-sign simulation. Omit to skip simulation (tests, paper). */
+  /**
+   * Solana RPC for lookup tables and pre-sign simulation. Omit only in tests:
+   * without it the token-account checks don't run.
+   */
   solanaRpcUrl?: string;
-  /** Arbitrum RPC for Hyperliquid deposits. Defaults to the public endpoint. */
+  /**
+   * Arbitrum RPC for Hyperliquid deposits. If unset, the deposit uses the
+   * Arbitrum entry of `evmRpcUrls` (config `evmRpcUrls.arbitrum`), and only
+   * then the public endpoint.
+   */
   arbitrumRpcUrl?: string;
   /** RPC per EVM chain id, overriding the public defaults. */
   evmRpcUrls?: Record<number, string>;
 }
 
 export const HL_AGENT_NAME = "fren";
+
+/** Hyperliquid charges 1 USDC per withdrawal; anything at or under it would arrive as nothing. */
+export const HL_WITHDRAW_FEE_USD = 1;
+
+/** Arbitrum One and Arbitrum Sepolia chain ids, matching the daemon's `evmRpcsById`. */
+const ARBITRUM_CHAIN_ID = { mainnet: 42161, testnet: 421614 } as const;
+
+/** The RPC a Hyperliquid deposit goes through; `undefined` means the public default. */
+export function hlDepositRpcUrl(options: SignerOptions, isTestnet: boolean): string | undefined {
+  return options.arbitrumRpcUrl ?? options.evmRpcUrls?.[isTestnet ? ARBITRUM_CHAIN_ID.testnet : ARBITRUM_CHAIN_ID.mainnet];
+}
 
 export function createSigner(keys: KeyMaterial, options: SignerOptions = {}): SignerApi {
   const addresses = addressesOf(keys);
@@ -118,29 +143,14 @@ export function createSigner(keys: KeyMaterial, options: SignerOptions = {}): Si
 
     async solSignTransaction(req) {
       const tx = VersionedTransaction.deserialize(Buffer.from(req.txBase64, "base64"));
+      const lookupTables = connection ? await fetchLookupTables(connection, tx) : [];
       const report: SolSignResult["report"] = checkSolanaTransaction(tx, sol.publicKey, {
         ...(req.jitoTipLamports !== undefined ? { jitoTipLamports: req.jitoTipLamports } : {}),
+        lookupTables,
       });
 
       if (connection) {
-        const before = await connection.getBalance(sol.publicKey, "confirmed");
-        const sim = await connection.simulateTransaction(tx, {
-          sigVerify: false,
-          replaceRecentBlockhash: true,
-          accounts: { encoding: "base64", addresses: [sol.publicKey.toBase58()] },
-        });
-        if (sim.value.err) {
-          throw new SignerRuleError(`Simulation failed: ${JSON.stringify(sim.value.err)}`);
-        }
-        const after = sim.value.accounts?.[0]?.lamports;
-        if (after === undefined) throw new SignerRuleError("Simulation did not return the wallet balance.");
-        const delta = after - before;
-        report.simulatedSolDeltaLamports = delta;
-        if (-delta > req.maxSolSpendLamports) {
-          throw new SignerRuleError(
-            `Simulation shows the wallet losing ${-delta} lamports, more than the ${req.maxSolSpendLamports} allowed.`,
-          );
-        }
+        report.simulatedSolDeltaLamports = await simulateAndCheck(connection, tx, sol.publicKey, report, lookupTables, req.maxSolSpendLamports);
       }
 
       tx.sign([sol]);
@@ -148,7 +158,25 @@ export function createSigner(keys: KeyMaterial, options: SignerOptions = {}): Si
     },
 
     async hlDepositFromArbitrum({ amountUsd, isTestnet }) {
-      return { txHash: await depositToHyperliquid(master, amountUsd, isTestnet, options.arbitrumRpcUrl) };
+      return { txHash: await depositToHyperliquid(master, amountUsd, isTestnet, hlDepositRpcUrl(options, isTestnet)) };
+    },
+
+    async hlWithdrawToSelf({ amountUsd, isTestnet }) {
+      if (!(Number.isFinite(amountUsd) && amountUsd > HL_WITHDRAW_FEE_USD)) {
+        throw new SignerRuleError(`Hyperliquid withdrawals must be more than its ${HL_WITHDRAW_FEE_USD} USDC fee.`);
+      }
+      // The master key signs a withdrawal only to itself: the destination is not a parameter.
+      const nonce = Date.now();
+      const action = {
+        type: "withdraw3",
+        signatureChainId: (isTestnet ? "0x66eee" : "0xa4b1") as `0x${string}`,
+        hyperliquidChain: isTestnet ? "Testnet" : "Mainnet",
+        destination: master.address.toLowerCase(),
+        amount: String(Math.floor(amountUsd * 1e6) / 1e6),
+        time: nonce,
+      };
+      const signature = await signUserSignedAction({ wallet: master, action, types: Withdraw3Types });
+      return { action, signature, nonce };
     },
 
     async evmSendTransaction(req) {

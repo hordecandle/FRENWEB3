@@ -1,4 +1,8 @@
-import { PublicKey, SystemProgram, VersionedTransaction } from "@solana/web3.js";
+import { PublicKey, SystemProgram, VersionedTransaction, type AddressLookupTableAccount } from "@solana/web3.js";
+import { SignerRuleError } from "./errors.js";
+import { checkJupiterIx, checkJupiterLendIx, checkKaminoIx, type IxContext, type IxEffects } from "./solana-ix.js";
+
+export { SignerRuleError };
 
 /**
  * Hard rules the signer applies to everything it is asked to sign. These run
@@ -57,6 +61,7 @@ export const SOLANA_PROGRAMS = {
 
 const NATIVE_MINT = new PublicKey("So11111111111111111111111111111111111111112");
 
+
 /** Jito's published tip accounts. A snipe may tip one of these, up to the cap. */
 export const JITO_TIP_ACCOUNTS = new Set([
   "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
@@ -79,12 +84,26 @@ export interface SolanaTxRules {
   maxPriorityFeeLamports?: number;
   /** Allow one tip to a Jito tip account of at most this many lamports (never above MAX_JITO_TIP_LAMPORTS). */
   jitoTipLamports?: number;
+  /**
+   * The transaction's address lookup tables, fetched by the signer. Without
+   * them, an account that has to be checked but sits in a lookup table makes
+   * the transaction refused.
+   */
+  lookupTables?: AddressLookupTableAccount[];
 }
 
 export interface SolanaTxReport {
   programs: string[];
   priorityFeeLamports: number;
   jitoTipLamports: number;
+  /**
+   * Wallet token accounts the checked instructions may draw down: raw amount
+   * as a decimal string, or null for no fixed bound. Any other wallet token
+   * account going down in simulation is refused.
+   */
+  spends: Record<string, string | null>;
+  /** Wallet token accounts that must go up (swap outputs). */
+  mustIncrease: string[];
 }
 
 export function associatedTokenAddress(owner: PublicKey, mint: PublicKey, tokenProgram: string): PublicKey {
@@ -110,9 +129,9 @@ export function associatedTokenAddress(owner: PublicKey, mint: PublicKey, tokenP
  */
 export function checkSolanaTransaction(tx: VersionedTransaction, owner: PublicKey, rules: SolanaTxRules = {}): SolanaTxReport {
   const msg = tx.message;
-  const keys = msg.staticAccountKeys;
   const ownerB58 = owner.toBase58();
-  if (keys[0]?.toBase58() !== ownerB58) throw new SignerRuleError("The wallet must pay the fee for its own transactions.");
+  if (msg.staticAccountKeys[0]?.toBase58() !== ownerB58) throw new SignerRuleError("The wallet must pay the fee for its own transactions.");
+  const keys = resolveAccountKeys(tx, rules.lookupTables);
 
   const allowed = new Set<string>([...Object.values(SOLANA_PROGRAMS), ...(rules.extraPrograms ?? [])]);
   const wsolAccounts = new Set([
@@ -122,8 +141,18 @@ export function checkSolanaTransaction(tx: VersionedTransaction, owner: PublicKe
 
   const keyAt = (i: number): string => {
     const k = keys[i];
-    if (!k) throw new SignerRuleError("Instruction references an account from a lookup table where a known account is required.");
-    return k.toBase58();
+    if (!k) throw new SignerRuleError("Instruction references an account from a lookup table the signer could not read.");
+    return k;
+  };
+  const spends = new Map<string, bigint | null>();
+  const mustIncrease = new Set<string>();
+  const merge = (fx: IxEffects) => {
+    for (const { account, maxRaw } of fx.spends) {
+      const prev = spends.get(account);
+      // Two bounded spends from one account add up; anything unbounded stays unbounded.
+      spends.set(account, prev === undefined ? maxRaw : prev === null || maxRaw === null ? null : prev + maxRaw);
+    }
+    for (const a of fx.mustIncrease) mustIncrease.add(a);
   };
 
   const tipCap = Math.min(rules.jitoTipLamports ?? 0, MAX_JITO_TIP_LAMPORTS);
@@ -137,8 +166,22 @@ export function checkSolanaTransaction(tx: VersionedTransaction, owner: PublicKe
     programs.push(program);
     if (!allowed.has(program)) throw new SignerRuleError(`Program ${program} is not on the signer's allow list.`);
     const data = Buffer.from(ix.data);
+    const ctx: IxContext = { owner: ownerB58, data, acct: (i) => keyAt(ix.accountKeyIndexes[i] ?? -1), count: ix.accountKeyIndexes.length };
 
-    if (program === SOLANA_PROGRAMS.system) {
+    if (program === SOLANA_PROGRAMS.jupiterV6) {
+      merge(checkJupiterIx(ctx));
+    } else if (program === SOLANA_PROGRAMS.jupiterLend) {
+      merge(checkJupiterLendIx(ctx));
+    } else if (program === SOLANA_PROGRAMS.kaminoLend) {
+      merge(checkKaminoIx(ctx));
+    } else if (program === SOLANA_PROGRAMS.pumpFun || program === SOLANA_PROGRAMS.pumpAmm) {
+      // pump.fun layouts are not pinned here; the simulation still refuses any
+      // change of owner or delegate, and only lets the token accounts handed
+      // to this instruction go down.
+      ix.accountKeyIndexes.forEach((k) => {
+        if (msg.isAccountWritable(k) && keys[k]) merge({ spends: [{ account: keys[k]!, maxRaw: null }], mustIncrease: [] });
+      });
+    } else if (program === SOLANA_PROGRAMS.system) {
       const kind = data.readUInt32LE(0);
       if (kind !== 2) throw new SignerRuleError(`System instruction ${kind} is not allowed.`);
       const dest = keyAt(ix.accountKeyIndexes[1] ?? -1);
@@ -177,6 +220,11 @@ export function checkSolanaTransaction(tx: VersionedTransaction, owner: PublicKe
     } else if (program === SOLANA_PROGRAMS.computeBudget) {
       if (data[0] === 2) cuLimit = data.readUInt32LE(1);
       if (data[0] === 3) cuPriceMicroLamports = data.readBigUInt64LE(1);
+    } else {
+      // Kamino's oracle refresh and any extra program: never handed the wallet.
+      for (let i = 0; i < ctx.count; i++) {
+        if (ctx.acct(i) === ownerB58) throw new SignerRuleError(`Program ${program} may not be given the wallet.`);
+      }
     }
   }
 
@@ -185,9 +233,29 @@ export function checkSolanaTransaction(tx: VersionedTransaction, owner: PublicKe
   if (priorityFeeLamports > cap) {
     throw new SignerRuleError(`Priority fee of ${priorityFeeLamports} lamports is over the ${cap} lamport cap.`);
   }
-  return { programs, priorityFeeLamports, jitoTipLamports: tipped };
+  return {
+    programs,
+    priorityFeeLamports,
+    jitoTipLamports: tipped,
+    spends: Object.fromEntries([...spends].map(([a, v]) => [a, v === null ? null : v.toString()])),
+    mustIncrease: [...mustIncrease],
+  };
 }
 
-export class SignerRuleError extends Error {
-  override name = "SignerRuleError";
+/** Every account the transaction names, static ones first, then lookup-table ones; `undefined` where a table is missing. */
+export function resolveAccountKeys(tx: VersionedTransaction, lookupTables: AddressLookupTableAccount[] = []): Array<string | undefined> {
+  const msg = tx.message;
+  const out: Array<string | undefined> = msg.staticAccountKeys.map((k) => k.toBase58());
+  const lookups = msg.addressTableLookups ?? [];
+  const byKey = new Map(lookupTables.map((t) => [t.key.toBase58(), t]));
+  const pick = (which: "writableIndexes" | "readonlyIndexes") => {
+    for (const l of lookups) {
+      const table = byKey.get(l.accountKey.toBase58());
+      for (const i of l[which]) out.push(table?.state.addresses[i]?.toBase58());
+    }
+  };
+  pick("writableIndexes");
+  pick("readonlyIndexes");
+  return out;
 }
+

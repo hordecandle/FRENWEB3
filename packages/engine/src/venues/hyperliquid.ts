@@ -239,6 +239,24 @@ export class HyperliquidVenue implements VenueAdapter {
     this.o.store.setKv(key, "1");
   }
 
+  /**
+   * Withdraw USDC from Hyperliquid to the wallet's own Arbitrum address. The
+   * signer fixes the destination; Hyperliquid takes a 1 USDC fee and pays out
+   * in a few minutes.
+   */
+  async withdrawToArbitrum(amountUsd: number): Promise<string> {
+    const { action, signature, nonce } = await this.signer().hlWithdrawToSelf({ amountUsd, isTestnet: this.o.isTestnet });
+    const res = await postJson<OrderResponse>(this.o.fetchFn, `${this.o.apiUrl}/exchange`, { action, nonce, signature });
+    if (res.status !== "ok") throw new VenueError(`Hyperliquid refused the withdrawal: ${typeof res.response === "string" ? res.response : JSON.stringify(res.response)}`);
+    return `✅ Withdrawal of ${fmtUsd(amountUsd)} USDC to ${String(action.destination)} on Arbitrum requested (Hyperliquid keeps 1 USDC as its fee).`;
+  }
+
+  /** USDC Hyperliquid would let this account withdraw right now (main dex). */
+  async withdrawableUsd(): Promise<number | null> {
+    if (!this.o.signer) return null;
+    return Number((await this.clearinghouse("")).withdrawable);
+  }
+
   private async liveOpen(leg: PerpOpenLeg, ctx: ExecContext): Promise<ExecResult> {
     await this.ensureAgent();
     const m = await this.market(leg.market);

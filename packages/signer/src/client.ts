@@ -103,6 +103,9 @@ export class SignerProcess implements SignerApi {
   hlDepositFromArbitrum(req: { amountUsd: number; isTestnet: boolean }) {
     return this.call<{ txHash: `0x${string}` }>("hlDepositFromArbitrum", req);
   }
+  hlWithdrawToSelf(req: { amountUsd: number; isTestnet: boolean }) {
+    return this.call<HlApproveAgentResult>("hlWithdrawToSelf", req);
+  }
 
   evmSendTransaction(req: EvmTxRequest) {
     return this.call<{ txHash: `0x${string}` }>("evmSendTransaction", req);

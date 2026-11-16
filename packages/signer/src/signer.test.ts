@@ -63,6 +63,29 @@ describe("hyperliquid rules", () => {
     await expect(signer.hlDepositFromArbitrum({ amountUsd: 4, isTestnet: true })).rejects.toThrow(/at least 5 USDC/);
   });
 
+  it("withdraws from Hyperliquid only to its own address, and only above the fee", async () => {
+    const keys = generateKeys();
+    const s = createSigner(keys);
+    const res = await s.hlWithdrawToSelf({ amountUsd: 7.5, isTestnet: false });
+    expect(res.action).toMatchObject({ type: "withdraw3", hyperliquidChain: "Mainnet", destination: addressesOf(keys).evm.toLowerCase(), amount: "7.5" });
+    const { recoverTypedDataAddress } = await import("viem");
+    const { Withdraw3Types } = await import("@nktkas/hyperliquid/api/exchange");
+    const sig = res.signature;
+    const signer = await recoverTypedDataAddress({
+      domain: { name: "HyperliquidSignTransaction", version: "1", chainId: 0xa4b1, verifyingContract: "0x0000000000000000000000000000000000000000" },
+      types: Withdraw3Types,
+      primaryType: "HyperliquidTransaction:Withdraw",
+      message: { hyperliquidChain: "Mainnet", destination: res.action.destination, amount: "7.5", time: BigInt(res.nonce) },
+      signature: { r: sig.r, s: sig.s, v: BigInt(sig.v) },
+    });
+    expect(signer.toLowerCase()).toBe(addressesOf(keys).evm.toLowerCase());
+    await expect(s.hlWithdrawToSelf({ amountUsd: 1, isTestnet: true })).rejects.toThrow(/fee/);
+    await expect(s.hlWithdrawToSelf({ amountUsd: Number.NaN, isTestnet: true })).rejects.toThrow(/fee/);
+    // Extra fields can't redirect it: the request type has no destination, and one passed anyway is ignored.
+    const sneaky = await s.hlWithdrawToSelf({ amountUsd: 3, isTestnet: true, destination: "0x000000000000000000000000000000000000dead" } as never);
+    expect(sneaky.action.destination).toBe(addressesOf(keys).evm.toLowerCase());
+  });
+
   it("only approves its own agent", async () => {
     const keys = generateKeys();
     const res = await createSigner(keys).hlApproveAgent({ isTestnet: true });
@@ -76,15 +99,16 @@ describe("solana rules", () => {
   const stranger = Keypair.generate().publicKey;
   const wsol = associatedTokenAddress(owner, new PublicKey("So11111111111111111111111111111111111111112"), SOLANA_PROGRAMS.token);
 
-  it("allows wrapping SOL into the wallet's own account plus a Jupiter route", () => {
-    const tx = txFor(owner, [
+  it("allows wrapping SOL into the wallet's own account, but not an unknown Jupiter instruction", () => {
+    const wrap = [
       ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }),
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000 }),
       SystemProgram.transfer({ fromPubkey: owner, toPubkey: wsol, lamports: 1_000_000 }),
-      new TransactionInstruction({ programId: new PublicKey(SOLANA_PROGRAMS.jupiterV6), keys: [], data: Buffer.from([1, 2, 3]) }),
-    ]);
-    const report = checkSolanaTransaction(tx, owner);
-    expect(report.priorityFeeLamports).toBe(300);
+    ];
+    expect(checkSolanaTransaction(txFor(owner, wrap), owner).priorityFeeLamports).toBe(300);
+    // Real Jupiter routes are checked against API fixtures in solana-h1.test.ts.
+    const junk = new TransactionInstruction({ programId: new PublicKey(SOLANA_PROGRAMS.jupiterV6), keys: [], data: Buffer.from([1, 2, 3]) });
+    expect(() => checkSolanaTransaction(txFor(owner, [...wrap, junk]), owner)).toThrow(/Jupiter instruction/);
   });
 
   it("refuses a SOL transfer to someone else", () => {
