@@ -62,6 +62,8 @@ const E164 = /^\+[1-9]\d{6,14}$/;
 export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<SetupResult> {
   const { io } = deps;
   try {
+    // Isolated: say so before the questions, not after five minutes of them.
+    if (isolatedMarker(deps.paths)) throw new Error(LOCKED_AWAY);
     io.say(`
   ┌───────────────────────────────────────────┐
   │  Fren setup: a few questions, ~5 minutes  │
@@ -223,6 +225,8 @@ function lastLines(r: { stdout: string; stderr: string }): string {
   return (r.stderr || r.stdout).trim().split("\n").slice(-3).join("\n");
 }
 
+const LOCKED_AWAY = "Fren's keys are locked away with the engine user. Run `sudo fren isolate --undo` first, then setup, then `sudo fren isolate` (on a VPS `sudo fren setup` does all three).";
+
 /** Wallets, config and the plugin: the last step of both setups. */
 export async function finishSetup(
   deps: Pick<SetupDeps, "run" | "openclawBin" | "paths" | "pluginDir">,
@@ -231,7 +235,7 @@ export async function finishSetup(
   if (isolatedMarker(deps.paths)) {
     // Wallets live with the engine's own user now; a fresh initFren here would
     // quietly make new ones.
-    throw new Error("Fren's keys are locked away with the engine user. Run `sudo fren isolate --undo` first, then setup, then `sudo fren isolate`.");
+    throw new Error(LOCKED_AWAY);
   }
   const res = initFren(deps.paths, { network: o.network, ...(o.jupiterApiKey ? { jupiterApiKey: o.jupiterApiKey } : {}), ...o.line });
   await mustRun(deps, deps.openclawBin, ["plugins", "install", "--link", "--accept-capabilities", "--force", deps.pluginDir], "install the Fren plugin");

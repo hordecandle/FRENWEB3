@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -87,6 +87,17 @@ const startMessage = {
 };
 
 describe("fren setup", () => {
+  it("stops before any question when the keys are locked away with the engine user", async () => {
+    const { run, runs } = fakeRunner(false);
+    const io = scriptedIo([]);
+    const d = deps({ io, run, fetchFn: fakeTelegram([]).fetchFn });
+    mkdirSync(d.paths.home, { recursive: true });
+    writeFileSync(join(d.paths.home, "engine.json"), JSON.stringify({ engineUser: "fren-engine", frenHome: "/var/lib/fren-engine/.fren" }));
+    await expect(runSetup(d, { server: true })).rejects.toThrow(/locked away/);
+    expect(io.out.some((l) => l.startsWith("?"))).toBe(false);
+    expect(runs).toEqual([]);
+  });
+
   it("links Telegram with the owner as the only sender, creates wallets and installs the plugin", async () => {
     const tg = fakeTelegram([startMessage]);
     const { run, runs } = fakeRunner(false);

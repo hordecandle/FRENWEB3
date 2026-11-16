@@ -180,12 +180,15 @@ async function installIsolatedService(run: Runner, agentUser: string, engineUser
   let node = process.execPath;
   let cli = join(appDir, "packages/engine/dist/cli.js");
   if (!rootOwned(node) || !rootOwned(appDir)) {
+    // Staged next to it, then swapped: this node or app may be the old /opt/fren.
+    await mustRun(run, "rm", ["-rf", "/opt/fren.new"]);
+    await mustRun(run, "mkdir", ["-p", "/opt/fren.new/bin"]);
+    await mustRun(run, "cp", [node, "/opt/fren.new/bin/node"]);
+    await mustRun(run, "cp", ["-a", appDir, "/opt/fren.new/app"]);
+    await mustRun(run, "chown", ["-R", "root:root", "/opt/fren.new"]);
+    await mustRun(run, "chmod", ["-R", "go-w,a+rX", "/opt/fren.new"]);
     await mustRun(run, "rm", ["-rf", "/opt/fren"]);
-    await mustRun(run, "mkdir", ["-p", "/opt/fren/bin"]);
-    await mustRun(run, "cp", [node, "/opt/fren/bin/node"]);
-    await mustRun(run, "cp", ["-a", appDir, "/opt/fren/app"]);
-    await mustRun(run, "chown", ["-R", "root:root", "/opt/fren"]);
-    await mustRun(run, "chmod", ["-R", "go-w,a+rX", "/opt/fren"]);
+    await mustRun(run, "mv", ["/opt/fren.new", "/opt/fren"]);
     node = "/opt/fren/bin/node";
     cli = "/opt/fren/app/packages/engine/dist/cli.js";
     console.log("✓ Copied Fren and Node to /opt/fren (root-owned: the agent's user can't change what the engine runs)");
