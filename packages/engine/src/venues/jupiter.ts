@@ -274,6 +274,7 @@ export class JupiterVenue implements SpotVenueAdapter {
       symbol: t.symbol,
       spendUsd: spend,
       notionalUsd: spend,
+      ...(leg.side === "sell" && leg.amount.type === "usd" ? { sellUsd: leg.amount.usd } : {}),
       verifiedToken: t.verified,
       ...(notes.length ? { notes } : {}),
     };

@@ -68,6 +68,15 @@ describe("selling native ETH, live", () => {
     expect(out).toMatch(/✅ Sold 0\.01634 ETH on Arbitrum for \$32\.68 at \$2,000.* · https:\/\/arbiscan\.io\/tx\/0x0+1/);
   });
 
+  it("with auto-approve $0 the sale waits for /ok and sends nothing before it", async () => {
+    const { t, sent } = await live({ "arbitrum:native": HELD });
+    const res = await t.fren.submit(sellEth("arbitrum", { type: "usd", usd: 28 }));
+    expect(res.verdict).toBe("needs_code");
+    expect(sent).toHaveLength(0);
+    expect(await t.fren.approve(codeFrom(t.notifier.sent))).toMatch(/✅ Sold/);
+    expect(sent).toHaveLength(1);
+  });
+
   it("'sell all my ETH' keeps the gas reserve", async () => {
     const { sent, run } = await live({ "arbitrum:native": HELD });
     const out = await run(sellEth("arbitrum", { type: "fraction", fraction: 1 }));

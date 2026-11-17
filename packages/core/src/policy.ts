@@ -21,6 +21,12 @@ export interface ResolvedStep {
    * it still needs the owner's code.
    */
   movesUsd?: number;
+  /**
+   * USD value of what a swap sells, when the venue can tell (an amount given in
+   * dollars). A sale spends $0, so without this it would slip under the
+   * auto-approve level; a live sale of unknown value (a fraction of a balance) always asks for the owner's code.
+   */
+  sellUsd?: number;
   /** Venue's own leverage cap for this market, when it has one. */
   venueMaxLeverage?: number;
   /** False when a token could not be matched to a verified list. */
@@ -123,8 +129,11 @@ export function evaluatePolicy(
     if (isNow) spendNow += r.spendUsd;
     spendTotal += r.spendUsd;
 
+    // Auto-approve at $0 means every live trade waits for the owner's code, whatever it spends (sales and closes spend $0).
+    if (limits.autoApproveUsd <= 0) needsConfirm = true;
     if (r.spendUsd > limits.autoApproveUsd) needsConfirm = true;
     if ((r.movesUsd ?? 0) > limits.autoApproveUsd) needsConfirm = true;
+    if (leg.kind === "swap" && leg.side === "sell" && ((r.sellUsd === undefined && limits.mode === "live") || (r.sellUsd ?? 0) > limits.autoApproveUsd)) needsConfirm = true;
 
     const verdict: Verdict = reasons.length > 0 ? "reject" : needsConfirm ? "confirm" : "execute";
     return { index: r.index, verdict, reasons, warnings };
@@ -138,7 +147,7 @@ export function evaluatePolicy(
   if (state.openPositions + newPositions > limits.maxOpenPositions) {
     planReasons.push(`Would open ${newPositions} more position(s); your cap is ${limits.maxOpenPositions} open.`);
   }
-  if (!options.preApproved && spendTotal > limits.autoApproveUsd) {
+  if (!options.preApproved && (spendTotal > limits.autoApproveUsd || limits.autoApproveUsd <= 0)) {
     for (const d of decisions) if (d.verdict === "execute") d.verdict = "confirm";
   }
   if (options.preApproved) {
