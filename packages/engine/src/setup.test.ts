@@ -138,6 +138,10 @@ describe("fren setup", () => {
     expect(runs).toContain("openclaw config set tools.loopDetection.enabled true");
     expect(runs).toContain("openclaw config set tools.exec.notifyOnExit false");
     expect(runs).toContain("openclaw config set plugins.entries.fren.hooks.allowConversationAccess true");
+    // Fren's own voice goes into the OpenClaw workspace (under this install's home), and the terminal says what it's doing.
+    expect(readFileSync(join(d.home, ".openclaw/workspace/IDENTITY.md"), "utf8")).toMatch(/Name: Fren/);
+    expect(io.out.some((l) => l.startsWith("Linking your bot to OpenClaw"))).toBe(true);
+    expect(io.out.some((l) => l.startsWith("Making your wallets and setting up OpenClaw"))).toBe(true);
     expect(runs).toContain(`openclaw config set channels.telegram.groupPolicy "disabled"`);
     // Server mode: the VPS installer owns the services.
     expect(runs.some((r) => r.startsWith("systemctl") || r.startsWith("openclaw daemon"))).toBe(false);
