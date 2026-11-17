@@ -369,7 +369,7 @@ export class Fren {
         for (const s of steps) {
           if (s.status !== "waiting" && s.status !== "pending") continue;
           const leg = p.plan.steps[s.idx]?.leg;
-          const isExit = leg?.kind === "perp_close" || (leg?.kind === "swap" && leg.side === "sell");
+          const isExit = isExitLeg(leg);
           if (isExit && status === "active") {
             keptExits++;
             continue;
@@ -533,9 +533,14 @@ export class Fren {
     this.ticking = true;
     try {
       const limits = this.limits();
-      if (limits.paused) return;
       const snap = await this.snapshot();
       await this.paperExits(snap);
+      // Paused: the watcher keeps running but only exits fire (sales, closes, paper stops);
+      // entries, buys, snipes and bets wait for /resume or were cancelled by the pause.
+      if (limits.paused) {
+        await this.fireReady(snap, false, true);
+        return;
+      }
       if (limits.mode === "paper") await this.settlePaperBets();
       await this.fireReady(snap, false);
     } finally {
@@ -544,13 +549,14 @@ export class Fren {
   }
 
   /** Fire every waiting step whose conditions hold in this snapshot. */
-  private async fireReady(snap: MarketSnapshot, snipesOnly: boolean): Promise<void> {
+  private async fireReady(snap: MarketSnapshot, snipesOnly: boolean, exitsOnly = false): Promise<void> {
     for (const rec of this.d.store.plansWithStatus("active")) {
       for (const s of this.d.store.getSteps(rec.id)) {
         if (s.status !== "waiting") continue;
         const step = rec.plan.steps[s.idx];
         if (!step) continue;
         if (snipesOnly && !step.when.some((c) => c.type === "tradable")) continue;
+        if (exitsOnly && !isExitLeg(step.leg)) continue;
         if (step.expiresAt && snap.now.getTime() > new Date(step.expiresAt).getTime()) {
           this.d.store.setStep(rec.id, s.idx, "expired", "Expired before its conditions were met");
           await this.d.notifier.alert(`⌛ Expired without firing: ${describeStep(step)}`);
@@ -572,7 +578,8 @@ export class Fren {
           continue;
         }
         r.index = s.idx;
-        const decision = evaluatePolicy([r], this.limits(), this.policyState(rec.mode), { preApproved: true });
+        // An exit may fire while paused; every other cap still applies.
+        const decision = evaluatePolicy([r], exitsOnly ? { ...this.limits(), paused: false } : this.limits(), this.policyState(rec.mode), { preApproved: true });
         if (decision.verdict === "reject") {
           this.d.store.setStep(rec.id, s.idx, "rejected", describeDecision(decision, [r]));
           await this.d.notifier.alert(`❌ Conditions met but your limits blocked it:\n${describeDecision(decision, [r])}`);
@@ -819,6 +826,11 @@ function describePosition(p: PositionView): string {
   if (p.venue === "polymarket") return `${size} shares of ${p.symbol} worth ${fmtUsd(p.valueUsd)}${pnl}`;
   if (p.venue === "yield") return `${fmtUsd(p.valueUsd)} USDC lent on ${p.symbol}${p.pnlUsd !== null && p.pnlUsd > 0.005 ? ` (+${fmtUsd(p.pnlUsd)} interest)` : ""}`;
   return `${p.size} ${p.symbol} worth ${fmtUsd(p.valueUsd)}${pnl}`;
+}
+
+/** A step that only reduces exposure: closing a perp or selling a token. */
+function isExitLeg(leg: { kind: string; side?: string } | undefined): boolean {
+  return leg?.kind === "perp_close" || (leg?.kind === "swap" && leg.side === "sell");
 }
 
 /** The limits that differ between two sets. `paused` is never carried: only /stop and /resume touch it. */

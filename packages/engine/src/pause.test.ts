@@ -87,3 +87,59 @@ describe("pause (/fren_stop)", () => {
     expect(await t.fren.approve("")).toMatch(/Send \/ok followed by the code/);
   });
 });
+
+describe("pause: the watcher still runs exits", () => {
+  const SOL = "So11111111111111111111111111111111111111112";
+  const buySol = { request: "buy sol", steps: [{ leg: { kind: "swap", venue: "jupiter", side: "buy", token: SOL, amount: { type: "usd", usd: 40 } } }] };
+  const stopSell = {
+    request: "sell sol if it drops",
+    steps: [{ leg: { kind: "swap", venue: "jupiter", side: "sell", token: SOL, amount: { type: "fraction", fraction: 1 } }, when: [{ type: "price", venue: "jupiter", market: SOL, op: "<", value: 150 }] }],
+  };
+  const buyDip = {
+    request: "buy sol on a dip",
+    steps: [{ leg: { kind: "swap", venue: "jupiter", side: "buy", token: SOL, amount: { type: "usd", usd: 10 } }, when: [{ type: "price", venue: "jupiter", market: SOL, op: "<", value: 150 }] }],
+  };
+
+  it("a waiting spot stop-sale fires while paused", async () => {
+    const t = buildTestFren({});
+    await t.fren.submit(buySol as never);
+    expect(t.store.paperHoldings()).toHaveLength(1);
+    await t.fren.submit(stopSell as never);
+    await t.fren.stop();
+    expect(t.store.plansWithStatus("active")).toHaveLength(1); // the exit was kept
+    t.fake.tokens.find((x) => x.id === SOL)!.usdPrice = 140;
+    await t.fren.tick();
+    expect(t.store.paperHoldings()).toHaveLength(0);
+    expect(t.fren.limits().paused).toBe(true);
+  });
+
+  it("a conditional buy does not fire while paused (it is cancelled by the pause)", async () => {
+    const t = buildTestFren({});
+    await t.fren.submit(buyDip as never);
+    await t.fren.stop();
+    t.fake.tokens.find((x) => x.id === SOL)!.usdPrice = 140;
+    await t.fren.tick();
+    expect(t.store.paperHoldings()).toHaveLength(0);
+    expect(t.store.recentFills(10)).toHaveLength(0);
+  });
+
+  it("a buy that is still waiting when paused (not cancelled) never fires", async () => {
+    const t = buildTestFren({});
+    await t.fren.submit(buyDip as never);
+    t.store.setLimits({ ...t.fren.limits(), paused: true }); // paused without stop(): nothing cancelled
+    t.fake.tokens.find((x) => x.id === SOL)!.usdPrice = 140;
+    await t.fren.tick();
+    expect(t.store.paperHoldings()).toHaveLength(0);
+    expect(t.store.recentFills(10)).toHaveLength(0);
+  });
+
+  it("a paper perp stop fires while paused", async () => {
+    const t = buildTestFren({});
+    await t.fren.submit({ ...goldLong(50), steps: [{ leg: { ...goldLong(50).steps[0]!.leg, leverage: 10, stopLossPct: 20 } }] } as never);
+    await t.fren.stop();
+    t.fake.setMid("xyz:GOLD", 3_900);
+    await t.fren.tick();
+    expect(t.store.paperPositions()).toHaveLength(0);
+    expect(t.notifier.sent.at(-1)).toMatch(/Stop hit, closed long xyz:GOLD/);
+  });
+});
