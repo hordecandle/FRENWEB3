@@ -98,6 +98,14 @@ Owner commands, which skip the model:
 
 Defaults: paper mode, $500 per trade, $2,000 per day, 20x max leverage, 10 open positions, auto-approve up to $100, all venues allowed. The agent can tighten these. Only you can loosen them.
 
+The agent itself is capped too, so it can't spin on your AI key: at most 12 tool calls and 120 seconds per message, 6 messages a minute per chat, 200 answers a day (then one short notice and a break until 00:00 UTC; owner commands keep working). There are no background AI turns (no heartbeat, no automations), and groups and bots get no answers. Change the caps in `~/.fren/config.json`:
+
+```json
+"agentGuard": { "turnsPerDay": 200, "turnsPerMinute": 6, "toolCallsPerTurn": 12 }
+```
+
+The daily cap applies on the next message; the other two within 5 minutes. `fren setup` turns all of this on; on an older install run `fren guard`, then restart the engine.
+
 ## Development
 
 ```bash

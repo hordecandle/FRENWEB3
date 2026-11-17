@@ -1,6 +1,7 @@
 import { Type, type TSchema } from "typebox";
 import { definePluginEntry, type OpenClawPluginApi, type OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 import { EngineClient, type OwnerResult } from "./client.js";
+import { LoopGuard, type ToolContext, type TurnContext } from "./guard.js";
 import planSchema from "./plan-schema.json" with { type: "json" };
 
 /**
@@ -315,6 +316,15 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
   });
 }
 
+/** Caps on agent turns and tool calls, see guard.ts. Older hosts without api.on just don't get them. */
+export function registerLoopGuard(api: Pick<OpenClawPluginApi, "on">, guard: LoopGuard) {
+  if (typeof api.on !== "function") return;
+  // A hook that throws would let the turn through (claim hooks fail open), so decide inside.
+  api.on("before_agent_reply", async (_event, ctx) => guard.beforeReply(ctx as TurnContext), { priority: 100 });
+  api.on("before_tool_call", async (event, ctx) => guard.beforeTool({ ...(ctx as ToolContext), toolName: event.toolName, runId: event.runId ?? ctx.runId }), { priority: 100 });
+  api.on("agent_end", async (_event, ctx) => guard.endRun(ctx));
+}
+
 export default definePluginEntry({
   id: "fren",
   name: "Fren",
@@ -327,6 +337,9 @@ export default definePluginEntry({
     });
     registerTools(api, client);
     const mode = api.registrationMode;
-    if (mode !== "cli-metadata" && mode !== "setup-only" && mode !== "tool-discovery") registerCommands(api, client);
+    if (mode !== "cli-metadata" && mode !== "setup-only" && mode !== "tool-discovery") {
+      registerCommands(api, client);
+      registerLoopGuard(api, new LoopGuard(client));
+    }
   },
 });
