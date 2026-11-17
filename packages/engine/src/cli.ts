@@ -8,7 +8,7 @@ import { readKeystoreAddresses } from "@fren/signer";
 import { frenPaths, initFren, loadConfig, parseNotify } from "./config.js";
 import { startDaemon } from "./daemon.js";
 import { ENGINE_USER, isolate, isolatedEngineUnit } from "./isolate.js";
-import { guardExisting, isolatedMarker, runSetup, systemSetupDeps } from "./setup.js";
+import { guardExisting, isolatedMarker, personaExisting, runSetup, systemSetupDeps } from "./setup.js";
 import { serveSetup } from "./setup-web.js";
 import { serveBotBroker } from "./managed-bot.js";
 import type { Runner } from "./setup.js";
@@ -38,6 +38,10 @@ const HELP = `fren: self-hosted on-chain trading agent backend
       no background AI turns, a time limit per answer, loop detection, groups
       off, then restart the OpenClaw gateway. Caps per message, minute and day
       live in agentGuard in config.json (see the README).
+  fren persona
+      Give an existing install Fren's own voice and trading rules (AGENTS.md,
+      SOUL.md, IDENTITY.md in the OpenClaw workspace; no first-run ritual),
+      then restart the OpenClaw gateway. Setup does it for new installs.
   fren wallet
       Print wallet addresses.
   fren status
@@ -152,6 +156,9 @@ Next: \`fren start\`, then install the OpenClaw plugin (see README), or run \`fr
     }
     case "guard":
       await guardExisting(systemSetupDeps(paths), (t) => console.log(t));
+      return;
+    case "persona":
+      await personaExisting(systemSetupDeps(paths), (t) => console.log(t));
       return;
     case "wallet": {
       if (isolatedMarker(paths)) {

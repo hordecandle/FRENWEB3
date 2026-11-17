@@ -8,6 +8,7 @@ import type { FrenPaths, InitOptions } from "./config.js";
 import { initFren } from "./config.js";
 import type { Fetch } from "./http.js";
 import { claimManagedBot, startManagedBot } from "./managed-bot.js";
+import { writePersona } from "./persona.js";
 
 /**
  * `fren setup`: the guided first run. It asks a handful of questions and does
@@ -95,7 +96,7 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
     ]);
     const jupiterApiKey = (await io.ask("Jupiter key (optional, makes fast buys of brand-new Solana coins more reliable; free at portal.jup.ag; Enter to skip)", "")).trim();
 
-    io.say("Making your wallets…");
+    io.say("Making your wallets and setting up OpenClaw, about a minute, keep this window open…");
     const { addresses } = await finishSetup(deps, { network, jupiterApiKey, line });
     io.say(`
 ✓ Your wallets are ready
@@ -229,7 +230,7 @@ const LOCKED_AWAY = "Fren's keys are locked away with the engine user. Run `sudo
 
 /** Wallets, config and the plugin: the last step of both setups. */
 export async function finishSetup(
-  deps: Pick<SetupDeps, "run" | "openclawBin" | "paths" | "pluginDir">,
+  deps: Pick<SetupDeps, "run" | "openclawBin" | "paths" | "pluginDir" | "home">,
   o: { network: "mainnet" | "testnet"; jupiterApiKey?: string; line: Pick<InitOptions, "telegram" | "notify"> },
 ) {
   if (isolatedMarker(deps.paths)) {
@@ -241,6 +242,7 @@ export async function finishSetup(
   await mustRun(deps, deps.openclawBin, ["plugins", "install", "--link", "--accept-capabilities", "--force", deps.pluginDir], "install the Fren plugin");
   await lockDownAgentTools(deps);
   await applyLoopGuard(deps);
+  await writePersona(deps);
   return res;
 }
 
@@ -291,6 +293,17 @@ export async function guardExisting(deps: Pick<SetupDeps, "run" | "openclawBin">
   }
   await applyLoopGuard(deps, channels);
   say(`✓ Loop guard on${channels.length ? ` (${channels.join(", ")})` : ""}: no background AI turns, ${LOOP_GUARD_TURN_SECONDS} s per answer, loop detection, groups off`);
+  const restarted = (await deps.run(deps.openclawBin, ["daemon", "restart"])).code === 0;
+  say(restarted ? "✓ OpenClaw gateway restarted" : `! Restart the OpenClaw gateway yourself: ${deps.openclawBin} daemon restart`);
+}
+
+/**
+ * `fren persona`: Fren's own AGENTS.md, SOUL.md and IDENTITY.md for an install that
+ * was set up before (the bot sounded like a bare OpenClaw), then a gateway restart.
+ */
+export async function personaExisting(deps: Pick<SetupDeps, "run" | "openclawBin" | "pluginDir"> & { home?: string }, say: (t: string) => void): Promise<void> {
+  const r = await writePersona(deps);
+  say(`✓ Fren's persona in ${r.dir}${r.written.length ? ` (${r.written.join(", ")})` : " (already up to date)"}${r.removed ? ", first-run ritual removed" : ""}`);
   const restarted = (await deps.run(deps.openclawBin, ["daemon", "restart"])).code === 0;
   say(restarted ? "✓ OpenClaw gateway restarted" : `! Restart the OpenClaw gateway yourself: ${deps.openclawBin} daemon restart`);
 }
@@ -420,6 +433,7 @@ Make your bot with @BotFather (takes a minute):
   io.say(`✓ Bot @${bot}`);
 
   const owner = await findTelegramOwner(deps, token, bot);
+  io.say("Linking your bot to OpenClaw, about a minute, keep this window open…");
   const line = await configureTelegram(deps, token, owner.id);
   io.say(`✓ Telegram linked: only ${owner.name} can use @${bot}`);
   return line;
@@ -432,12 +446,14 @@ async function oneTapTelegram(deps: SetupDeps, broker: string) {
   io.say(`
 Make your Telegram bot in one tap. Open this on the phone with Telegram and press Create:
   ${s.link}
-`);
+
+Waiting for you to press Create (up to 15 minutes)…`);
   for (let i = 0; i < 300; i++) {
     const r = await claimManagedBot(deps.fetchFn, s);
     if (r) {
       const bot = await telegramBot(deps.fetchFn, r.token);
       if (!bot) throw new Error("Telegram didn't accept the new bot's token");
+      io.say(`Got it: @${bot}. Linking it to OpenClaw, about a minute, keep this window open…`);
       const line = await configureTelegram(deps, r.token, r.owner.id);
       io.say(`✓ Telegram linked: only ${r.owner.name} can use @${bot}. Open it and press Start.`);
       return line;
