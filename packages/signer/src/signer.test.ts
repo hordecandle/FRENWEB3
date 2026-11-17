@@ -213,10 +213,12 @@ describe("EVM rules", () => {
   const approve = (spender: string, amount: bigint) =>
     `0x095ea7b3${spender.slice(2).padStart(64, "0")}${amount.toString(16).padStart(64, "0")}` as `0x${string}`;
 
-  it("sends only to Relay's contracts, never with ETH, on known chains", () => {
+  it("sends only to Relay's contracts, ETH only into Relay (eth-sell.test.ts), on known chains", () => {
     expect(checkEvmTransaction({ chainId: 8453, to: ROUTER, data: "0x1234" }).kind).toBe("relay");
     expect(() => checkEvmTransaction({ chainId: 8453, to: "0x9999999999999999999999999999999999999999", data: "0x1234" })).toThrow(/not on the signer's allow list/);
-    expect(() => checkEvmTransaction({ chainId: 8453, to: ROUTER, data: "0x1234", value: "1" })).toThrow(/never send ETH/);
+    // eth-sell/v1: ETH may go into Relay on Arbitrum and Base (sale of native ETH); anywhere else it is still refused.
+    expect(() => checkEvmTransaction({ chainId: 8453, to: "0x9999999999999999999999999999999999999999", data: "0x1234", value: "1" })).toThrow(/never send ETH/);
+    expect(() => checkEvmTransaction({ chainId: 4663, to: ROUTER, data: "0x1234", value: "1" })).toThrow(/only sells ETH on Arbitrum and Base/);
     expect(() => checkEvmTransaction({ chainId: 1, to: ROUTER, data: "0x1234" })).toThrow(/not one the signer sends on/);
   });
 

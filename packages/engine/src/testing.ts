@@ -107,6 +107,9 @@ export class FakeVenues {
     { chainId: 8453, address: BASE_DOG, symbol: "DOG", name: "Base Dog", decimals: 18, verified: false, price: 0.01 },
     { chainId: 8453, address: "0x3333333333333333333333333333333333333333", symbol: "BRETT", name: "Brett", decimals: 18, verified: true, price: 0.05 },
     { chainId: 4663, address: RH_FROG, symbol: "FROG", name: "Robin Frog", decimals: 18, verified: false, price: 0.002 },
+    // Native ETH, as Relay names it (zero address); prices and quotes only, Fren never looks it up.
+    { chainId: 42161, address: "0x0000000000000000000000000000000000000000", symbol: "ETH", name: "Ether", decimals: 18, verified: true, price: 2000 },
+    { chainId: 8453, address: "0x0000000000000000000000000000000000000000", symbol: "ETH", name: "Ether", decimals: 18, verified: true, price: 2000 },
   ];
   /** Every Relay quote request body. */
   relayQuotes: Record<string, unknown>[] = [];
@@ -515,6 +518,7 @@ export function buildTestFren(opts: TestFrenOptions = {}) {
     store,
     signer,
     erc20Balance: async (chain, token) => evmBalances[`${chain}:${token.toLowerCase()}`] ?? 0n,
+    nativeBalance: async (chain) => evmBalances[`${chain}:native`] ?? 0n,
     waitForTx: async (_chain, hash) => void evmTxs.push(hash),
     fillTimeoutMs: 1_000,
     evmRead: async () => encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }, { type: "uint256" }], [0n, 10n ** 27n, fake.aaveRateRay]),

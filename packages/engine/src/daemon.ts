@@ -58,6 +58,7 @@ export function buildFren({ config, store, signer, fetchFn = fetch, exec }: Buil
     store,
     signer,
     rpcUrls: config.evmRpcUrls,
+    gasReserveWei: ethToWei(config.evmGasReserveEth),
   });
   const lending: YieldProtocolAdapter[] = [
     new JupiterLendUsdc({ fetchFn, apiUrl: jupiterLendApiUrl(config), ...(config.jupiterApiKey ? { apiKey: config.jupiterApiKey } : {}), solana: jupiter }),
@@ -112,6 +113,7 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
       passphraseFile: paths.passphrase,
       solanaRpcUrl: config.solanaRpcUrl,
       evmRpcUrls: evmRpcsById(config),
+      evmGasReserveWei: ethToWei(config.evmGasReserveEth),
       ...(process.env.FREN_SIGNER_PREFIX ? { commandPrefix: process.env.FREN_SIGNER_PREFIX.split(" ") } : {}),
     });
     await signer.ready;
@@ -151,6 +153,11 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
   return { fren, server, stop: shutdown };
+}
+
+/** Config ETH amounts to wei, without float drift past 9 decimals. */
+export function ethToWei(eth: number): bigint {
+  return BigInt(Math.round(eth * 1e9)) * 1_000_000_000n;
 }
 
 /** The signer wants RPCs by chain id; the config names chains. */

@@ -61,7 +61,7 @@ export interface SignerApi {
    * only chooses the amount. Returns the signed action for the engine to post.
    */
   hlWithdrawToSelf(req: { amountUsd: number; isTestnet: boolean }): Promise<HlApproveAgentResult>;
-  /** Send an EVM transaction to an allow-listed contract (Relay swaps and their approvals). Never carries ETH. */
+  /** Send an EVM transaction to an allow-listed contract (Relay swaps and their approvals). Carries ETH only into a Relay swap selling ETH, keeping the gas reserve. */
   evmSendTransaction(req: EvmTxRequest): Promise<{ txHash: `0x${string}` }>;
   /** Sign a Derive option order with the session key. The signer builds the action; it can only be a trade. */
   deriveSignOrder(req: DeriveOrderRequest): Promise<DeriveOrderSignature>;
@@ -87,6 +87,8 @@ export interface SignerOptions {
   arbitrumRpcUrl?: string;
   /** RPC per EVM chain id, overriding the public defaults. */
   evmRpcUrls?: Record<number, string>;
+  /** ETH (wei) the wallet keeps for gas after selling ETH; from the owner's config. Default 0.0005 ETH. */
+  evmGasReserveWei?: bigint;
 }
 
 export const HL_AGENT_NAME = "fren";
@@ -180,7 +182,10 @@ export function createSigner(keys: KeyMaterial, options: SignerOptions = {}): Si
     },
 
     async evmSendTransaction(req) {
-      return { txHash: await sendEvmTransaction(master, req, options.evmRpcUrls) };
+      return { txHash: await sendEvmTransaction(master, req, {
+        ...(options.evmRpcUrls ? { rpcOverrides: options.evmRpcUrls } : {}),
+        ...(options.evmGasReserveWei !== undefined ? { gasReserveWei: options.evmGasReserveWei } : {}),
+      }) };
     },
 
     async deriveSignOrder(req) {

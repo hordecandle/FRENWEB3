@@ -195,7 +195,7 @@
                   "token": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Token mint / contract address (CA) or a ticker. Tickers only resolve to verified tokens."
+                    "description": "Token mint / contract address (CA) or a ticker. Tickers only resolve to verified tokens. \"ETH\" with relay on arbitrum or base is the wallet's own native ETH: selling it gives USDC on that chain and always leaves a little ETH for gas."
                   },
                   "amount": {
                     "oneOf": [

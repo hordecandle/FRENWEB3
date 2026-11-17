@@ -32,6 +32,11 @@ export const FrenConfig = z.object({
   deriveApiUrl: z.string().url().optional(),
   /** RPC overrides for EVM chains. */
   evmRpcUrls: z.object({ base: z.string().url(), robinhood: z.string().url(), arbitrum: z.string().url() }).partial().default({}),
+  /**
+   * ETH kept on Arbitrum and Base for gas when selling ETH: "sell all my ETH"
+   * leaves this much, and the signer refuses any sale that would dip below it.
+   */
+  evmGasReserveEth: z.number().min(0.0001).max(0.05).default(0.0005),
   /** Jito tip on launch snipes, in lamports (0.001 SOL default; the signer refuses more than 0.01 SOL). */
   snipeTipLamports: z.number().int().min(0).max(10_000_000).default(1_000_000),
   api: z
