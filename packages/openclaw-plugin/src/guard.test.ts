@@ -125,7 +125,7 @@ describe("loop guard scenarios (plugin + real engine + fake model)", () => {
       expect(gw.replies[0]).toMatch(/200 messages today/);
       expect(gw.replies[0]).not.toMatch(/\$|cost|money|spend/i);
       const stop = await commands.get("fren_stop").handler({ senderIsOwner: true, args: "" });
-      expect(stop.text).toMatch(/Stopped/);
+      expect(stop.text).toMatch(/Paused/);
       const limits = await commands.get("limits").handler({ senderIsOwner: true, args: "" });
       expect(limits.text).toBeTruthy();
     } finally {

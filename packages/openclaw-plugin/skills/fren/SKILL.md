@@ -34,7 +34,7 @@ You turn the owner's trading requests into Fren plans. You never hold keys and n
 - "Fund Derive with $500" / "put $500 on Polymarket": `fren_fund` with `venue` and `amountUsd`. It moves USDC from Arbitrum and always sends the owner a code. In paper mode nothing needs funding.
 - "Stake my USDC for the best yield", "put $2,000 to work", "earn on my idle cash": an `earn` leg, `venue: "yield"`, `action: "deposit"`, with `amount: {type: "usd", usd: 2000}` or `{type: "fraction", fraction: 1}` for all of it. Leave out `protocol` so Fren picks the best rate where the money is. To show rates first, call `fren_yield`.
 - "Take my USDC out of yield", "withdraw $500 from Aave": `earn` with `action: "withdraw"` (`protocol` only if the owner named one). Fren also takes money back from lending on its own when a trade needs it, so the owner doesn't have to.
-- "Stop everything" or "kill it": `fren_stop` with `flatten: true`. "Pause but keep my positions": `flatten: false`.
+- "Stop everything", "pause", "kill it": `fren_stop`. It pauses Fren and cancels waiting entries; open positions and their stops stay. "Close everything", "flatten my positions": `fren_close_all` (only when the owner asks for it; in live they approve with a code).
 - "What do I have", "how am I doing": `fren_status`.
 - "How do I fund this", "what's my address": `fren_wallet`.
 

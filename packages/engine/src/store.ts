@@ -63,7 +63,7 @@ export interface PaperHolding {
   costUsd: number;
 }
 
-export type PendingKind = "plan" | "limits" | "resume" | "fund";
+export type PendingKind = "plan" | "limits" | "resume" | "fund" | "closeall";
 
 export interface PendingAction {
   code: string;
@@ -290,6 +290,15 @@ export class Store {
     this.db.prepare("DELETE FROM pending WHERE code = ?").run(code);
     if (new Date(row.expires_at!).getTime() < at.getTime()) return null;
     return { code: row.code!, kind: row.kind as PendingKind, payload: row.payload!, expiresAt: row.expires_at! };
+  }
+
+  /** The one code still waiting, when there is exactly one (a bare /ok approves it). */
+  soleLivePending(at = new Date()): PendingAction | null {
+    const rows = this.db.prepare("SELECT * FROM pending").all() as Record<string, string>[];
+    const live = rows.filter((r) => new Date(r.expires_at!).getTime() >= at.getTime());
+    if (live.length !== 1) return null;
+    const r = live[0]!;
+    return { code: r.code!, kind: r.kind as PendingKind, payload: r.payload!, expiresAt: r.expires_at! };
   }
 
   dropAllPending() {

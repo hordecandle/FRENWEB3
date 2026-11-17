@@ -89,7 +89,8 @@ Owner commands, which skip the model:
 | Command | Does |
 | --- | --- |
 | `/ok CODE` | Approve a plan or a settings change |
-| `/fren_stop` (or `/fren_stop keep`) | Kill switch: pause, cancel waiting plans, close leveraged positions (or keep them) |
+| `/fren_stop` | Kill switch: pause, cancel waiting entries. Open positions and their stop-loss/take-profit stay as they are |
+| `/close_all` | Close every leveraged position at market (live: needs your code; works while paused) |
 | `/resume` | Turn Fren back on (sends a code) |
 | `/limits key=value …` | e.g. `/limits mode=live maxTradeUsd=2000 maxLeverage=40` (loosening sends a code) |
 | `/positions`, `/wallet` | Read-only views |

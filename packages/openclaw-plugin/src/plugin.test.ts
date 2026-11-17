@@ -45,7 +45,7 @@ describe("OpenClaw plugin against a real engine", () => {
 
   it("registers every declared tool and the owner commands", () => {
     expect([...reg.tools.keys()].sort()).toEqual([...TOOL_NAMES].sort());
-    expect([...reg.commands.keys()].sort()).toEqual(["fren_code", "fren_stop", "limits", "ok", "positions", "resume", "stop", "wallet"]);
+    expect([...reg.commands.keys()].sort()).toEqual(["close_all", "fren_code", "fren_stop", "limits", "ok", "positions", "resume", "stop", "wallet"]);
   });
 
   it("hides trading tools from people who aren't the owner", () => {
@@ -113,10 +113,13 @@ describe("OpenClaw plugin against a real engine", () => {
     expect(isOwner({ senderIsOwner: false, isAuthorizedSender: true, channel: "telegram", senderId: "777000123", config })).toBe(false);
   });
 
-  it("stops everything from /fren_stop (OpenClaw reserves /stop)", async () => {
+  it("pauses from /fren_stop (OpenClaw reserves /stop) and keeps positions; /close_all closes them", async () => {
     const res = await reg.commands.get("fren_stop").handler({ senderIsOwner: true, args: "" });
-    expect(res.text).toMatch(/Stopped/);
-    expect(res.text).toMatch(/Closed long xyz:GOLD/);
+    expect(res.text).toMatch(/Paused/);
+    expect(res.text).not.toMatch(/Closed long/);
+    expect((await reg.commands.get("close_all").handler({ senderIsOwner: false })).text).toMatch(/Only the owner/);
+    const closed = await reg.commands.get("close_all").handler({ senderIsOwner: true });
+    expect(closed.text).toMatch(/Closed long xyz:GOLD/);
     const resume = await reg.commands.get("resume").handler({ senderIsOwner: true });
     expect(resume.text).toMatch(/Code: [A-Z0-9]{6}/);
   });
