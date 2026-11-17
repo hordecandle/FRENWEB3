@@ -76,16 +76,16 @@ describe("loop guard scenarios (plugin + real engine + fake model)", () => {
   });
   afterAll(() => server.close());
 
-  it("cuts a tool loop at 12 tool calls in one message", async () => {
+  it("cuts a tool loop at 20 tool calls in one message", async () => {
     const { hooks } = loadPlugin({ apiUrl, tokenFile });
     const gw = fakeGateway(hooks, "looping");
     await gw.inbound({});
-    expect(gw.toolCalls).toBe(12);
-    // 12 allowed + 3 refused, then OpenClaw stops: a bounded run, not 1000 calls.
-    expect(gw.modelCalls).toBe(15);
+    expect(gw.toolCalls).toBe(20);
+    // 20 allowed + 3 refused, then OpenClaw stops: a bounded run, not 1000 calls.
+    expect(gw.modelCalls).toBe(23);
     // The next message starts with a fresh allowance.
     await gw.inbound({});
-    expect(gw.toolCalls).toBe(24);
+    expect(gw.toolCalls).toBe(40);
   });
 
   it("gives bots and other agents 0 model calls", async () => {
@@ -135,13 +135,16 @@ describe("loop guard scenarios (plugin + real engine + fake model)", () => {
 });
 
 describe("LoopGuard", () => {
-  it("lets 6 messages a minute through per chat, drops the rest silently", async () => {
+  it("lets 10 messages a minute through per chat, says so once, then drops the rest", async () => {
     let now = Date.parse("2026-11-17T12:00:00Z");
     const g = new LoopGuard(null, () => now);
     const ctx = { trigger: "user", channel: "telegram", chatId: "1", inputProvenance: { kind: "external_user" } };
     const results = [];
-    for (let i = 0; i < 10; i++) results.push(await g.beforeReply(ctx));
-    expect(results.filter((r) => r === undefined)).toHaveLength(6);
+    for (let i = 0; i < 15; i++) results.push(await g.beforeReply(ctx));
+    expect(results.filter((r) => r === undefined)).toHaveLength(10);
+    const told = results.filter((r) => r?.reply);
+    expect(told).toHaveLength(1);
+    expect(told[0]!.reply!.text).toBe("Too many messages at once, give me a few seconds and send it again. /fren_stop always works.");
     expect(results.filter((r) => r?.handled && !r.reply)).toHaveLength(4);
     // Another chat has its own minute.
     expect(await g.beforeReply({ ...ctx, chatId: "2" })).toBeUndefined();
@@ -166,7 +169,7 @@ describe("LoopGuard", () => {
   });
 
   it("reads the limits from the engine", async () => {
-    const engine = { call: async (_m: string, path: string) => (path === "/agent/guard" ? { guard: { turnsPerDay: 200, turnsPerMinute: 6, toolCallsPerTurn: 2 } } : { allow: true, used: 1, limit: 200 }) };
+    const engine = { call: async (_m: string, path: string) => (path === "/agent/guard" ? { guard: { turnsPerDay: 200, turnsPerMinute: 10, toolCallsPerTurn: 2 } } : { allow: true, used: 1, limit: 200 }) };
     const g = new LoopGuard(engine as never);
     expect(await g.beforeTool({ runId: "r" })).toBeUndefined();
     expect(await g.beforeTool({ runId: "r" })).toBeUndefined();
@@ -176,11 +179,11 @@ describe("LoopGuard", () => {
   it("doesn't count Tool Search's dispatch_action on top of the tool it dispatches", async () => {
     const g = new LoopGuard(null);
     let passed = 0;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 30; i++) {
       if (!(await g.beforeTool({ runId: "r", toolName: "dispatch_action" }))) passed++;
       if (!(await g.beforeTool({ runId: "r", toolName: "fren_status" }))) passed++;
     }
-    // 20 wrappers pass, 12 real calls pass.
-    expect(passed).toBe(32);
+    // 30 wrappers pass, 20 real calls pass.
+    expect(passed).toBe(50);
   });
 });

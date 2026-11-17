@@ -14,11 +14,11 @@ export const AgentGuard = z
     /** Agent turns (one per message Fren answers with the AI) per UTC day. */
     turnsPerDay: z.number().int().min(1).max(100_000).default(200),
     /** Agent turns per chat per minute; messages over it get no AI reply. */
-    turnsPerMinute: z.number().int().min(1).max(600).default(6),
+    turnsPerMinute: z.number().int().min(1).max(600).default(10),
     /** Tool calls the agent may make while answering one message. */
-    toolCallsPerTurn: z.number().int().min(1).max(200).default(12),
+    toolCallsPerTurn: z.number().int().min(1).max(200).default(20),
   })
-  .default({ turnsPerDay: 200, turnsPerMinute: 6, toolCallsPerTurn: 12 });
+  .default({ turnsPerDay: 200, turnsPerMinute: 10, toolCallsPerTurn: 20 });
 export type AgentGuard = z.infer<typeof AgentGuard>;
 
 export const DAILY_LIMIT_NOTICE = (limit: number) =>

@@ -257,7 +257,7 @@ export async function finishSetup(
  *   tool calls per answer, answers per minute and per day.
  * Groups and WhatsApp self-chat are shut per channel (LOOP_GUARD_CHANNEL).
  */
-export const LOOP_GUARD_TURN_SECONDS = 120;
+export const LOOP_GUARD_TURN_SECONDS = 600;
 export const LOOP_GUARD: [string, string][] = [
   ["agents.defaults.heartbeat.every", JSON.stringify("0m")],
   ["cron.enabled", "false"],

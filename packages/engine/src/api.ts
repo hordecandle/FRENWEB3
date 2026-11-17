@@ -9,7 +9,8 @@ import type { AgentBudget } from "./guard.js";
  * bearer token. It exposes only what the plugin's tools and commands need;
  * there is no route that returns key material.
  */
-export function createApi(fren: Fren, token: string, budget?: AgentBudget): Server {
+export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts: { slowMs?: number } = {}): Server {
+  const slowMs = opts.slowMs ?? 90_000;
   const expected = Buffer.from(token);
 
   const authed = (req: IncomingMessage) => {
@@ -64,12 +65,22 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget): Serv
         }
         body = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>) : {};
       }
-      send(200, await handler(body, url));
+      const started = Date.now();
+      const result = await handler(body, url);
+      // A trade that ran long (EVM approve, swap and fill can take minutes) or whose chat
+      // reply the agent may no longer be waiting for: tell the owner the outcome directly.
+      const text = (result as { text?: string } | null)?.text;
+      if (EXECUTES.has(url.pathname) && text && (res.destroyed || Date.now() - started > slowMs)) {
+        await fren.tellOwner(`${text}`);
+      }
+      send(200, result);
     } catch (err) {
       send(500, { error: (err as Error).message });
     }
   });
 }
+
+const EXECUTES = new Set(["/plans", "/approve"]);
 
 function betQuery(b: Record<string, unknown>): BetQuery {
   const q = { asset: String(b.asset ?? ""), target: Number(b.target), direction: b.direction === "below" ? "below" : "above", by: String(b.by ?? ""), budgetUsd: Number(b.budgetUsd) } as const;
