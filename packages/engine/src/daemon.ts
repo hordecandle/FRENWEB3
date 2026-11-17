@@ -1,12 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
+import { isolatedMarker } from "./setup.js";
 import { SignerProcess, type SignerApi } from "@fren/signer";
 import { createApi } from "./api.js";
 import { Connection } from "@solana/web3.js";
-import { deriveApiUrl, hyperliquidApiUrl, jupiterLendApiUrl, frenPaths, loadConfig, relayApiUrl, type FrenConfig, type FrenPaths } from "./config.js";
+import { deriveApiUrl, hyperliquidApiUrl, jupiterApiUrl, jupiterLendApiUrl, frenPaths, loadConfig, relayApiUrl, type FrenConfig, type FrenPaths } from "./config.js";
 import { Fren } from "./engine.js";
 import type { Fetch } from "./http.js";
 import { GatewayLine, OwnerNotifier, TelegramLine, type Exec, type OwnerLine } from "./notify.js";
 import { Store } from "./store.js";
+import { AgentBudget } from "./guard.js";
 import { HyperliquidVenue } from "./venues/hyperliquid.js";
 import { JupiterVenue } from "./venues/jupiter.js";
 import { OnlinePumpFun } from "./venues/pumpfun.js";
@@ -37,10 +39,10 @@ export function ownerLines(config: FrenConfig, fetchFn: Fetch, exec?: Exec): Own
 
 export function buildFren({ config, store, signer, fetchFn = fetch, exec }: BuildOptions): Fren {
   const isTestnet = config.network === "testnet";
-  const hyperliquid = new HyperliquidVenue({ fetchFn, apiUrl: hyperliquidApiUrl(config), isTestnet, store, signer });
+  const hyperliquid = new HyperliquidVenue({ fetchFn, apiUrl: hyperliquidApiUrl(config), isTestnet, store, signer, markets: { dexes: config.hyperliquidDexes } });
   const jupiter = new JupiterVenue({
     fetchFn,
-    apiUrl: config.jupiterApiUrl,
+    apiUrl: jupiterApiUrl(config),
     ...(config.jupiterApiKey ? { apiKey: config.jupiterApiKey } : {}),
     solanaRpcUrl: config.solanaRpcUrl,
     store,
@@ -56,6 +58,7 @@ export function buildFren({ config, store, signer, fetchFn = fetch, exec }: Buil
     store,
     signer,
     rpcUrls: config.evmRpcUrls,
+    gasReserveWei: ethToWei(config.evmGasReserveEth),
   });
   const lending: YieldProtocolAdapter[] = [
     new JupiterLendUsdc({ fetchFn, apiUrl: jupiterLendApiUrl(config), ...(config.jupiterApiKey ? { apiKey: config.jupiterApiKey } : {}), solana: jupiter }),
@@ -96,6 +99,8 @@ export function buildFren({ config, store, signer, fetchFn = fetch, exec }: Buil
 }
 
 export async function startDaemon(paths: FrenPaths = frenPaths()) {
+  const iso = isolatedMarker(paths);
+  if (iso) throw new Error(`Fren's engine runs as ${iso.engineUser} now (keys in ${iso.frenHome}). Start it with: sudo systemctl start fren`);
   const config = loadConfig(paths);
   if (!existsSync(paths.apiToken)) throw new Error(`No API token at ${paths.apiToken}. Run \`fren init\` first.`);
   const token = readFileSync(paths.apiToken, "utf8").trim();
@@ -108,13 +113,21 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
       passphraseFile: paths.passphrase,
       solanaRpcUrl: config.solanaRpcUrl,
       evmRpcUrls: evmRpcsById(config),
+      evmGasReserveWei: ethToWei(config.evmGasReserveEth),
       ...(process.env.FREN_SIGNER_PREFIX ? { commandPrefix: process.env.FREN_SIGNER_PREFIX.split(" ") } : {}),
     });
     await signer.ready;
   }
 
   const fren = buildFren({ config, store, signer });
-  const server = createApi(fren, token);
+  const budget = new AgentBudget(store, () => {
+    try {
+      return loadConfig(paths).agentGuard;
+    } catch {
+      return config.agentGuard;
+    }
+  });
+  const server = createApi(fren, token, budget);
   await new Promise<void>((res) => server.listen(config.api.port, config.api.host, res));
 
   const timer = setInterval(() => {
@@ -140,6 +153,11 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
   return { fren, server, stop: shutdown };
+}
+
+/** Config ETH amounts to wei, without float drift past 9 decimals. */
+export function ethToWei(eth: number): bigint {
+  return BigInt(Math.round(eth * 1e9)) * 1_000_000_000n;
 }
 
 /** The signer wants RPCs by chain id; the config names chains. */

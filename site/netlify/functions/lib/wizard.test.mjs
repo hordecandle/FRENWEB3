@@ -139,24 +139,76 @@ describe("VPS wizard", () => {
     }, "x");
   });
 
-  it("reports a failed install with the last lines", async () => {
-    const { wizard, fake } = setup();
-    const { id } = await wizard.start("bee@example.com", "micro-ip");
-    fake.state.services.push({ id: 41 });
-    fake.state.booted = true;
-    await wizard.status(id);
-    await wizard.install(id, async () => ({ code: 1, output: "x Couldn't download Fren from https://github.com/beeonchain/frenweb3.git.\n" }), "u");
-    expect(await wizard.status(id)).toMatchObject({ stage: "failed", error: expect.stringMatching(/Couldn't download Fren/) });
+  async function installing() {
+    const t = setup();
+    const { id } = await t.wizard.start("bee@example.com", "micro-ip");
+    t.fake.state.services.push({ id: 41 });
+    t.fake.state.booted = true;
+    await t.wizard.status(id);
+    return { ...t, id };
+  }
+  const BAD = async () => ({ code: 1, output: "x Couldn't download Fren from https://github.com/beeonchain/frenweb3.git.\n" });
+
+  it("a broken install retries once by itself, on the same server, with no second order", async () => {
+    const { wizard, fake, db, triggered, id } = await installing();
+    await wizard.install(id, BAD, "u");
+    expect(await wizard.status(id)).toMatchObject({ stage: "installing", progress: expect.stringMatching(/trying again/i) });
+    expect(triggered).toEqual([id, id]);
+    expect(db.get(id).privateKey).toBeTruthy();
+    expect(db.get(id).eqvpsToken).toBeTruthy();
+    // The auto retry works.
+    await wizard.install(id, async () => ({ code: 0, output: "FREN_SETUP_URL=https://1-2-3-4.sslip.io/setup?t=ok\n" }), "u");
+    expect(await wizard.status(id)).toMatchObject({ stage: "ready", setupUrl: expect.stringContaining("t=ok") });
+    expect(db.get(id).privateKey).toBeUndefined();
+    expect(fake.calls.filter((c) => c === "POST /orders")).toHaveLength(1);
   });
 
-  it("times out an install that never reports back", async () => {
-    const { wizard, fake, tick } = setup();
-    const { id } = await wizard.start("bee@example.com", "micro-ip");
-    fake.state.services.push({ id: 41 });
-    fake.state.booted = true;
-    await wizard.status(id);
-    tick(26 * 60_000);
-    expect((await wizard.status(id)).stage).toBe("failed");
+  it("after the auto retry also fails: failed with a retry button, secrets kept, retry reaches ready on the same server", async () => {
+    const { wizard, fake, db, triggered, id } = await installing();
+    await wizard.install(id, BAD, "u");
+    await wizard.install(id, BAD, "u");
+    const v = await wizard.status(id);
+    expect(v).toMatchObject({ stage: "failed", retryable: true, error: expect.stringMatching(/paid for/), detail: expect.stringMatching(/Couldn't download Fren/) });
+    expect(v.error).not.toMatch(/PLACEHOLDER/);
+    expect(v.contact).toBeUndefined(); // no support address configured = no contact line
+    expect(JSON.stringify(v)).not.toMatch(/tok-|PRIVATE/);
+    expect(db.get(id).privateKey).toBeTruthy();
+    expect(db.get(id).eqvpsToken).toBeTruthy();
+
+    expect(await wizard.retry(id)).toMatchObject({ stage: "installing" });
+    expect(triggered).toHaveLength(3);
+    let seen;
+    await wizard.install(id, async (o) => ((seen = o), { code: 0, output: "FREN_SETUP_URL=https://1-2-3-4.sslip.io/setup?t=late\n" }), "u");
+    expect(seen).toMatchObject({ host: "1.2.3.4" });
+    expect(await wizard.status(id)).toMatchObject({ stage: "ready" });
+    expect(fake.calls.filter((c) => c === "POST /orders")).toHaveLength(1);
+    expect(fake.calls.filter((c) => c === "POST /auth/register")).toHaveLength(1);
+    await expect(wizard.retry(id)).rejects.toThrow(/nothing to retry/);
+  });
+
+  it("an unreachable server is retried the same way", async () => {
+    const { wizard, id } = await installing();
+    const down = async () => {
+      throw new Error("connect ETIMEDOUT");
+    };
+    await wizard.install(id, down, "u");
+    await wizard.install(id, down, "u");
+    expect(await wizard.status(id)).toMatchObject({ stage: "failed", retryable: true, detail: "connect ETIMEDOUT" });
+  });
+
+  it("an install that never reports back (function killed after 15 min) is retried, then offered again", async () => {
+    const { wizard, tick, triggered, id } = await installing();
+    tick(18 * 60_000);
+    expect((await wizard.status(id)).stage).toBe("installing"); // auto retry, fresh clock
+    expect(triggered).toHaveLength(2);
+    tick(18 * 60_000);
+    expect(await wizard.status(id)).toMatchObject({ stage: "failed", retryable: true });
+  });
+
+  it("does not time out an install that is still within the function's 15 minutes", async () => {
+    const { wizard, tick, id } = await installing();
+    tick(14 * 60_000);
+    expect((await wizard.status(id)).stage).toBe("installing");
   });
 
   it("rejects bad input and unknown ids", async () => {

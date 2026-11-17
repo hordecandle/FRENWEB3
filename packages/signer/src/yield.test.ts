@@ -1,7 +1,7 @@
 import { AddressLookupTableProgram, Keypair, PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import { encodeFunctionData, erc20Abi, maxUint256, parseAbi } from "viem";
 import { describe, expect, it } from "vitest";
-import { checkEvmTransaction } from "./evm.js";
+import { approvalWithinBalance, checkEvmTransaction } from "./evm.js";
 import { SOLANA_PROGRAMS, checkSolanaTransaction } from "./rules.js";
 
 function txFor(payer: PublicKey, ixs: TransactionInstruction[]) {
@@ -12,11 +12,13 @@ describe("Solana lending rules", () => {
   const owner = Keypair.generate().publicKey;
   const call = (program: string) => new TransactionInstruction({ programId: new PublicKey(program), keys: [{ pubkey: owner, isSigner: true, isWritable: true }], data: Buffer.from([1, 2, 3]) });
 
-  it("allows Jupiter Lend and Kamino deposits, and Kamino's first-deposit lookup table", () => {
-    expect(checkSolanaTransaction(txFor(owner, [call(SOLANA_PROGRAMS.jupiterLend)]), owner).programs).toEqual([SOLANA_PROGRAMS.jupiterLend]);
+  it("allows Kamino's first-deposit lookup table, but not an unknown Jupiter Lend or Kamino instruction", () => {
+    // Real Jupiter Lend and Kamino deposits are checked against API fixtures in solana-h1.test.ts.
     const [create] = AddressLookupTableProgram.createLookupTable({ authority: owner, payer: owner, recentSlot: 1 });
     const extend = AddressLookupTableProgram.extendLookupTable({ lookupTable: create.keys[0]!.pubkey, authority: owner, payer: owner, addresses: [owner] });
-    expect(() => checkSolanaTransaction(txFor(owner, [create, extend, call(SOLANA_PROGRAMS.kaminoLend)]), owner)).not.toThrow();
+    expect(() => checkSolanaTransaction(txFor(owner, [create, extend]), owner)).not.toThrow();
+    expect(() => checkSolanaTransaction(txFor(owner, [call(SOLANA_PROGRAMS.jupiterLend)]), owner)).toThrow(/Jupiter Lend/);
+    expect(() => checkSolanaTransaction(txFor(owner, [call(SOLANA_PROGRAMS.kaminoLend)]), owner)).toThrow(/Kamino/);
   });
 
   it("refuses lookup tables for someone else, closing tables, and Jupiter Lend's inner Liquidity program at the top level", () => {
@@ -62,5 +64,26 @@ describe("Aave rules", () => {
     expect(() => checkEvmTransaction({ chainId: 8453, to: USDC_BASE, data: approve(POOL_ARB, 1n) }, OWNER)).toThrow(/not on the signer's allow list/);
     expect(() => checkEvmTransaction(tx(approve(POOL_ARB, 1n), STRANGER), OWNER)).toThrow(/USDC only/);
     expect(() => checkEvmTransaction(tx(approve(POOL_ARB, maxUint256), USDC_ARB), OWNER)).toThrow(/Unlimited/);
+  });
+});
+
+describe("approval cap (H1)", () => {
+  const approve = (amount: bigint) => ({ chainId: 42161, to: USDC_ARB as `0x${string}`, data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [POOL_ARB, amount] }) });
+  const holds = (balance: bigint) => async () => balance;
+
+  it("allows approving up to the wallet's balance, and revoking", async () => {
+    await expect(approvalWithinBalance(approve(100_000_000n), OWNER, holds(100_000_000n))).resolves.toBeUndefined();
+    await expect(approvalWithinBalance(approve(0n), OWNER, holds(0n))).resolves.toBeUndefined();
+  });
+
+  it("refuses an approval above the balance, even below the old 1e30 cap", async () => {
+    await expect(approvalWithinBalance(approve(100_000_001n), OWNER, holds(100_000_000n))).rejects.toThrow(/more than the wallet's balance/);
+    await expect(approvalWithinBalance(approve(10n ** 29n), OWNER, holds(5n))).rejects.toThrow(/more than the wallet's balance/);
+  });
+
+  it("does not read balances for non-approvals", async () => {
+    let called = false;
+    await approvalWithinBalance(tx(encodeFunctionData({ abi: pool, functionName: "supply", args: [USDC_ARB, 1n, OWNER, 0] })), OWNER, async () => ((called = true), 0n));
+    expect(called).toBe(false);
   });
 });

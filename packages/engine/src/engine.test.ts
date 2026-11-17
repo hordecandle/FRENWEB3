@@ -101,11 +101,15 @@ describe("paper trading end to end", () => {
     expect(t.notifier.sent.at(-1)).toMatch(/Stop hit, closed long xyz:GOLD at \$3,900, PnL -\$12.50/);
   });
 
-  it("kill switch flattens, pauses, and needs the owner's code to resume", async () => {
+  it("kill switch pauses and leaves positions open; /close_all closes them; resume needs the owner's code", async () => {
     await t.fren.submit(goldLong(50, 10));
-    const stopped = await t.fren.stop(true);
-    expect(stopped).toMatch(/Stopped/);
-    expect(stopped).toMatch(/Closed long xyz:GOLD/);
+    const stopped = await t.fren.stop();
+    expect(stopped).toMatch(/Paused/);
+    expect(stopped).toMatch(/open positions and their stop-loss/);
+    expect(stopped).not.toMatch(/Closed long/);
+    expect(t.store.paperPositions()).toHaveLength(1);
+    const closed = await t.fren.requestCloseAll();
+    expect(closed.text).toMatch(/Closed long xyz:GOLD/);
     expect(t.store.paperPositions()).toHaveLength(0);
     expect((await t.fren.submit(goldLong(10, 2))).verdict).toBe("rejected");
 
@@ -121,6 +125,66 @@ describe("paper trading end to end", () => {
     expect(t.fren.limits().maxTradeUsd).toBe(50);
     await t.fren.approve(codeFrom(t.notifier));
     expect(t.fren.limits().maxTradeUsd).toBe(5000);
+  });
+
+  it("a loosen-limits code from before /stop does not switch Fren back on (H3)", async () => {
+    const loosen = await t.fren.changeLimits("maxTradeUsd=5000");
+    expect(loosen.codeSentPrivately).toBe(true);
+    const oldCode = codeFrom(t.notifier);
+    await t.fren.stop();
+    expect(t.fren.limits().paused).toBe(true);
+    expect(await t.fren.approve(oldCode)).toMatch(/wrong or expired/);
+    expect(t.fren.limits().paused).toBe(true);
+    expect(t.fren.limits().maxTradeUsd).not.toBe(5000);
+    expect((await t.fren.submit(goldLong(10, 2))).verdict).toBe("rejected");
+    // Back on only with /resume and its own code.
+    await t.fren.requestResume();
+    await t.fren.approve(codeFrom(t.notifier));
+    expect(t.fren.limits().paused).toBe(false);
+  });
+
+  it("a loosen code applies only its own field: an earlier tightening elsewhere survives (H3)", async () => {
+    await t.fren.changeLimits("maxTradeUsd=5000");
+    const code = codeFrom(t.notifier);
+    await t.fren.changeLimits("maxLeverage=2");
+    expect(t.fren.limits().maxLeverage).toBe(2);
+    await t.fren.approve(code);
+    expect(t.fren.limits().maxTradeUsd).toBe(5000);
+    expect(t.fren.limits().maxLeverage).toBe(2);
+  });
+
+  it("a code that was already pending cannot un-stop even if it slipped past /stop", async () => {
+    await t.fren.changeLimits("maxTradeUsd=5000");
+    const code = codeFrom(t.notifier);
+    await t.fren.stop();
+    // Simulate an old build's code being re-issued with a full snapshot incl. paused=false.
+    t.store.putPending({ code: "OLDONE", kind: "limits", payload: JSON.stringify({ ...t.fren.limits(), paused: false }), expiresAt: new Date(Date.now() + 60_000).toISOString() });
+    await t.fren.approve("OLDONE");
+    expect(t.fren.limits().paused).toBe(true);
+    expect(code).toBeTruthy();
+  });
+
+  it("five wrong /ok codes in a row drop every waiting code and warn the owner (C1)", async () => {
+    await t.fren.changeLimits("maxTradeUsd=5000");
+    const real = codeFrom(t.notifier);
+    for (let i = 0; i < 4; i++) expect(await t.fren.approve("ZZZZZZ")).toMatch(/wrong or expired/);
+    expect(await t.fren.approve("ZZZZZZ")).toMatch(/Too many wrong codes/);
+    expect(t.notifier.sent.at(-1)).toMatch(/wrong \/ok codes in a row/);
+    // The real code died with the lockout.
+    expect(await t.fren.approve(real)).toMatch(/wrong or expired/);
+    expect(t.fren.limits().maxTradeUsd).not.toBe(5000);
+  });
+
+  it("a right code resets the wrong-code count", async () => {
+    for (let i = 0; i < 4; i++) await t.fren.approve("ZZZZZZ");
+    await t.fren.changeLimits("maxTradeUsd=5000");
+    await t.fren.approve(codeFrom(t.notifier));
+    expect(t.fren.limits().maxTradeUsd).toBe(5000);
+    await t.fren.changeLimits("maxTradeUsd=6000");
+    const code = codeFrom(t.notifier);
+    for (let i = 0; i < 4; i++) await t.fren.approve("ZZZZZZ");
+    await t.fren.approve(code);
+    expect(t.fren.limits().maxTradeUsd).toBe(6000);
   });
 
   it("buys a verified token by ticker, refuses an ambiguous unverified ticker, and flags an unverified CA", async () => {

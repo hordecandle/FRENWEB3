@@ -1,6 +1,6 @@
 # Roadmap
 
-What works today, and what's next to cover everything in the brief, plus a few things beyond it.
+What works today (all of it is beta: tested in paper mode and on fakes, no live venue has placed a real order yet, and Telegram and WhatsApp haven't been verified live), and what's next to cover everything in the brief, plus a few things beyond it.
 
 ## Done in this first cut
 

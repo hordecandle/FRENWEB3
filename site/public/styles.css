@@ -15,6 +15,7 @@
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --spring: cubic-bezier(0.34, 1.4, 0.64, 1);
   --header: 64px;
+  --cta-gap: 40px; --cap-gap: 24px; /* one gap: last text -> button / Copy, everywhere */
   --phone-w: 300px;
   --phone-h: 620px;
 }
@@ -151,6 +152,18 @@ p {
 }
 .loader[hidden] {
   display: none;
+}
+.loader__skip {
+  position: absolute;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  opacity: 0.38;
+  pointer-events: none;
 }
 .loader__mark {
   width: 132px;
@@ -298,6 +311,9 @@ html.is-revealing .hero .btn:nth-child(2) {
 html.is-revealing #hello .float__in {
   animation: helloIn 0.5s var(--spring) backwards 0.95s;
 }
+html.is-revealing .hero__chats {
+  animation: fadeUp 0.6s var(--ease) backwards 0.9s;
+}
 html.is-revealing .hint {
   animation: 0.6s 1.3s backwards fadeUp;
 }
@@ -437,6 +453,21 @@ html.is-catch .progress {
   color: var(--ink);
   line-height: 0;
   display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+}
+.beta {
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  text-transform: uppercase;
+  text-decoration: none;
 }
 .scene {
   height: 800vh;
@@ -509,7 +540,8 @@ html.is-catch .progress {
 html.is-loading .dotfield {
   opacity: 0 !important;
 }
-html.is-revealing .dotfield {
+/* the closing-scene dots stay hidden while the hero appears (they used to flash in the wrong place) */
+html.is-revealing .dotfield:not(.dotfield--fin) {
   animation: 1.2s 0.3s backwards fadeIn;
 }
 .dotfield--fin {
@@ -1647,13 +1679,16 @@ html.is-killed .plq {
   justify-content: center;
   margin-top: auto;
 }
+.way--vps .way__desc {
+  margin-bottom: var(--cta-gap);
+}
 .cmd {
   background: var(--ink);
   color: var(--bg);
   border-radius: var(--radius);
   align-items: center;
   gap: 12px;
-  margin-top: 22px;
+  margin-top: var(--cta-gap);
   padding: 8px 8px 8px 16px;
   display: flex;
 }
@@ -2028,3 +2063,33 @@ html.is-killed .plq {
     animation: none;
   }
 }
+
+/* ===== v2 (FLOW_V2.md): facts, alt link, five steps ===== */
+.facts{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:22px}
+.facts span{border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:500;background:var(--bg)}
+.hero__chats{margin:var(--cap-gap) 0 0;line-height:1.6;display:flex;align-items:center;justify-content:center;gap:6px;font-size:14px;color:var(--muted)}
+.hero__chats .cta__ic{flex:none}
+.hero__chats>span{margin-left:4px}
+.steps5__limits{margin:18px 0 0;max-width:640px;color:var(--muted);font-size:13px;line-height:1.5}
+@media (width<860px){
+  .chat__final{padding:18px 12px 22px}
+  .chat__say{max-width:100%;font-size:15px;line-height:1.4;padding:10px 12px 11px}
+  .chat__you{max-width:92%}
+}
+.steps5{padding:64px 0 72px;border-top:1px solid var(--line)}
+.steps5 h2{margin:0;font-size:clamp(28px,3.4vw,44px);font-weight:500;letter-spacing:-.03em}
+.steps5 .wrap>p{color:var(--muted);margin:10px 0 0;font-size:17px;font-weight:300}
+.steps5 ol{list-style:none;padding:0;margin:28px 0 0;display:grid;grid-template-columns:repeat(5,1fr);gap:12px;counter-reset:s}
+@media (max-width:900px){.steps5 ol{grid-template-columns:1fr}}
+.steps5 li{counter-increment:s;background:#f5f5f5;border-radius:22px;padding:20px}
+.steps5 li:before{content:counter(s);display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--ink);color:var(--bg);font-size:13px;font-weight:600}
+.steps5 li.key{background:var(--bg);border:1px solid var(--ink);box-shadow:var(--shadow-hard)}
+.steps5 b{display:block;margin-top:14px;font-size:18px;font-weight:500;letter-spacing:-.02em}
+.steps5 li span{display:block;margin-top:6px;color:var(--muted);font-size:14px;font-weight:300;line-height:1.5}
+.steps5 .end{margin-top:24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.steps5 .end small{color:var(--muted);font-size:14px}
+@media (width<480px){:root{--cta-gap:32px}.hero__chats{font-size:13px;line-height:1.6;margin-top:var(--cap-gap)}.hero__chats span{margin-left:0}.hero__chats .nb{white-space:nowrap}.hero__chats>span{text-align:center}}
+.hero .hero__sub{margin-bottom:48px}
+@media (width<480px){.hero .hero__sub{margin-bottom:36px}}
+.hero .hero__sub{max-width:38em}
+.steps5__paper{margin-top:24px}

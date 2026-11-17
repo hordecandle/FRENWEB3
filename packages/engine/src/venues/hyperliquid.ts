@@ -5,7 +5,7 @@ import { price as fmtPrice, signedUsd, usd as fmtUsd, type PerpCloseLeg, type Pe
 import type { SignerApi } from "@fren/signer";
 import { postJson, type Fetch } from "../http.js";
 import type { Store } from "../store.js";
-import { HyperliquidMarkets, type PerpMarket } from "./hyperliquid-markets.js";
+import { HyperliquidMarkets, type HyperliquidMarketsOptions, type PerpMarket } from "./hyperliquid-markets.js";
 import { VenueError, type ExecContext, type ExecResult, type PositionView, type VenueAdapter } from "./types.js";
 
 type OrderWire = {
@@ -98,6 +98,8 @@ export interface HyperliquidVenueOptions {
   store: Store;
   /** Null when running paper-only without keys. */
   signer: SignerApi | null;
+  /** Which builder dexes to load, cache lifetimes, 429 backoff. */
+  markets?: HyperliquidMarketsOptions;
 }
 
 export class HyperliquidVenue implements VenueAdapter {
@@ -105,7 +107,7 @@ export class HyperliquidVenue implements VenueAdapter {
   readonly markets: HyperliquidMarkets;
 
   constructor(private readonly o: HyperliquidVenueOptions) {
-    this.markets = new HyperliquidMarkets(o.fetchFn, o.apiUrl);
+    this.markets = new HyperliquidMarkets(o.fetchFn, o.apiUrl, o.markets);
   }
 
   private async market(symbol: string): Promise<PerpMarket> {
@@ -116,7 +118,9 @@ export class HyperliquidVenue implements VenueAdapter {
         `No Hyperliquid market called ${symbol}.${near.length ? ` Closest: ${near.join(", ")}.` : " Search with fren_markets."}`,
       );
     }
-    return m;
+    // The market list may be a minute old; a paper fill should use the current mid.
+    const fresh = (await this.markets.mids().catch(() => null))?.get(m.name);
+    return fresh ? { ...m, midPx: fresh } : m;
   }
 
   async resolve(step: PlanStep, index: number): Promise<ResolvedStep> {
@@ -233,6 +237,24 @@ export class HyperliquidVenue implements VenueAdapter {
       throw new VenueError(`Could not enable trading on Hyperliquid: ${msg}. Deposit USDC to your Hyperliquid account first.`);
     }
     this.o.store.setKv(key, "1");
+  }
+
+  /**
+   * Withdraw USDC from Hyperliquid to the wallet's own Arbitrum address. The
+   * signer fixes the destination; Hyperliquid takes a 1 USDC fee and pays out
+   * in a few minutes.
+   */
+  async withdrawToArbitrum(amountUsd: number): Promise<string> {
+    const { action, signature, nonce } = await this.signer().hlWithdrawToSelf({ amountUsd, isTestnet: this.o.isTestnet });
+    const res = await postJson<OrderResponse>(this.o.fetchFn, `${this.o.apiUrl}/exchange`, { action, nonce, signature });
+    if (res.status !== "ok") throw new VenueError(`Hyperliquid refused the withdrawal: ${typeof res.response === "string" ? res.response : JSON.stringify(res.response)}`);
+    return `✅ Withdrawal of ${fmtUsd(amountUsd)} USDC to ${String(action.destination)} on Arbitrum requested (Hyperliquid keeps 1 USDC as its fee).`;
+  }
+
+  /** USDC Hyperliquid would let this account withdraw right now (main dex). */
+  async withdrawableUsd(): Promise<number | null> {
+    if (!this.o.signer) return null;
+    return Number((await this.clearinghouse("")).withdrawable);
   }
 
   private async liveOpen(leg: PerpOpenLeg, ctx: ExecContext): Promise<ExecResult> {

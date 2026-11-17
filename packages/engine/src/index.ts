@@ -4,6 +4,7 @@ export * from "./store.js";
 export * from "./api.js";
 export * from "./daemon.js";
 export * from "./notify.js";
+export * from "./guard.js";
 export * from "./venues/types.js";
 export * from "./venues/hyperliquid.js";
 export * from "./venues/hyperliquid-markets.js";

@@ -2,14 +2,16 @@
 
 A self-hosted [OpenClaw](https://github.com/openclaw/openclaw) agent that trades on-chain from a chat window. Tell it on Telegram or WhatsApp, "long gold 20x with $500, stop at -30%," and it finds the market, checks your limits, signs with keys that never leave your machine, and replies once with what it did.
 
-Status: **early backend**. It does Hyperliquid perps (crypto, gold, stocks, indices), Solana spot through Jupiter, pump.fun coins (on the curve and after), launch snipes, tokens on Base and Robinhood Chain through Relay, options on Derive, Polymarket bets, USDC yield on Jupiter Lend, Kamino and Aave, conditional orders, stops and targets, paper mode, and a kill switch (see [docs/ROADMAP.md](docs/ROADMAP.md) for what's next).
+Status: **beta, early backend**. Everything below runs in paper mode and on fakes in tests; none of the live venues (Hyperliquid, Jupiter, pump.fun, Relay, Derive, Polymarket, Jupiter Lend, Kamino, Aave) has placed a real order yet, so all of them are beta, and so are the Telegram and WhatsApp chat lines. Real trading is off until you switch it on.
+
+It does Hyperliquid perps (crypto, gold, stocks, indices), Solana spot through Jupiter, pump.fun coins (on the curve and after), launch snipes, tokens on Base and Robinhood Chain through Relay, options on Derive, Polymarket bets, USDC yield on Jupiter Lend, Kamino and Aave, conditional orders, stops and targets, paper mode, and a kill switch (see [docs/ROADMAP.md](docs/ROADMAP.md) for what's next).
 
 ## How it works
 
 ```
 Telegram / WhatsApp
       │
-OpenClaw agent ── fren plugin (tools + /ok /stop /limits /resume)
+OpenClaw agent ── fren plugin (tools + /ok /fren_stop /limits /resume)
       │  plans only, no keys
       ▼
 fren engine (local HTTP API on 127.0.0.1)
@@ -38,7 +40,7 @@ On your own Mac or Linux machine (Windows: inside WSL):
 curl -fsSL https://getfren.netlify.app/install.sh | bash
 ```
 
-It installs Node and OpenClaw if they're missing, downloads and builds Fren, then runs `fren setup`, which asks a few questions: your AI model login, Telegram or WhatsApp (you become the bot's only allowed sender and owner; on Telegram it finds your user id when you press Start), mainnet or testnet, and an optional Jupiter key. It then creates the wallets, installs the plugin and starts Fren in the background. Run `fren setup` again any time; it keeps your wallets.
+It installs Node and OpenClaw if they're missing, downloads and builds Fren, then runs `fren setup`, which asks a few questions: your AI model login, Telegram or WhatsApp (you become the bot's only allowed sender and owner; on Telegram it finds your user id when you press Start), mainnet or testnet, and an optional Jupiter key. It then creates the wallets, installs the plugin, gives the bot its own voice and trading rules (Fren's `AGENTS.md`, `SOUL.md` and `IDENTITY.md` in the OpenClaw workspace, so the first answer isn't a bare OpenClaw's "who should I be?") and starts Fren in the background. On an older install, `fren persona` does the same. Run `fren setup` again any time; it keeps your wallets.
 
 **On a VPS, with no terminal at all:** [getfren.netlify.app/vps](https://getfren.netlify.app/vps/). You enter an email and pay the server ($10/month at EQVPS: no KYC, USDC/USDT or card). The site then SSHes in once with a one-time key, runs the installer with `--server --web`, and deletes that key. The server runs Fren as its own `fren` user under systemd, and serves a private HTTPS setup page at `https://<ip>.sslip.io/setup` with a one-time link. On that page you paste an AI API key, connect Telegram or WhatsApp (the QR code shows in the page), create wallets and download a backup. Pressing "Start Fren" starts the engine and gateway and shuts the setup page down. The wizard's functions live in `site/netlify/functions`.
 
@@ -78,7 +80,7 @@ Then talk to your OpenClaw bot:
 - "snipe <CA> on Base with $100 the second it launches"
 - "short SOL $100 at 5x when funding goes above 0.02%/h"
 - "best way to bet ETH hits $4,000 by December, use $1,000" quotes the nearest Derive call and the matching Polymarket market side by side, then places the one you pick
-- "stake my USDC for the best yield" lends it wherever the rate is best (Jupiter Lend or Kamino on Solana, Aave on Arbitrum or Base). When a trade needs the cash, Fren takes it back on its own first.
+- "lend my USDC for the best yield" lends it wherever the rate is best (Jupiter Lend or Kamino on Solana, Aave on Arbitrum or Base). When a trade needs the cash, Fren takes it back on its own first.
 - "fund Polymarket with $500" moves USDC from Arbitrum to your Polymarket wallet (or "fund Derive" for options)
 - "stop everything"
 
@@ -87,14 +89,23 @@ Owner commands, which skip the model:
 | Command | Does |
 | --- | --- |
 | `/ok CODE` | Approve a plan or a settings change |
-| `/stop` (or `/stop keep`) | Kill switch: pause, cancel waiting plans, close leveraged positions (or keep them) |
+| `/fren_stop` | Kill switch: pause, cancel waiting entries. Open positions and their stop-loss/take-profit stay as they are |
+| `/close_all` | Close every leveraged position at market (live: needs your code; works while paused) |
 | `/resume` | Turn Fren back on (sends a code) |
 | `/limits key=value …` | e.g. `/limits mode=live maxTradeUsd=2000 maxLeverage=40` (loosening sends a code) |
 | `/positions`, `/wallet` | Read-only views |
 
 ## Limits
 
-Defaults: paper mode, $500 per trade, $2,000 per day, 20x max leverage, 10 open positions, auto-approve up to $100, all venues allowed. The agent can tighten these. Only you can loosen them.
+Defaults: paper mode, $500 per trade, $2,000 per day, 20x max leverage, 10 open positions, auto-approve up to $50, all venues allowed. The agent can tighten these. Only you can loosen them.
+
+The agent itself is capped too, so it can't spin on your AI key: at most 20 tool calls and 10 minutes per message, 10 messages a minute per chat (past that it answers once with a short "too many messages" line), 200 answers a day (then one short notice and a break until 00:00 UTC; owner commands keep working). There are no background AI turns (no heartbeat, no automations), and groups and bots get no answers. Change the caps in `~/.fren/config.json`:
+
+```json
+"agentGuard": { "turnsPerDay": 200, "turnsPerMinute": 10, "toolCallsPerTurn": 20 }
+```
+
+If a trade takes longer than 90 seconds to finish, or the chat stops waiting for it, Fren also sends you the outcome directly. The daily cap applies on the next message; the other two within 5 minutes. `fren setup` turns all of this on; on an older install run `fren guard`, then restart the engine.
 
 ## Development
 

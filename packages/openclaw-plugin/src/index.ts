@@ -1,6 +1,7 @@
 import { Type, type TSchema } from "typebox";
 import { definePluginEntry, type OpenClawPluginApi, type OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 import { EngineClient, type OwnerResult } from "./client.js";
+import { LoopGuard, type ToolContext, type TurnContext } from "./guard.js";
 import planSchema from "./plan-schema.json" with { type: "json" };
 
 /**
@@ -16,6 +17,7 @@ export const TOOL_NAMES = [
   "fren_status",
   "fren_cancel",
   "fren_stop",
+  "fren_close_all",
   "fren_limits",
   "fren_deposit_hyperliquid",
   "fren_bet_quote",
@@ -49,6 +51,22 @@ async function deliverOwnerCode(res: OwnerResult, ctx: OpenClawPluginToolContext
   return `${res.text}\nNo private channel is set up, so ask the user to run /fren_code to see the code.`;
 }
 
+/**
+ * Language of the last plain chat message (Cyrillic → ru, or uk with і/ї/є/ґ, else en).
+ * /fren_stop skips the model, so the engine needs it to write the pause message in the
+ * owner's language. Null until the owner has written something.
+ */
+let lastLang: "en" | "ru" | "uk" | null = null;
+export function noteLang(body: unknown) {
+  const text = typeof body === "string" ? body : "";
+  if (text.trim().startsWith("/")) return;
+  const letters = text.match(/\p{L}/gu) ?? [];
+  if (letters.length < 3) return;
+  const cyr = letters.filter((c) => /[\u0400-\u04FF]/.test(c)).length;
+  lastLang = cyr / letters.length < 0.5 ? "en" : /[іїєґІЇЄҐ]/.test(text) ? "uk" : "ru";
+}
+const langBody = () => (lastLang ? { lang: lastLang } : {});
+
 export function toolSpecs(client: EngineClient): ToolSpec[] {
   return [
     {
@@ -71,7 +89,7 @@ export function toolSpecs(client: EngineClient): ToolSpec[] {
       label: "Trade",
       description: [
         "Propose a trading plan built from the user's request. Fren checks it against the user's limits, then either executes it,",
-        "asks the user for a confirmation code, or refuses with reasons. Relay the returned text to the user as-is.",
+        "asks the user for a confirmation code, or refuses with reasons. Relay the returned text to the user as-is, including its \"📝 Paper mode\" or live marker: never drop it, the user must always see whether money is real.",
         "One plan can hold several legs; legs with `when` conditions wait for the watcher.",
         'To snipe a launch, add when: [{type:"tradable", venue, chain, token}] with the same contract address.',
         "Never invent token addresses: use one the user gave or one fren_markets returned.",
@@ -96,9 +114,16 @@ export function toolSpecs(client: EngineClient): ToolSpec[] {
     {
       name: "fren_stop",
       label: "Kill switch",
-      description: 'Kill switch for "stop everything": pauses Fren, cancels waiting plans, and (flatten=true) closes all leveraged positions.',
-      parameters: Type.Object({ flatten: Type.Boolean({ default: true }) }),
-      run: async (p) => (await client.call<{ text: string }>("POST", "/stop", { flatten: p.flatten !== false })).text,
+      description: 'Kill switch for "stop everything": pauses Fren and cancels waiting entries. Open positions and their stops stay as they are. To close them use fren_close_all.',
+      parameters: Type.Object({}),
+      run: async () => (await client.call<{ text: string }>("POST", "/stop", langBody())).text,
+    },
+    {
+      name: "fren_close_all",
+      label: "Close all leveraged positions",
+      description: "Close every open leveraged position at market. Only when the owner asks for it; in live mode the owner approves with a code. Spot tokens are not touched.",
+      parameters: Type.Object({}),
+      run: async () => ownerReply(await client.call<OwnerResult>("POST", "/close_all")),
     },
     {
       name: "fren_limits",
@@ -198,6 +223,30 @@ function ownerReply(res: OwnerResult): string {
   return `${res.text}\n\n🔐 Code: ${res.ownerCode} (send /ok ${res.ownerCode})`;
 }
 
+/** Channel ids (Telegram user id, WhatsApp number) compared as digits: "telegram:777", "+44 77…", "4477…@s.whatsapp.net". */
+const idDigits = (s: unknown) => (typeof s === "string" ? s.replace(/@.*$/, "").replace(/\D/g, "") : "");
+
+/**
+ * OpenClaw ≥2026.11 only tells bundled plugins whether the sender is the owner
+ * (ctx.senderIsOwner stays undefined for us), so when it's missing we check the
+ * allowlisted sender against commands.ownerAllowFrom, which Fren setup writes.
+ */
+export function isOwner(ctx: { senderIsOwner?: boolean; isAuthorizedSender?: boolean; channel?: string; senderId?: string; from?: string; config?: unknown }): boolean {
+  if (typeof ctx.senderIsOwner === "boolean") return ctx.senderIsOwner;
+  if (ctx.isAuthorizedSender !== true) return false;
+  const owners = (ctx.config as { commands?: { ownerAllowFrom?: unknown } } | undefined)?.commands?.ownerAllowFrom;
+  if (!Array.isArray(owners)) return false;
+  const channel = (ctx.channel ?? "").toLowerCase();
+  const sender = idDigits(ctx.senderId) || idDigits(ctx.from);
+  if (!sender) return false;
+  return owners.some((o) => {
+    if (typeof o !== "string") return false;
+    const m = o.match(/^([a-z]+):(.+)$/i);
+    if (m && m[1]!.toLowerCase() !== channel) return false;
+    return idDigits(m ? m[2] : o) === sender;
+  });
+}
+
 function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
   const ownerOnly = "Only the owner of this Fren can do that.";
   const guard = async (isOwner: boolean | undefined, run: () => Promise<string>) => {
@@ -216,32 +265,38 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
     requireAuth: true,
     exposeSenderIsOwner: true,
     handler: (ctx) =>
-      guard(ctx.senderIsOwner, async () => {
+      guard(isOwner(ctx), async () => {
         const code = (ctx.args ?? "").trim();
-        if (!code) return "Send /ok followed by the code.";
         return (await client.call<{ text: string }>("POST", "/approve", { code })).text;
       }),
   });
 
+  // OpenClaw reserves /stop for itself since 2026.11 (it only aborts the current
+  // reply), so the kill switch is /fren_stop; /stop still works on older OpenClaw.
+  for (const name of ["fren_stop", "stop"]) {
+    api.registerCommand({
+      name,
+      description: "Kill switch: pause Fren and cancel waiting entries. Open positions and their stops stay. Close them with /close_all.",
+      requireAuth: true,
+      exposeSenderIsOwner: true,
+      handler: (ctx) => guard(isOwner(ctx), async () => (await client.call<{ text: string }>("POST", "/stop", langBody())).text),
+    });
+  }
+
   api.registerCommand({
-    name: "stop",
-    description: "Kill switch: pause Fren and close leveraged positions. /stop keep pauses without closing.",
-    acceptsArgs: true,
+    name: "close_all",
+    description: "Close every leveraged position at market (live: needs the code Fren sends you). Also works while paused.",
     requireAuth: true,
     exposeSenderIsOwner: true,
-    handler: (ctx) =>
-      guard(ctx.senderIsOwner, async () => {
-        const flatten = (ctx.args ?? "").trim().toLowerCase() !== "keep";
-        return (await client.call<{ text: string }>("POST", "/stop", { flatten })).text;
-      }),
+    handler: (ctx) => guard(isOwner(ctx), async () => ownerReply(await client.call<OwnerResult>("POST", "/close_all"))),
   });
 
   api.registerCommand({
     name: "resume",
-    description: "Turn Fren back on after /stop.",
+    description: "Turn Fren back on after /fren_stop.",
     requireAuth: true,
     exposeSenderIsOwner: true,
-    handler: (ctx) => guard(ctx.senderIsOwner, async () => ownerReply(await client.call<OwnerResult>("POST", "/resume"))),
+    handler: (ctx) => guard(isOwner(ctx), async () => ownerReply(await client.call<OwnerResult>("POST", "/resume"))),
   });
 
   api.registerCommand({
@@ -251,7 +306,7 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
     requireAuth: true,
     exposeSenderIsOwner: true,
     handler: (ctx) =>
-      guard(ctx.senderIsOwner, async () => {
+      guard(isOwner(ctx), async () => {
         const args = (ctx.args ?? "").trim();
         if (!args) return (await client.call<{ text: string }>("GET", "/limits")).text;
         return ownerReply(await client.call<OwnerResult>("POST", "/limits", { args }));
@@ -263,7 +318,7 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
     description: "Fren positions and watched conditions.",
     requireAuth: true,
     exposeSenderIsOwner: true,
-    handler: (ctx) => guard(ctx.senderIsOwner, async () => (await client.call<{ text: string }>("GET", "/status")).text),
+    handler: (ctx) => guard(isOwner(ctx), async () => (await client.call<{ text: string }>("GET", "/status")).text),
   });
 
   api.registerCommand({
@@ -271,7 +326,7 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
     description: "Fren wallet addresses and how to fund them.",
     requireAuth: true,
     exposeSenderIsOwner: true,
-    handler: (ctx) => guard(ctx.senderIsOwner, async () => (await client.call<{ text: string }>("GET", "/wallet")).text),
+    handler: (ctx) => guard(isOwner(ctx), async () => (await client.call<{ text: string }>("GET", "/wallet")).text),
   });
 
   api.registerCommand({
@@ -280,11 +335,23 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
     requireAuth: true,
     exposeSenderIsOwner: true,
     handler: (ctx) =>
-      guard(ctx.senderIsOwner, async () => {
+      guard(isOwner(ctx), async () => {
         if (!lastOwnerCode || Date.now() - lastOwnerCode.at > 10 * 60_000) return "No recent code.";
         return `🔐 Code: ${lastOwnerCode.code} (send /ok ${lastOwnerCode.code})`;
       }),
   });
+}
+
+/** Caps on agent turns and tool calls, see guard.ts. Older hosts without api.on just don't get them. */
+export function registerLoopGuard(api: Pick<OpenClawPluginApi, "on">, guard: LoopGuard) {
+  if (typeof api.on !== "function") return;
+  // A hook that throws would let the turn through (claim hooks fail open), so decide inside.
+  api.on("before_agent_reply", async (event, ctx) => {
+    noteLang((event as { cleanedBody?: string }).cleanedBody);
+    return guard.beforeReply(ctx as TurnContext);
+  }, { priority: 100 });
+  api.on("before_tool_call", async (event, ctx) => guard.beforeTool({ ...(ctx as ToolContext), toolName: event.toolName, runId: event.runId ?? ctx.runId }), { priority: 100 });
+  api.on("agent_end", async (_event, ctx) => guard.endRun(ctx));
 }
 
 export default definePluginEntry({
@@ -299,6 +366,9 @@ export default definePluginEntry({
     });
     registerTools(api, client);
     const mode = api.registrationMode;
-    if (mode !== "cli-metadata" && mode !== "setup-only" && mode !== "tool-discovery") registerCommands(api, client);
+    if (mode !== "cli-metadata" && mode !== "setup-only" && mode !== "tool-discovery") {
+      registerCommands(api, client);
+      registerLoopGuard(api, new LoopGuard(client));
+    }
   },
 });

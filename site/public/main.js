@@ -1,5 +1,14 @@
 (() => {
   "use strict";
+  // Fee note: empty = hidden. When Bee picks the fee mechanism, put the sentence here (one edit).
+  const FEE_NOTE = "";
+  if (FEE_NOTE) {
+    const fn = document.getElementById("fee-note");
+    if (fn) {
+      fn.textContent = FEE_NOTE;
+      fn.hidden = false;
+    }
+  }
   const t = document.documentElement,
     e = window.matchMedia("(prefers-reduced-motion: reduce)").matches,
     s = (t) => document.querySelector(t),
@@ -81,7 +90,7 @@
       },
       {
         word: "buy anything",
-        desc: "Solana and pump.fun buys with CA sniping, plus Base and Robinhood Chain. One chat for every chain.",
+        desc: "Buy any coin on Solana, pump.fun, Base or Robinhood Chain. Paste a coin's address and it buys the second it can.",
         you: "Buy $50 of ETH on Base",
         fren: "Done. Your ETH is on Base.",
         status: "Bought",
@@ -185,9 +194,9 @@
       F = 0.95 * s,
       M = 0.42 * s,
       C = H.length * M,
-      $ = o ? Math.min(0.8, (s - r - 150) / l) : Math.min(0.9, (s - r - 60) / l),
+      $ = o ? Math.min(0.9, (s - r - 190) / l) : Math.min(0.9, (s - r - 60) / l),
       E = (e - a * $) / 2,
-      k = o ? s - l * $ - 18 : r + (s - r - l * $) / 2,
+      k = o ? r + 170 : r + (s - r - l * $) / 2,
       S = 1.2 * s,
       A = s + v + b + F + C + S + 0.35 * s;
     f.style.height = A + "px";
@@ -271,8 +280,9 @@
     (f.classList.toggle("is-hero", o <= 0.001),
       f.classList.toggle("is-chat", (o > 0.62 && h < 0.4) || u > 0.4),
       f.classList.toggle("is-final", u > 0.4));
-    const y = [1, 0.8, 0.6],
-      S = [3.4, 3.8, 4.4];
+    // one entry per hero child (title, subhead, button, price line): a child without an entry never left on scroll
+    const y = [1, 0.8, 0.6, 0.5],
+      S = [3.4, 3.8, 4.4, 4.8];
     (x.forEach((t, e) => {
       const s = r(i(o * S[e]));
       ((t.style.opacity = (1 - s).toFixed(3)),
@@ -458,14 +468,24 @@
   )
     ((ct.hidden = !0), t.classList.remove("is-loading"));
   else {
-    const e = () => {
-      ct.hidden || mt();
+    window.matchMedia("(hover: none)").matches && (document.getElementById("loader-skip").textContent = "Tap to skip");
+    const e = (ev) => {
+      if (ct.hidden) return;
+      // the tap that skips the splash must not also press whatever lies beneath it
+      const eat = (c) => (c.preventDefault(), c.stopPropagation());
+      window.addEventListener("click", eat, { capture: !0, once: !0 });
+      setTimeout(() => window.removeEventListener("click", eat, { capture: !0 }), 600);
+      mt();
     };
     (ct.addEventListener("click", e),
       window.addEventListener("keydown", e, { once: !0 }),
       window.addEventListener("wheel", e, { once: !0, passive: !0 }),
       window.addEventListener("touchstart", e, { once: !0, passive: !0 }),
       (async function () {
+        // once the splash is skipped, stop here: finishing the timeline would run the reveal a second time
+        const n = async (ms) => {
+          if ((await new Promise((r) => setTimeout(r, ms)), ct.hidden)) throw 0;
+        };
         const e = ht.querySelector(".pupil"),
           s = (t, s) => {
             (e.setAttribute("cx", 84 + t), e.setAttribute("cy", 40 + s));
@@ -528,13 +548,26 @@
     cmd = document.getElementById("cmd-text");
   if (!btn || !cmd) return;
   btn.addEventListener("click", async () => {
+    const text = cmd.textContent.trim();
+    let ok = false;
     try {
-      await navigator.clipboard.writeText(cmd.textContent.trim());
-      btn.textContent = "Copied";
+      await navigator.clipboard.writeText(text);
+      ok = true;
     } catch {
-      getSelection().selectAllChildren(cmd);
-      btn.textContent = "Press ⌘C";
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      try {
+        ok = document.execCommand("copy");
+      } catch {}
+      ta.remove();
     }
-    setTimeout(() => (btn.textContent = "Copy"), 1800);
+    if (!ok) getSelection().selectAllChildren(cmd);
+    btn.textContent = ok ? "Copied" : "Select and copy";
+    setTimeout(() => (btn.textContent = "Copy"), 2000);
   });
 })();

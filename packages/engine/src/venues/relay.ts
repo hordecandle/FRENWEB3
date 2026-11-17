@@ -46,6 +46,17 @@ const TESTNET: Record<EvmChain, ChainInfo> = {
 const FUNDING_CHAINS: EvmChain[] = ["arbitrum", "base"];
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+/** Native ETH as Relay names it. */
+export const NATIVE_ETH = "0x0000000000000000000000000000000000000000" as const;
+/** What a plan may call native ETH: the ticker, Relay's zero address, or the common 0xEeee… placeholder. */
+const NATIVE_ALIASES = new Set(["eth", "$eth", NATIVE_ETH, "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"]);
+export const isNativeEth = (token: string) => NATIVE_ALIASES.has(token.trim().toLowerCase());
+/** Chains where Fren sells native ETH (the signer allows the same ones). */
+const NATIVE_SELL_CHAINS: EvmChain[] = ["arbitrum", "base"];
+/** Room left for the sale's own gas on top of the reserve: ~8× an Arbitrum swap at today's fees. */
+export const NATIVE_SELL_GAS_ALLOWANCE_WEI = 100_000_000_000_000n;
+const DEFAULT_GAS_RESERVE_WEI = 500_000_000_000_000n;
 export const isEvmAddress = (s: string) => ADDRESS.test(s.trim());
 
 export interface EvmToken {
@@ -99,6 +110,10 @@ export interface RelayVenueOptions {
   rpcUrls?: Partial<Record<EvmChain, string>>;
   /** Injected for tests; defaults to viem public clients. */
   erc20Balance?: (chain: EvmChain, token: `0x${string}`, owner: `0x${string}`) => Promise<bigint>;
+  /** Injected for tests; defaults to eth_getBalance. */
+  nativeBalance?: (chain: EvmChain, owner: `0x${string}`) => Promise<bigint>;
+  /** ETH (wei) kept for gas when selling ETH; the signer enforces the same number. Default 0.0005 ETH. */
+  gasReserveWei?: bigint;
   /** Injected for tests; defaults to waiting for the receipt on chain. */
   waitForTx?: (chain: EvmChain, hash: `0x${string}`) => Promise<void>;
   /** How long to wait for Relay to fill, in ms. */
@@ -141,6 +156,10 @@ export class RelayVenue implements SpotVenueAdapter {
   }
 
   private async balanceOf(chain: EvmChain, token: `0x${string}`, owner: `0x${string}`): Promise<bigint> {
+    if (token.toLowerCase() === NATIVE_ETH) {
+      if (this.o.nativeBalance) return this.o.nativeBalance(chain, owner);
+      return this.client(chain).getBalance({ address: owner });
+    }
     if (this.o.erc20Balance) return this.o.erc20Balance(chain, token, owner);
     return this.client(chain).readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [owner] });
   }
@@ -199,6 +218,8 @@ export class RelayVenue implements SpotVenueAdapter {
   /** Same rule as Jupiter: an address resolves to that token; a ticker only to a verified one. */
   async token(chain: EvmChain, query: string): Promise<EvmToken> {
     const q = query.trim();
+    // Native ETH is not a contract: no lookup, and never confused with WETH or an "ETH" lookalike.
+    if (isNativeEth(q)) return { chain, address: NATIVE_ETH, symbol: "ETH", name: "Ether", decimals: 18, verified: true };
     const key = `${chain}:${q.toLowerCase()}`;
     const cached = this.tokenCache.get(key);
     if (cached) return cached;
@@ -352,6 +373,9 @@ export class RelayVenue implements SpotVenueAdapter {
     }
     const usdc = this.chain(chain).usdc;
     if (usdc && t.address.toLowerCase() === usdc.toLowerCase()) throw new VenueError("That's USDC already; pick the token to buy or sell.");
+    if (t.address === NATIVE_ETH && leg.side === "sell" && !NATIVE_SELL_CHAINS.includes(chain)) {
+      throw new VenueError(`Fren sells ETH on Arbitrum and Base only; on ${chainName[chain]} the ETH pays gas.`);
+    }
     const canonical = {
       ...step,
       leg: { ...leg, token: t.address },
@@ -365,6 +389,7 @@ export class RelayVenue implements SpotVenueAdapter {
       symbol: t.symbol,
       spendUsd: spend,
       notionalUsd: spend,
+      ...(leg.side === "sell" && leg.amount.type === "usd" ? { sellUsd: leg.amount.usd } : {}),
       verifiedToken: t.verified,
       ...(notes.length ? { notes } : {}),
     };
@@ -450,6 +475,8 @@ export class RelayVenue implements SpotVenueAdapter {
     let origin: EvmChain;
     let qty: number;
     let usd: number;
+    /** Wei this trade may send: the ETH sold, or nothing. */
+    let nativeSale = 0n;
 
     if (leg.side === "buy") {
       const need =
@@ -469,16 +496,31 @@ export class RelayVenue implements SpotVenueAdapter {
       usd = Number(need) / 1e6;
       qty = Number(quote.details?.currencyOut?.amount ?? "0") / 10 ** t.decimals;
     } else {
-      const raw = await this.balanceOf(t.chain, t.address, owner);
-      if (raw <= 0n) throw new VenueError(`You hold no ${t.symbol} on ${where}.`);
+      const native = t.address === NATIVE_ETH;
+      const held = await this.balanceOf(t.chain, t.address, owner);
+      // Selling ETH: the gas reserve and this sale's own gas stay on the wallet.
+      const keep = native ? (this.o.gasReserveWei ?? DEFAULT_GAS_RESERVE_WEI) + NATIVE_SELL_GAS_ALLOWANCE_WEI : 0n;
+      const raw = held - keep;
+      if (raw <= 0n) {
+        throw new VenueError(
+          native && held > 0n
+            ? `You have ${fmtEth(held)} ETH on ${where}, and Fren keeps ${fmtEth(keep)} for gas, so there's nothing to sell.`
+            : `You hold no ${t.symbol} on ${where}.`,
+        );
+      }
       let amount: bigint;
-      if (leg.amount.type === "fraction") amount = (raw * BigInt(Math.floor(leg.amount.fraction * 1e6))) / 1_000_000n;
-      else {
+      if (leg.amount.type === "fraction") {
+        // "Sell all" of ETH means all but the reserve; a smaller share counts the whole balance but still keeps it.
+        const share = ((native ? held : raw) * BigInt(Math.floor(leg.amount.fraction * 1e6))) / 1_000_000n;
+        amount = share < raw ? share : raw;
+      } else {
         const px = await this.price(t);
         if (!px) throw new VenueError(`No price for ${t.symbol} right now.`);
         const want = BigInt(Math.floor((leg.amount.usd / px) * 10 ** t.decimals));
         amount = want < raw ? want : raw;
       }
+      if (amount <= 0n) throw new VenueError(`That's too little ${t.symbol} to sell.`);
+      if (native) nativeSale = amount;
       origin = t.chain;
       const home: EvmChain = this.chain(t.chain).usdc ? t.chain : "arbitrum";
       quote = await this.quote({
@@ -493,9 +535,9 @@ export class RelayVenue implements SpotVenueAdapter {
     }
 
     const spendRaw = leg.side === "buy" ? BigInt(Math.round(usd * 1e6)) : BigInt(Math.round(qty * 10 ** t.decimals));
-    const hashes = await this.runSteps(quote, origin, owner, spendRaw);
+    const hashes = await this.runSteps(quote, origin, owner, spendRaw, nativeSale);
     const lastHash = hashes.at(-1);
-    this.rememberToken(t);
+    if (t.address !== NATIVE_ETH) this.rememberToken(t);
     this.o.store.insertFill({
       planId: ctx.planId,
       idx: ctx.idx,
@@ -520,8 +562,9 @@ export class RelayVenue implements SpotVenueAdapter {
    * only signs for Relay's own contracts), wait for it, then wait for Relay to
    * report the fill. Signature steps are refused: Fren never signs messages for Relay.
    */
-  private async runSteps(quote: RelayQuote, origin: EvmChain, owner: `0x${string}`, spendRaw: bigint): Promise<`0x${string}`[]> {
+  private async runSteps(quote: RelayQuote, origin: EvmChain, owner: `0x${string}`, spendRaw: bigint, maxValueWei = 0n): Promise<`0x${string}`[]> {
     const hashes: `0x${string}`[] = [];
+    let valueSent = 0n;
     let requestId = quote.requestId;
     for (const step of quote.steps) {
       if (step.kind !== "transaction") throw new VenueError(`Relay asked for a "${step.id}" signature, which Fren doesn't sign.`);
@@ -532,11 +575,21 @@ export class RelayVenue implements SpotVenueAdapter {
         if (!d.to || !d.data || !d.chainId) throw new VenueError("Relay returned a transaction without a target.");
         if (d.from && d.from.toLowerCase() !== owner.toLowerCase()) throw new VenueError("Relay returned a transaction for a different wallet.");
         if (d.chainId !== this.chain(origin).id) throw new VenueError("Relay returned a transaction for an unexpected chain.");
+        // ETH only leaves on an ETH sale, and never more than the amount sold (summed over every step).
+        const value = weiValue(d.value);
+        valueSent += value;
+        if (valueSent > maxValueWei) {
+          throw new VenueError(
+            maxValueWei === 0n
+              ? "Relay asked to send ETH with a trade that doesn't sell ETH. Nothing was sent."
+              : `Relay asked to send ${fmtEth(valueSent)} ETH for a sale of ${fmtEth(maxValueWei)} ETH. Nothing more was sent.`,
+          );
+        }
         const { txHash } = await this.signer().evmSendTransaction({
           chainId: d.chainId,
           to: d.to as `0x${string}`,
           data: exactApproval(d.data as `0x${string}`, spendRaw),
-          ...(d.value !== undefined ? { value: String(d.value) } : {}),
+          ...(value !== 0n ? { value: value.toString() } : {}),
           ...(d.gas !== undefined ? { gas: String(d.gas) } : {}),
         });
         hashes.push(txHash);
@@ -625,6 +678,19 @@ export function exactApproval(data: `0x${string}`, spendRaw: bigint): `0x${strin
   if (args[0] === undefined || (args[1] as bigint) <= spendRaw) return data;
   return encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [args[0] as `0x${string}`, spendRaw] });
 }
+
+function weiValue(v: unknown): bigint {
+  if (v === undefined || v === null || v === "") return 0n;
+  try {
+    const n = BigInt(v as string);
+    if (n >= 0n) return n;
+  } catch {
+    /* fall through */
+  }
+  throw new VenueError("Relay returned a transaction with a bad ETH amount.");
+}
+
+const fmtEth = (wei: bigint) => (Number(wei) / 1e18).toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
 
 function fmtQty(q: number): string {
   if (q >= 1000) return q.toLocaleString("en-US", { maximumFractionDigits: 0 });

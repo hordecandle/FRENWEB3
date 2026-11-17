@@ -3,246 +3,129 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Fren · Run your Fren on a VPS</title>
-    <meta name="description" content="Rent a no-KYC server with crypto and set up Fren on it, all in your browser. From $10 a month." />
-    <meta property="og:title" content="Run your Fren on a VPS" />
-    <meta property="og:description" content="No KYC, pay in crypto, no terminal. Fren runs 24/7 on a server you own." />
+    <title>Fren · Get your Fren</title>
+    <meta name="description" content="Rent your own server with crypto, no ID needed, and set up Fren on it in your browser. The server is $10 a month." />
+    <meta property="og:title" content="Get your Fren" />
+    <meta property="og:description" content="No ID, pay in crypto, nothing to install. Fren runs 24/7 on your own server." />
     <meta property="og:image" content="https://getfren.netlify.app/assets/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Geologica:slnt,wght,CRSV,SHRP@-12..0,100..900,0..1,0..100&display=swap"
-    />
-    <link rel="stylesheet" href="../styles.css" />
-    <style>
-      .vp-top { border-bottom: 1px solid var(--line); }
-      .vp-top .wrap { height: 64px; display: flex; align-items: center; justify-content: space-between; }
-      .vp-hero { padding: 88px 0 24px; }
-      .vp-hero h1 { font-size: clamp(40px, 6vw, 80px); font-weight: 500; letter-spacing: -0.035em; line-height: 1.04; }
-      .vp-hero p { color: var(--muted); max-width: 600px; margin-top: 18px; font-size: clamp(17px, 1.4vw, 20px); font-weight: 300; line-height: 1.5; }
-      .vp-hero .cmd { max-width: 640px; margin-top: 32px; }
-      .vp-facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
-      .vp-facts span { border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; font-size: 13px; font-weight: 500; }
-      .vp-sec { padding: 56px 0; border-top: 1px solid var(--line); margin-top: 56px; }
-      .vp-sec h2 { font-size: clamp(28px, 3.4vw, 40px); font-weight: 500; letter-spacing: -0.03em; }
-      .vp-steps { list-style: none; margin: 28px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; counter-reset: s; }
-      .vp-steps li { background: var(--soft); border-radius: 22px; padding: 22px; counter-increment: s; }
-      .vp-steps li:before { content: counter(s); display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 600; }
-      .vp-steps b { display: block; margin-top: 14px; font-size: 18px; font-weight: 500; letter-spacing: -0.02em; }
-      .vp-steps span { display: block; margin-top: 4px; color: var(--muted); font-size: 14px; font-weight: 300; line-height: 1.5; }
-      .vp-need { margin: 24px 0 0; padding: 0; list-style: none; display: grid; gap: 12px; max-width: 720px; }
-      .vp-need li { border-bottom: 1px solid var(--line); padding-bottom: 12px; font-size: 16px; font-weight: 300; }
-      .vp-need b { font-weight: 500; }
-      .vp-faq { max-width: 720px; margin-top: 20px; }
-      .vp-faq details { border-bottom: 1px solid var(--line); padding: 16px 0; }
-      .vp-faq summary { cursor: pointer; font-size: 17px; font-weight: 500; }
-      .vp-faq p { color: var(--muted); margin-top: 8px; font-size: 15px; font-weight: 300; line-height: 1.6; }
-      .vp-alt { color: var(--muted); margin-top: 28px; font-size: 15px; font-weight: 300; }
-      .wiz { margin-top: 40px; border: 1px solid var(--ink); border-radius: 22px; box-shadow: 4px 5px 0 var(--ink); background: var(--bg); padding: clamp(20px, 3vw, 36px); max-width: 760px; }
-      .wiz__rail { display: flex; gap: 6px; list-style: none; margin: 0 0 28px; padding: 0; counter-reset: r; flex-wrap: wrap; }
-      .wiz__rail li { counter-increment: r; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: var(--muted); padding: 5px 12px 5px 6px; border-radius: 999px; background: var(--soft); }
-      .wiz__rail li:before { content: counter(r); display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--bg); color: var(--muted); font-size: 11px; font-weight: 600; }
-      .wiz__rail li.is-now { color: var(--ink); background: var(--blue); box-shadow: 0 0 0 1px var(--ink); }
-      .wiz__rail li.is-now:before { background: var(--ink); color: var(--bg); }
-      .wiz__rail li.is-done { color: var(--ink); }
-      .wiz__rail li.is-done:before { content: "✓"; background: var(--ink); color: var(--bg); }
-      .wiz h2 { font-size: clamp(24px, 2.6vw, 32px); font-weight: 500; letter-spacing: -0.03em; }
-      .wiz__lead { color: var(--muted); margin-top: 6px; font-size: 16px; font-weight: 300; line-height: 1.5; }
-      .plans { display: grid; grid-template-columns: minmax(0, 460px); gap: 12px; margin-top: 22px; }
-      .wiz button { font: inherit; }
-      .plan { position: relative; display: block; cursor: pointer; border: 1px solid var(--line); border-radius: 16px; padding: 16px; transition: border-color .15s, box-shadow .15s; }
-      .plan--only { cursor: default; border-color: var(--ink); box-shadow: 2px 3px 0 var(--ink); }
-      .plan--only .plan__spec { font-size: 14px; line-height: 1.5; margin-top: 8px; }
-      .plan input { position: absolute; opacity: 0; pointer-events: none; }
-      .plan:has(input:checked) { border-color: var(--ink); box-shadow: 2px 3px 0 var(--ink); }
-      .plan:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 3px; }
-      .plan b { display: block; font-size: 16px; font-weight: 500; }
-      .plan__price { display: block; margin-top: 6px; font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
-      .plan__price small { font-size: 14px; font-weight: 300; color: var(--muted); }
-      .plan__spec { display: block; margin-top: 4px; font-size: 13px; font-weight: 300; color: var(--muted); }
-      .plan__tag { position: absolute; top: -10px; right: 12px; background: var(--blue); border: 1px solid var(--ink); border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 500; }
-      .field { display: block; margin-top: 22px; }
-      .field span { display: block; font-size: 14px; font-weight: 500; margin-bottom: 8px; }
-      .field input { width: 100%; font: inherit; font-size: 17px; padding: 12px 14px; border: 1px solid var(--ink); border-radius: var(--radius); background: var(--bg); color: var(--ink); }
-      .field input:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
-      .field small { display: block; margin-top: 6px; color: var(--muted); font-size: 13px; font-weight: 300; }
-      .field--code input { letter-spacing: .4em; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; max-width: 260px; }
-      .wiz__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 26px; }
-      .wiz .btn[disabled] { opacity: .5; pointer-events: none; }
-      .wiz__err { color: #b42318; margin-top: 14px; font-size: 14px; }
-      .wiz__err:empty { display: none; }
-      .pay { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: start; margin-top: 22px; }
-      .pay__amount { font-size: 44px; font-weight: 600; letter-spacing: -0.03em; }
-      .pay__amount small { font-size: 16px; font-weight: 300; color: var(--muted); letter-spacing: 0; }
-      .pay__qr { background: var(--bg); border: 1px solid var(--line); border-radius: 16px; padding: 10px; line-height: 0; }
-      .pay__qr svg { width: 168px; height: 168px; }
-      .wait { display: flex; align-items: center; gap: 12px; margin-top: 22px; font-size: 15px; color: var(--muted); }
-      .wait svg { width: 40px; flex: none; }
-      .wait .pupil { animation: look 2.4s ease-in-out infinite; }
-      @keyframes look { 0%, 100% { transform: translateX(0); } 30% { transform: translateX(-14px); } 60% { transform: translateX(4px); } }
-      .build { list-style: none; margin: 22px 0 0; padding: 0; display: grid; gap: 10px; }
-      .build li { display: flex; align-items: center; gap: 12px; font-size: 16px; color: var(--muted); }
-      .build li:before { content: ""; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--faint); flex: none; box-sizing: border-box; }
-      .build li.is-now { color: var(--ink); font-weight: 500; }
-      .build li.is-now:before { border-color: var(--ink); border-top-color: transparent; animation: spin .9s linear infinite; }
-      .build li.is-done { color: var(--ink); }
-      .build li.is-done:before { content: "✓"; display: grid; place-items: center; background: var(--ink); border-color: var(--ink); color: var(--bg); font-size: 12px; }
-      @keyframes spin { to { transform: rotate(360deg); } }
-      .wiz__progress { margin-top: 14px; font-size: 14px; font-weight: 300; color: var(--muted); }
-      .wiz__progress:empty { display: none; }
-      .ready__note { margin-top: 18px; background: var(--soft); border-radius: 14px; padding: 14px 16px; font-size: 14px; font-weight: 300; line-height: 1.5; }
-      .linkbtn { background: none; border: 0; padding: 0; font: inherit; font-size: 14px; color: var(--muted); text-decoration: underline; cursor: pointer; }
-      .wiz [hidden] { display: none !important; }
-      @media (prefers-reduced-motion: reduce) { .wait .pupil, .build li.is-now:before { animation: none; } }
-      @media (width<=600px) { .pay { grid-template-columns: 1fr; } .pay__qr { justify-self: start; } }
-    </style>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geologica:wght@300..700&display=swap" />
+    <link rel="stylesheet" href="flow.css" />
   </head>
   <body>
-    <header class="vp-top">
-      <div class="wrap">
-        <a href="../" aria-label="Fren home"
-          ><svg width="84" height="20" viewBox="0 0 336 80" fill="currentColor" role="img" aria-label="Fren">
-            <path d="M76 0C98.0914 0 116 17.9086 116 40C116 62.0914 98.0914 80 76 80H52C47.0684 80 42.5304 77.306 40.1689 72.9766L32 58H44C44 58 48 58 48 54C48 50 44 50 44 50H37.0586C31.4386 49.9998 26.2304 47.0506 23.3389 42.2314L16 30H44C44 30 48 30 48 26C48 22 44 22 44 22H21.498C15.6432 22 10.2559 18.802 7.45215 13.6621L0 0H76ZM84 24C75.1634 24 68 31.1634 68 40C68 48.8366 75.1634 56 84 56C92.8366 56 100 48.8366 100 40C100 31.1634 92.8366 24 84 24Z" /><circle cx="92" cy="40" r="8" /><path d="M254.516 22.8878C258.804 22.8878 262.628 23.6605 265.988 25.2045C269.348 26.7164 272.116 28.8394 274.292 31.5736C276.5 34.2757 278.021 37.4761 278.853 41.1754C279.685 44.8425 279.717 48.8316 278.949 53.142H242.179C242.211 55.0719 242.787 56.761 243.907 58.2084C245.027 59.6559 246.563 60.7972 248.515 61.6335C250.467 62.4376 252.739 62.8399 255.331 62.84C258.211 62.84 260.948 62.4705 263.54 61.7307C266.132 60.9587 268.612 59.7846 270.98 58.2084L275.925 68.9195C274.421 70.0775 272.468 71.1231 270.068 72.056C267.7 72.9566 265.172 73.6646 262.484 74.1793C259.828 74.7262 257.284 75 254.852 75C249.475 75 244.755 73.9216 240.691 71.7664C236.627 69.579 233.458 66.5396 231.186 62.6476C228.914 58.7231 227.778 54.1386 227.778 48.8953C227.778 45.0996 228.434 41.6092 229.746 38.4247C231.09 35.2402 232.946 32.4898 235.314 30.1738C237.714 27.8578 240.531 26.0722 243.763 24.8177C247.027 23.5311 250.612 22.8878 254.516 22.8878ZM184.259 20.6201H155.937V34.5648H181.283V48.6057H155.937V73.552H140V6H184.259V20.6201ZM222.44 22.7916C223.528 22.7916 224.504 22.8563 225.368 22.9849C226.232 23.1136 227.081 23.258 227.912 23.4188L226.04 39.6793C224.952 39.2934 223.8 38.9876 222.584 38.7624C221.368 38.5052 220.152 38.3766 218.936 38.3766C215.96 38.3766 213.496 39.2452 211.544 40.982C209.624 42.6869 208.663 45.1963 208.663 48.5095V73.552H192.919V24.3357H208.663V30.0776C210.135 27.5364 212.088 25.6872 214.52 24.5291C216.952 23.3711 219.592 22.7916 222.44 22.7916ZM315.887 22.8878C320.496 22.8878 324.288 23.8049 327.264 25.6384C330.24 27.4397 332.432 29.7881 333.84 32.6829C335.28 35.5458 336 38.5859 336 41.8027V73.552H320.255V46.7729C320.255 43.8136 319.471 41.4814 317.903 39.7765C316.367 38.0716 314.095 37.2192 311.086 37.2192C309.166 37.2193 307.486 37.6365 306.046 38.4728C304.638 39.3092 303.534 40.5002 302.734 42.0442C301.934 43.556 301.534 45.2928 301.534 47.2549V73.552H285.789V24.3357H301.534V29.5465C303.358 27.2305 305.519 25.5415 308.015 24.48C310.511 23.4186 313.135 22.8878 315.887 22.8878ZM254.083 34.3233C251.043 34.3234 248.515 35.0632 246.499 36.5429C244.515 38.0225 243.395 40.0013 243.139 42.4781H263.972C263.908 40.0012 262.996 38.0226 261.236 36.5429C259.476 35.0633 257.091 34.3233 254.083 34.3233Z" /></svg
-        ></a>
-        <a class="btn btn--sm" href="../#setup">All setup options</a>
-      </div>
-    </header>
-    <main class="wrap">
-      <section class="vp-hero">
-        <h1>Your Fren on a <span class="plq">VPS</span></h1>
-        <p>
-          Fren runs 24/7 on a server you rent, even when your laptop is closed. No KYC, just an email, and you pay in
-          crypto. Everything happens right here in your browser. No terminal, no SSH.
-        </p>
-        <div class="vp-facts"><span>$10 a month</span><span>No KYC</span><span>Pay in crypto</span><span>About 10 minutes</span></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="logo" viewBox="0 0 336 80"><path d="M76 0C98.0914 0 116 17.9086 116 40C116 62.0914 98.0914 80 76 80H52C47.0684 80 42.5304 77.306 40.1689 72.9766L32 58H44C44 58 48 58 48 54C48 50 44 50 44 50H37.0586C31.4386 49.9998 26.2304 47.0506 23.3389 42.2314L16 30H44C44 30 48 30 48 26C48 22 44 22 44 22H21.498C15.6432 22 10.2559 18.802 7.45215 13.6621L0 0H76ZM84 24C75.1634 24 68 31.1634 68 40C68 48.8366 75.1634 56 84 56C92.8366 56 100 48.8366 100 40C100 31.1634 92.8366 24 84 24Z"/><circle cx="92" cy="40" r="8"/><path d="M254.516 22.8878C258.804 22.8878 262.628 23.6605 265.988 25.2045C269.348 26.7164 272.116 28.8394 274.292 31.5736C276.5 34.2757 278.021 37.4761 278.853 41.1754C279.685 44.8425 279.717 48.8316 278.949 53.142H242.179C242.211 55.0719 242.787 56.761 243.907 58.2084C245.027 59.6559 246.563 60.7972 248.515 61.6335C250.467 62.4376 252.739 62.8399 255.331 62.84C258.211 62.84 260.948 62.4705 263.54 61.7307C266.132 60.9587 268.612 59.7846 270.98 58.2084L275.925 68.9195C274.421 70.0775 272.468 71.1231 270.068 72.056C267.7 72.9566 265.172 73.6646 262.484 74.1793C259.828 74.7262 257.284 75 254.852 75C249.475 75 244.755 73.9216 240.691 71.7664C236.627 69.579 233.458 66.5396 231.186 62.6476C228.914 58.7231 227.778 54.1386 227.778 48.8953C227.778 45.0996 228.434 41.6092 229.746 38.4247C231.09 35.2402 232.946 32.4898 235.314 30.1738C237.714 27.8578 240.531 26.0722 243.763 24.8177C247.027 23.5311 250.612 22.8878 254.516 22.8878ZM184.259 20.6201H155.937V34.5648H181.283V48.6057H155.937V73.552H140V6H184.259V20.6201ZM222.44 22.7916C223.528 22.7916 224.504 22.8563 225.368 22.9849C226.232 23.1136 227.081 23.258 227.912 23.4188L226.04 39.6793C224.952 39.2934 223.8 38.9876 222.584 38.7624C221.368 38.5052 220.152 38.3766 218.936 38.3766C215.96 38.3766 213.496 39.2452 211.544 40.982C209.624 42.6869 208.663 45.1963 208.663 48.5095V73.552H192.919V24.3357H208.663V30.0776C210.135 27.5364 212.088 25.6872 214.52 24.5291C216.952 23.3711 219.592 22.7916 222.44 22.7916ZM315.887 22.8878C320.496 22.8878 324.288 23.8049 327.264 25.6384C330.24 27.4397 332.432 29.7881 333.84 32.6829C335.28 35.5458 336 38.5859 336 41.8027V73.552H320.255V46.7729C320.255 43.8136 319.471 41.4814 317.903 39.7765C316.367 38.0716 314.095 37.2192 311.086 37.2192C309.166 37.2193 307.486 37.6365 306.046 38.4728C304.638 39.3092 303.534 40.5002 302.734 42.0442C301.934 43.556 301.534 45.2928 301.534 47.2549V73.552H285.789V24.3357H301.534V29.5465C303.358 27.2305 305.519 25.5415 308.015 24.48C310.511 23.4186 313.135 22.8878 315.887 22.8878ZM254.083 34.3233C251.043 34.3234 248.515 35.0632 246.499 36.5429C244.515 38.0225 243.395 40.0013 243.139 42.4781H263.972C263.908 40.0012 262.996 38.0226 261.236 36.5429C259.476 35.0633 257.091 34.3233 254.083 34.3233Z"/></symbol>
+  <symbol id="mark" viewBox="0 0 116 80"><path d="M76 0C98.0914 0 116 17.9086 116 40C116 62.0914 98.0914 80 76 80H52C47.0684 80 42.5304 77.306 40.1689 72.9766L32 58H44C44 58 48 58 48 54C48 50 44 50 44 50H37.0586C31.4386 49.9998 26.2304 47.0506 23.3389 42.2314L16 30H44C44 30 48 30 48 26C48 22 44 22 44 22H21.498C15.6432 22 10.2559 18.802 7.45215 13.6621L0 0H76ZM84 24C75.1634 24 68 31.1634 68 40C68 48.8366 75.1634 56 84 56C92.8366 56 100 48.8366 100 40C100 31.1634 92.8366 24 84 24Z"/><circle cx="92" cy="40" r="8"/></symbol>
+  <!-- Иконки: 24×24, линия 1.8, currentColor. Telegram и WhatsApp взяты с лендинга. -->
+  <symbol id="i-tg" viewBox="0 0 24 24"><path d="M21.2 4.1 2.9 11.2c-.8.3-.8 1.4 0 1.7l4.5 1.6 1.8 5.4c.2.7 1.1.9 1.6.4l2.6-2.5 4.7 3.4c.6.4 1.4.1 1.6-.6l3-15.2c.2-.9-.7-1.6-1.5-1.3Z"/><path d="m7.4 14.5 10.4-7-7.6 8.1-.4 4"/></symbol>
+  <symbol id="i-wa" viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3Z"/><path d="M9.1 7.9c.3-.3.7-.3 1-.1l.9 1.9c.1.3 0 .6-.2.8l-.6.6a6.2 6.2 0 0 0 2.9 2.9l.6-.6c.2-.2.5-.3.8-.2l1.9.9c.2.3.2.7-.1 1-.9.9-2.2 1.1-3.3.5a9.4 9.4 0 0 1-4.4-4.4c-.6-1.1-.4-2.4.5-3.3Z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 5h5v5M19 5l-8 8"/><path d="M17 14v3.5a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2H10"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></symbol>
+  <symbol id="i-retry" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 1 2.2 5.3"/><path d="M4.5 18v-4.5H9"/></symbol>
+  <symbol id="i-tab" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="M3.5 9h17M8 5v4"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 8.5-8.5M16 7l2.5 2.5M14 9l2 2"/></symbol>
+  <symbol id="i-paper" viewBox="0 0 24 24"><path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M9 13h6M9 16.5h4"/></symbol>
+  <symbol id="i-dl" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 19.5h14"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5 5 6v5.5c0 4.3 2.9 7.6 7 9 4.1-1.4 7-4.7 7-9V6z"/><path d="m9 12 2.2 2.2L15.5 10"/></symbol>
+</svg>
 
-        <div class="wiz" id="wiz" aria-live="polite">
-          <ol class="wiz__rail" id="rail">
-            <li data-step="plan">Start</li>
-            <li data-step="pay">Pay</li>
-            <li data-step="build">Server</li>
-            <li data-step="ready">Connect</li>
+    <header class="top"><div class="top__in"><a class="logo-a" href="../" aria-label="Fren home"><svg class="logo"><use href="#logo"/></svg><span class="beta">Beta</span></a><span class="top__step" id="top-step">Step <b>1</b> of 5</span></div></header>
+    <ol class="rail" id="rail" data-now="1"></ol>
+    <main class="page" aria-live="polite">
+      <div class="card">
+        <form id="s-plan" novalidate>
+          <p class="kicker">Server</p>
+          <h2>Your own server</h2>
+          <p class="lead">Fren runs 24/7 on a server rented in your name, even when your laptop is closed. You only need an email.</p>
+          <div id="plans"></div>
+          <label class="field"><span>Your email</span><input type="email" id="email" autocomplete="email" required placeholder="you@example.com" /><small>For your server account and receipts. No ID needed.</small></label>
+          <div class="actions"><button class="btn" type="submit" id="go">Continue to payment<svg class="ic"><use href="#i-arrow"/></svg></button></div>
+          <p class="err" id="err-plan"></p>
+        </form>
+
+        <form id="s-code" hidden novalidate>
+          <p class="kicker">Server</p>
+          <h2>Check your email</h2>
+          <p class="lead">That email already has a server account. We sent it a 6-digit code to confirm it's you.</p>
+          <label class="field"><span>Code</span><input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required /></label>
+          <div class="actions"><button class="btn" type="submit">Confirm<svg class="ic"><use href="#i-arrow"/></svg></button></div>
+          <p class="err" id="err-code"></p>
+        </form>
+
+        <div id="s-pay" hidden>
+          <p class="kicker">Pay</p>
+          <h2>Pay for your server</h2>
+          <p class="lead">USDC or USDT on most chains, BTC or XMR.</p>
+          <div class="pay">
+            <div>
+              <div class="pay__amount"><span id="amount">$10</span> <small>first month</small></div>
+              <div class="note"><svg class="ic"><use href="#i-tab"/></svg><span>Payment opens on EQVPS, our server partner, in a new tab. Pay there, then <b>come back here</b>: keep this tab open, it moves on by itself.</span></div>
+              <div class="actions"><a class="btn" id="checkout" href="#" target="_blank" rel="noopener">Open checkout<svg class="ic"><use href="#i-ext"/></svg></a></div>
+            </div>
+            <div class="qr" id="qr" aria-label="Checkout QR code"></div>
+          </div>
+          <div class="wait"><svg viewBox="0 0 116 80"><use href="#mark"/></svg><span>Waiting for your payment…</span></div>
+        </div>
+
+        <div id="s-build" hidden>
+          <p class="kicker">Install</p>
+          <h2>Setting up your server</h2>
+          <p class="lead">Paid, thanks. This takes a few minutes. You can close this tab: save this page's link and open it again later.</p>
+          <ol class="build" id="build">
+            <li data-stage="provisioning"><span class="dot"></span>Starting your server</li>
+            <li data-stage="installing"><span class="dot"></span>Installing Fren</li>
+            <li data-stage="ready"><span class="dot"></span>Opening your private setup page</li>
           </ol>
-
-          <form id="s-plan" novalidate>
-            <h2>Your server</h2>
-            <p class="wiz__lead">One plan, sized for Fren. We rent it in your name; you only need an email.</p>
-            <div class="plans" id="plans"></div>
-            <label class="field">
-              <span>Your email</span>
-              <input type="email" id="email" autocomplete="email" required placeholder="you@example.com" />
-              <small>Only used for your server account and receipts. No ID, no KYC.</small>
-            </label>
-            <div class="wiz__actions"><button class="btn" type="submit" id="go">Continue to payment&nbsp;→</button></div>
-            <p class="wiz__err" id="err-plan"></p>
-          </form>
-
-          <form id="s-code" hidden novalidate>
-            <h2>Check your email</h2>
-            <p class="wiz__lead">That email already has a server account. We sent it a 6-digit code to confirm it's you.</p>
-            <label class="field field--code">
-              <span>Code</span>
-              <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required />
-            </label>
-            <div class="wiz__actions"><button class="btn" type="submit">Confirm&nbsp;→</button></div>
-            <p class="wiz__err" id="err-code"></p>
-          </form>
-
-          <div id="s-pay" hidden>
-            <h2>Pay for your server</h2>
-            <p class="wiz__lead">Pay with USDC or USDT on most chains, BTC, XMR or a card. This tab updates by itself once payment lands.</p>
-            <div class="pay">
-              <div>
-                <div class="pay__amount"><span id="amount">$10</span> <small>first month</small></div>
-                <div class="wiz__actions"><a class="btn" id="checkout" href="#" target="_blank" rel="noopener">Open checkout&nbsp;→</a></div>
-              </div>
-              <div class="pay__qr" id="qr" aria-label="Checkout QR code"></div>
-            </div>
-            <div class="wait">
-              <svg viewBox="0 0 116 80" fill="#000" aria-hidden="true"><path d="M76 0C98.0914 0 116 17.9086 116 40C116 62.0914 98.0914 80 76 80H52C47.0684 80 42.5304 77.306 40.1689 72.9766L32 58H44C44 58 48 58 48 54C48 50 44 50 44 50H37.0586C31.4386 49.9998 26.2304 47.0506 23.3389 42.2314L16 30H44C44 30 48 30 48 26C48 22 44 22 44 22H21.498C15.6432 22 10.2559 18.802 7.45215 13.6621L0 0H76ZM84 24C75.1634 24 68 31.1634 68 40C68 48.8366 75.1634 56 84 56C92.8366 56 100 48.8366 100 40C100 31.1634 92.8366 24 84 24Z" /><circle class="pupil" cx="92" cy="40" r="8" /></svg>
-              <span>Waiting for your payment…</span>
-            </div>
-          </div>
-
-          <div id="s-build" hidden>
-            <h2>Setting up your box</h2>
-            <p class="wiz__lead">Paid, thanks! This takes a few minutes. You can close this tab and come back with the same link.</p>
-            <ol class="build" id="build">
-              <li data-stage="provisioning">Starting your server</li>
-              <li data-stage="installing">Installing Fren</li>
-              <li data-stage="ready">Opening your private setup page</li>
-            </ol>
-            <p class="wiz__progress" id="progress"></p>
-          </div>
-
-          <div id="s-ready" hidden>
-            <h2>Your Fren is up 🎉</h2>
-            <p class="wiz__lead">The last step happens on your own server: log in to your AI model, connect Telegram or WhatsApp, and create your wallets.</p>
-            <div class="wiz__actions"><a class="btn" id="setup-link" href="#" target="_blank" rel="noopener">Open your Fren setup&nbsp;→</a></div>
-            <p class="ready__note">
-              <b>Keep that link private.</b> It opens your server's one-time setup page and stops working once setup is done. Your
-              keys and logins go straight to your server and never pass through this site.
-            </p>
-          </div>
-
-          <div id="s-failed" hidden>
-            <h2>Something went wrong</h2>
-            <p class="wiz__lead" id="fail-msg">The server didn't finish setting up.</p>
-            <div class="wiz__actions"><a class="btn" href="./">Start again</a></div>
-          </div>
+          <div class="progress"><i id="bar" style="width:8%"></i></div>
+          <p class="hint" id="progress">Usually 3 to 5 minutes.</p>
         </div>
-      </section>
 
-      <section class="vp-sec">
-        <h2>What happens</h2>
-        <ol class="vp-steps">
-          <li><b>We rent your server</b><span>An EQVPS server in your name with its own IP. Only an email, no ID.</span></li>
-          <li><b>You pay in crypto</b><span>USDC or USDT on Base, Ethereum, Solana, Tron, BNB or Polygon, or BTC, XMR or a card.</span></li>
-          <li><b>We install Fren</b><span>Fren is installed and started as a service, then our temporary access is removed from the server.</span></li>
-          <li><b>You connect your chat</b><span>On your server's private setup page: AI login, Telegram or WhatsApp, and your wallets.</span></li>
-          <li><b>You back up your keys</b><span>Download a key backup, so losing the server never means losing funds.</span></li>
-        </ol>
-      </section>
+        <div id="s-ready" hidden>
+          <p class="kicker">AI brain</p>
+          <h2>Server ready. Next: an AI brain</h2>
+          <p class="lead">Your server is up. Two steps left, on the server itself: add an AI key, then connect your chat.</p>
+          <div class="note"><svg class="ic"><use href="#i-shield"/></svg><span>The next page runs on <b>your server</b>, so the web address will look unusual: <code id="ready-host">your-ip.sslip.io</code>. That's normal, it's your server's address. Your keys go straight there, not through us.</span></div>
+          <div class="actions">
+            <a class="btn" id="setup-link" href="#" target="_blank" rel="noopener">Open your Fren setup<svg class="ic"><use href="#i-arrow"/></svg></a>
+          </div>
+          <p class="hint"><b style="font-weight:500;color:var(--ink)">Keep this link private.</b> It opens your one-time setup and stops working when setup is done.</p>
+          <p class="hint">Continue on another device? <button class="textlink" type="button" id="copy-link"><span>Copy link</span></button></p>
+        </div>
 
-      <section class="vp-sec">
-        <h2>Have these ready</h2>
-        <ul class="vp-need">
-          <li><b>About $10 in crypto</b> (or a card) for the first month of the server.</li>
-          <li><b>An AI model login</b> such as Anthropic, OpenAI or OpenRouter. Fren uses it to understand your messages.</li>
-          <li><b>For Telegram:</b> a bot token from @BotFather. Setup finds your user ID once you message the bot.</li>
-          <li><b>For WhatsApp:</b> a spare number for your Fren, plus your own number.</li>
-          <li><b>USDC</b> to fund your trading wallet once setup is done.</li>
-        </ul>
-      </section>
-
-      <section class="vp-sec">
-        <h2>Questions</h2>
-        <div class="vp-faq">
-          <details>
-            <summary>Who holds my keys?</summary>
-            <p>You do. The keys are created on your server and never leave it. The AI plans trades but never signs them, and anything over your caps needs a confirm code from you.</p>
-          </details>
-          <details>
-            <summary>Can you get into my server?</summary>
-            <p>Only during install. We use a one-time key to install Fren, then delete it from the server. After that, only you can reach your Fren.</p>
-          </details>
-          <details>
-            <summary>What happens if I stop paying for the server?</summary>
-            <p>The server shuts down and Fren stops trading. Your funds stay in your wallets, and your key backup lets you restore Fren anywhere.</p>
-          </details>
-          <details>
-            <summary>Does it start with real money?</summary>
-            <p>No. Every Fren starts in paper mode with $500 a trade, 20x max leverage and a confirm code for anything over $100. You turn on live trading when you're ready.</p>
+        <div id="s-failed" hidden>
+          <p class="kicker">Install</p>
+          <h2 id="fail-title">The install got stuck</h2>
+          <p class="lead" id="fail-msg">Your server is fine and already paid for. Fren just didn't finish installing. Try again on the same server: <b>you won't be charged twice.</b></p>
+          <div class="actions">
+            <button class="btn" type="button" id="retry" hidden><svg class="ic"><use href="#i-retry"/></svg>Try again</button>
+            <a class="btn" id="start-again" href="./">Start again</a>
+          </div>
+          <p class="hint" id="fail-paid" hidden>Please don't start a new order.</p>
+          <p class="hint" id="fail-contact" hidden></p>
+          <details class="details" id="fail-more" hidden>
+            <summary>Show details<svg class="ic"><use href="#i-down"/></svg></summary>
+            <pre id="fail-detail"></pre>
+            <button class="btn btn--2 btn--sm" type="button" id="copy-detail"><svg class="ic ic--s"><use href="#i-copy"/></svg><span>Copy details</span></button>
           </details>
         </div>
-        <p class="vp-alt">Rather run it on your own computer? <a href="../#setup">Use the one-line install instead.</a></p>
-      </section>
+      </div>
     </main>
-    <footer class="foot wrap">
+    <section class="below" id="faq">
+      <details><summary>Who holds my keys?</summary><p>You do. The keys are created on your server and never leave it. The AI plans trades but never signs them, and anything over your limits needs a confirm code from you.</p></details>
+      <details><summary>Can you get into my server?</summary><p>Only during install. We use a one-time key to install Fren, then delete it from the server. After that, only you can reach your Fren.</p></details>
+      <details><summary>What happens if I stop paying for the server?</summary><p>The server shuts down and Fren stops trading. Your funds stay in your wallets, and you keep the key backup you downloaded.</p></details>
+      <details><summary>Does it start with real money?</summary><p>No. Fren is in beta, so every one starts in paper mode: real prices, pretend money. Limits from day one: $500 a trade, 20x max leverage, and a confirm code for anything over $50. Real trading stays off until you switch it on.</p></details>
+    </section>
+    <footer class="foot">
       <span>© 2026 Fren · <a href="../brand/">Brand</a></span>
       <span class="foot__risk">Fren is software you run yourself. Leverage, meme coins, options and prediction markets are risky and you can lose everything you put in. Not financial advice.</span>
     </footer>

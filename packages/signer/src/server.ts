@@ -31,6 +31,7 @@ function main() {
     ...(process.env.FREN_SOLANA_RPC ? { solanaRpcUrl: process.env.FREN_SOLANA_RPC } : {}),
     ...(process.env.FREN_ARBITRUM_RPC ? { arbitrumRpcUrl: process.env.FREN_ARBITRUM_RPC } : {}),
     ...(process.env.FREN_EVM_RPCS ? { evmRpcUrls: JSON.parse(process.env.FREN_EVM_RPCS) as Record<number, string> } : {}),
+    ...(process.env.FREN_EVM_GAS_RESERVE_WEI ? { evmGasReserveWei: BigInt(process.env.FREN_EVM_GAS_RESERVE_WEI) } : {}),
   });
 
   const write = (res: SignerResponse) => process.stdout.write(`${encodeLine(res)}\n`);

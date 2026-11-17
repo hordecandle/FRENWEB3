@@ -2,13 +2,15 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { BetQuery } from "./bets.js";
 import { describeLimits, type Fren, type FundVenue } from "./engine.js";
+import type { AgentBudget } from "./guard.js";
 
 /**
  * Local HTTP API for the OpenClaw plugin. Bound to 127.0.0.1 and gated by a
  * bearer token. It exposes only what the plugin's tools and commands need;
  * there is no route that returns key material.
  */
-export function createApi(fren: Fren, token: string): Server {
+export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts: { slowMs?: number } = {}): Server {
+  const slowMs = opts.slowMs ?? 90_000;
   const expected = Buffer.from(token);
 
   const authed = (req: IncomingMessage) => {
@@ -24,11 +26,15 @@ export function createApi(fren: Fren, token: string): Server {
     "GET /yield": async () => ({ text: await fren.yieldRates() }),
     "GET /limits": async () => ({ limits: fren.limits(), text: describeLimits(fren.limits()) }),
     "GET /events": async (_b, url) => ({ events: fren.recentEvents(Number(url.searchParams.get("since") ?? 0)) }),
+    // The plugin asks before every agent turn; without a budget (old callers) it keeps its own count.
+    "GET /agent/guard": async () => (budget ? { guard: budget.limits(), usedToday: budget.usedToday() } : { guard: null }),
+    "POST /agent/turn": async () => (budget ? budget.take() : { allow: true, used: 0, limit: 0 }),
     "POST /plans": async (b) => fren.submit(b.plan),
     "POST /approve": async (b) => ({ text: await fren.approve(String(b.code ?? "")) }),
     "POST /limits": async (b) => fren.changeLimits(String(b.args ?? "")),
     "POST /resume": async () => fren.requestResume(),
-    "POST /stop": async (b) => ({ text: await fren.stop(Boolean(b.flatten)) }),
+    "POST /stop": async (b) => ({ text: await fren.stop(b.lang) }),
+    "POST /close_all": async () => fren.requestCloseAll(),
     "POST /cancel": async (b) => ({ text: await fren.cancel(String(b.planId ?? "")) }),
     "POST /deposit/hyperliquid": async (b) => ({ text: await fren.depositToHyperliquid(Number(b.amountUsd)) }),
     "POST /bets/quote": async (b) => fren.quoteBet(betQuery(b), String(b.request ?? "")),
@@ -60,12 +66,22 @@ export function createApi(fren: Fren, token: string): Server {
         }
         body = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>) : {};
       }
-      send(200, await handler(body, url));
+      const started = Date.now();
+      const result = await handler(body, url);
+      // A trade that ran long (EVM approve, swap and fill can take minutes) or whose chat
+      // reply the agent may no longer be waiting for: tell the owner the outcome directly.
+      const text = (result as { text?: string } | null)?.text;
+      if (EXECUTES.has(url.pathname) && text && (res.destroyed || Date.now() - started > slowMs)) {
+        await fren.tellOwner(`${text}`);
+      }
+      send(200, result);
     } catch (err) {
       send(500, { error: (err as Error).message });
     }
   });
 }
+
+const EXECUTES = new Set(["/plans", "/approve"]);
 
 function betQuery(b: Record<string, unknown>): BetQuery {
   const q = { asset: String(b.asset ?? ""), target: Number(b.target), direction: b.direction === "below" ? "below" : "above", by: String(b.by ?? ""), budgetUsd: Number(b.budgetUsd) } as const;

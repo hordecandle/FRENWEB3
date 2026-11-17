@@ -15,6 +15,8 @@ export interface SignerProcessOptions {
   arbitrumRpcUrl?: string;
   /** RPC per EVM chain id. */
   evmRpcUrls?: Record<number, string>;
+  /** ETH (wei) kept for gas after selling ETH. */
+  evmGasReserveWei?: bigint;
   /** Run the signer as another OS user, e.g. ["sudo", "-u", "fren-signer"]. */
   commandPrefix?: string[];
 }
@@ -47,6 +49,7 @@ export class SignerProcess implements SignerApi {
       ...(opts.solanaRpcUrl ? { FREN_SOLANA_RPC: opts.solanaRpcUrl } : {}),
       ...(opts.arbitrumRpcUrl ? { FREN_ARBITRUM_RPC: opts.arbitrumRpcUrl } : {}),
       ...(opts.evmRpcUrls ? { FREN_EVM_RPCS: JSON.stringify(opts.evmRpcUrls) } : {}),
+      ...(opts.evmGasReserveWei !== undefined ? { FREN_EVM_GAS_RESERVE_WEI: opts.evmGasReserveWei.toString() } : {}),
     };
     this.child = spawn(cmd!, prefixArgs, { env, stdio: ["pipe", "pipe", "pipe"] });
 
@@ -102,6 +105,9 @@ export class SignerProcess implements SignerApi {
   }
   hlDepositFromArbitrum(req: { amountUsd: number; isTestnet: boolean }) {
     return this.call<{ txHash: `0x${string}` }>("hlDepositFromArbitrum", req);
+  }
+  hlWithdrawToSelf(req: { amountUsd: number; isTestnet: boolean }) {
+    return this.call<HlApproveAgentResult>("hlWithdrawToSelf", req);
   }
 
   evmSendTransaction(req: EvmTxRequest) {

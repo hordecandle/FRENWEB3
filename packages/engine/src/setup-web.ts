@@ -7,6 +7,7 @@ import { readKeystoreAddresses } from "@fren/signer";
 import {
   ackTelegram,
   configureModelKey,
+  ModelKeyError,
   configureTelegram,
   configureWhatsAppOwner,
   finishSetup,
@@ -18,6 +19,7 @@ import {
   type ModelProvider,
   type SetupDeps,
 } from "./setup.js";
+import { BrokerError, claimManagedBot, startManagedBot, type ManagedBotSession } from "./managed-bot.js";
 import { SETUP_PAGE } from "./setup-page.js";
 
 /**
@@ -34,6 +36,8 @@ export interface WebSetupOptions {
   port?: number;
   /** Written when the owner finishes, so the installer's watcher can start Fren and close this page. */
   doneFile?: string;
+  /** Fren's bot broker (FREN_BOT_BROKER). Set = the owner can make their bot with one tap in Telegram. */
+  botBroker?: string;
 }
 
 type Line = { telegram?: { botToken: string; ownerChatId: string }; notify?: { channel: string; to: string }[] };
@@ -42,6 +46,7 @@ interface State {
   line?: Line;
   channel?: "telegram" | "whatsapp";
   telegram?: { token: string; bot: string; offset: number; candidates: { id: string; name: string }[] };
+  managed?: ManagedBotSession;
   whatsapp?: { number: string; proc?: ChildProcess; qr?: string; linked: boolean; error?: string };
   finished?: { network: string; addresses: { solana: string; evm: string; hlAgent: string } };
   done: boolean;
@@ -51,6 +56,7 @@ const COOKIE = "fren_setup";
 
 export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Server {
   const state: State = { done: false };
+  const broker = opts.botBroker ?? deps.botBroker;
   const expected = Buffer.from(opts.token);
 
   const authed = (req: IncomingMessage, url: URL): boolean => {
@@ -65,6 +71,7 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       providers: Object.entries(MODEL_PROVIDERS).map(([id, p]) => ({ id, label: p.label, keyUrl: p.keyUrl })),
       channel: state.line ? state.channel : null,
       telegramBot: state.telegram?.bot ?? null,
+      oneTapBot: !!broker,
       finished: state.finished ?? null,
       done: state.done,
     }),
@@ -72,9 +79,14 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
     "POST /api/model": async (b) => {
       const provider = String(b.provider ?? "") as ModelProvider;
       const apiKey = String(b.apiKey ?? "").trim();
-      if (!(provider in MODEL_PROVIDERS)) throw new UserError("Pick a provider.");
-      if (apiKey.length < 10) throw new UserError("Paste the whole API key.");
-      await configureModelKey(deps, provider, apiKey);
+      if (!(provider in MODEL_PROVIDERS)) throw new UserError("Pick an AI company.");
+      if (apiKey.length < 10) throw new UserError("Paste the whole key.");
+      try {
+        await configureModelKey(deps, provider, apiKey);
+      } catch (err) {
+        if (err instanceof ModelKeyError) throw new UserError(err.message);
+        throw err;
+      }
       return { ok: true };
     },
 
@@ -84,6 +96,31 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       if (!bot) throw new UserError("That token didn't work. Copy it again from BotFather, the whole thing.");
       state.telegram = { token, bot, offset: 0, candidates: [] };
       return { bot };
+    },
+
+    /** One tap: a t.me/newbot link; Telegram makes the owner's own bot and Fren's broker hands its token back here. */
+    "POST /api/telegram/new": async () => {
+      if (!broker) throw new UserError("One-tap bots aren't on for this server. Use the BotFather steps.");
+      state.managed = await startManagedBot(deps.fetchFn, broker).catch(userErr);
+      return { link: state.managed.link, fallback: state.managed.fallback, username: state.managed.username };
+    },
+
+    "POST /api/telegram/new/wait": async () => {
+      const m = state.managed;
+      if (!m) throw new UserError("Press Create my bot first.");
+      const r = await claimManagedBot(deps.fetchFn, m).catch((e) => {
+        if (e instanceof BrokerError && e.expired) state.managed = undefined;
+        return userErr(e);
+      });
+      if (!r) return { ready: false };
+      state.managed = undefined;
+      // Trust Telegram, not the broker, for which bot this token opens.
+      const bot = await telegramBot(deps.fetchFn, r.token);
+      if (!bot) throw new UserError("Telegram didn't accept the new bot's token. Press Create my bot again.");
+      state.telegram = { token: r.token, bot, offset: 0, candidates: [] };
+      state.line = await configureTelegram(deps, r.token, r.owner.id);
+      state.channel = "telegram";
+      return { ready: true, bot, owner: r.owner.name };
     },
 
     /** Long-polls Telegram for the owner's first message to the bot. */
@@ -100,7 +137,7 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       const tg = state.telegram;
       if (!tg) throw new UserError("Add the bot token first.");
       const id = String(b.id ?? "").trim();
-      if (!/^\d{1,15}$/.test(id)) throw new UserError("That's the number @userinfobot shows as Id, digits only.");
+      if (!/^\d{1,15}$/.test(id)) throw new UserError("Use the number @userinfobot shows as Id, digits only.");
       await ackTelegram(deps.fetchFn, tg.token, tg.offset);
       state.line = await configureTelegram(deps, tg.token, id);
       state.channel = "telegram";
@@ -151,7 +188,7 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
     res.setHeader("cache-control", "no-store");
     res.setHeader("x-frame-options", "DENY");
     res.setHeader("referrer-policy", "no-referrer");
-    if (!authed(req, url)) return send(res, 403, "text/plain", "This setup link isn't valid. Use the link from the Fren VPS page.");
+    if (!authed(req, url)) return send(res, 403, "text/plain", "This setup link isn't valid. Use the link from the page where you set up your server.");
 
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/setup")) {
       if (url.searchParams.has("t")) {
@@ -184,7 +221,8 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       const body = req.method === "POST" ? await readJson(req) : {};
       sendJson(res, 200, await route(body));
     } catch (err) {
-      const msg = err instanceof UserError ? err.message : `Something went wrong: ${(err as Error).message}`;
+      if (!(err instanceof UserError)) console.error(err);
+      const msg = err instanceof UserError ? err.message : "Something went wrong on your server. Try again in a minute.";
       sendJson(res, err instanceof UserError ? 400 : 500, { error: msg });
     }
   });
@@ -240,6 +278,10 @@ async function mustOk(deps: SetupDeps, args: string[], what: string): Promise<vo
 }
 
 class UserError extends Error {}
+
+function userErr(e: unknown): never {
+  throw e instanceof BrokerError ? new UserError(e.message) : e;
+}
 
 function cookie(req: IncomingMessage, name: string): string | undefined {
   for (const part of (req.headers.cookie ?? "").split(";")) {

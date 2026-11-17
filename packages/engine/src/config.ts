@@ -4,14 +4,24 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { generateKeys, readKeystoreAddresses, writeKeystore } from "@fren/signer";
 import { z } from "zod";
+import { AgentGuard } from "./guard.js";
 
 export const FrenConfig = z.object({
   /** "testnet" uses Hyperliquid testnet; Jupiter has no testnet, so use paper mode for spot there. */
   network: z.enum(["mainnet", "testnet"]).default("testnet"),
   solanaRpcUrl: z.string().url().default("https://api.mainnet-beta.solana.com"),
   hyperliquidApiUrl: z.string().url().optional(),
-  /** Jupiter API base. Works without a key at a low rate limit; set jupiterApiKey (free at portal.jup.ag) for snipes. */
-  jupiterApiUrl: z.string().url().default("https://api.jup.ag"),
+  /**
+   * Hyperliquid builder dexes to load besides the main one. Testnet has ~280 and
+   * asking all of them every few seconds gets the IP rate-limited, so the
+   * default is "xyz" (gold, silver, stocks). ["*"] loads all.
+   */
+  hyperliquidDexes: z.array(z.string()).default(["xyz"]),
+  /**
+   * Jupiter API base. Leave unset: with a key (free at portal.jup.ag) it is
+   * api.jup.ag, without one it is the keyless lite-api.jup.ag.
+   */
+  jupiterApiUrl: z.string().url().optional(),
   jupiterApiKey: z.string().optional(),
   /** Relay API, for tokens on Base, Robinhood Chain and Arbitrum. */
   relayApiUrl: z.string().url().optional(),
@@ -22,6 +32,11 @@ export const FrenConfig = z.object({
   deriveApiUrl: z.string().url().optional(),
   /** RPC overrides for EVM chains. */
   evmRpcUrls: z.object({ base: z.string().url(), robinhood: z.string().url(), arbitrum: z.string().url() }).partial().default({}),
+  /**
+   * ETH kept on Arbitrum and Base for gas when selling ETH: "sell all my ETH"
+   * leaves this much, and the signer refuses any sale that would dip below it.
+   */
+  evmGasReserveEth: z.number().min(0.0001).max(0.05).default(0.0005),
   /** Jito tip on launch snipes, in lamports (0.001 SOL default; the signer refuses more than 0.01 SOL). */
   snipeTipLamports: z.number().int().min(0).max(10_000_000).default(1_000_000),
   api: z
@@ -51,6 +66,11 @@ export const FrenConfig = z.object({
   snipeIntervalMs: z.number().int().min(500).default(2_000),
   /** Starting paper balance in USDC. */
   paperStartingUsd: z.number().positive().default(10_000),
+  /**
+   * Caps on the AI agent so a loop can't burn the owner's AI key:
+   * { turnsPerDay: 200, turnsPerMinute: 6, toolCallsPerTurn: 12 }. See guard.ts.
+   */
+  agentGuard: AgentGuard,
 });
 export type FrenConfig = z.infer<typeof FrenConfig>;
 
@@ -98,9 +118,15 @@ export function deriveApiUrl(cfg: FrenConfig): string {
   return cfg.network === "mainnet" ? "https://api.derive.xyz/v3" : "https://testnet.api.derive.xyz/v3";
 }
 
-/** Jupiter Lend: the keyed API when there's a Jupiter key, else Jupiter's keyless host. */
+/** Jupiter API: the keyed host when there's a Jupiter key (jupiterApiKey in the config), else the keyless one. */
+export function jupiterApiUrl(cfg: FrenConfig): string {
+  if (cfg.jupiterApiUrl) return cfg.jupiterApiUrl;
+  return cfg.jupiterApiKey ? "https://api.jup.ag" : "https://lite-api.jup.ag";
+}
+
+/** Jupiter Lend, on the same host as the rest of the Jupiter API. */
 export function jupiterLendApiUrl(cfg: FrenConfig): string {
-  return cfg.jupiterApiKey ? `${cfg.jupiterApiUrl}/lend/v1` : "https://lite-api.jup.ag/lend/v1";
+  return `${jupiterApiUrl(cfg)}/lend/v1`;
 }
 
 /** `channel:target`, e.g. whatsapp:+15551234567. */

@@ -12,6 +12,7 @@
       "fren_status",
       "fren_cancel",
       "fren_stop",
+      "fren_close_all",
       "fren_limits",
       "fren_deposit_hyperliquid",
       "fren_bet_quote",

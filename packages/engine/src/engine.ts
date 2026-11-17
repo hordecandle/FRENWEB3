@@ -32,6 +32,7 @@ import type { HyperliquidVenue } from "./venues/hyperliquid.js";
 import type { JupiterVenue } from "./venues/jupiter.js";
 import type { RelayVenue } from "./venues/relay.js";
 import type { DeriveVenue } from "./venues/derive.js";
+import { asLang, pauseMessage, type Lang } from "./pause-text.js";
 import type { PolymarketVenue } from "./venues/polymarket.js";
 import type { CashChain, YieldVenue } from "./venues/yield.js";
 import { VenueError, type PositionView, type SpotVenueAdapter, type VenueAdapter } from "./venues/types.js";
@@ -72,6 +73,9 @@ export interface OwnerRequestResult {
 
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
+/** Wrong /ok codes in a row before every waiting code is dropped. */
+export const WRONG_CODE_LIMIT = 5;
+
 function newCode(): string {
   const bytes = randomBytes(6);
   return Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
@@ -81,6 +85,11 @@ export class Fren {
   private readonly venues: Record<Venue, VenueAdapter>;
   private ticking = false;
   private sniping = false;
+
+  /** A line to the owner outside the agent's chat (for results the chat may never see). */
+  async tellOwner(text: string): Promise<boolean> {
+    return this.d.notifier.sendPrivate(text).catch(() => false);
+  }
 
   constructor(private readonly d: FrenDeps) {
     this.venues = { hyperliquid: d.hyperliquid, jupiter: d.jupiter, relay: d.relay, derive: d.derive, polymarket: d.polymarket, yield: d.yield };
@@ -248,18 +257,52 @@ export class Fren {
     return { text: `Reply /ok <code> with the code I just sent you to go ahead.`, codeSentPrivately: false, ownerCode: code };
   }
 
-  /** The /ok command. Codes only ever reach the owner, so this is the owner speaking. */
+  /** Wrong /ok codes in a row; see approve(). */
+  private wrongCodes = 0;
+  /** Language of the owner's last chat message, for texts that skip the model (pause). */
+  private ownerLang: Lang = "en";
+
+  /**
+   * The /ok command. Codes only ever reach the owner, so this is the owner speaking.
+   * Guessing is cut off: after WRONG_CODE_LIMIT wrong codes in a row every
+   * waiting code is dropped and the owner is told on their private line.
+   */
   async approve(code: string): Promise<string> {
-    const p = this.d.store.takePending(code.trim().toUpperCase());
-    if (!p) return "That code is wrong or expired.";
+    let entered = code.trim().toUpperCase();
+    if (!entered) {
+      // A tap on the /ok link in the bot's message sends no code. Only the owner can send /ok,
+      // and the message they tapped it in showed what the code is for, so one waiting code is enough.
+      const sole = this.d.store.soleLivePending();
+      if (!sole) return "Send /ok followed by the code I sent you privately.";
+      entered = sole.code;
+    }
+    const p = this.d.store.takePending(entered);
+    if (!p) {
+      if (++this.wrongCodes >= WRONG_CODE_LIMIT) {
+        this.wrongCodes = 0;
+        this.d.store.dropAllPending();
+        await this.d.notifier
+          .sendPrivate(`⚠️ ${WRONG_CODE_LIMIT} wrong /ok codes in a row. To be safe I cancelled every request that was waiting for a code. If that wasn't you, send /fren_stop.`)
+          .catch(() => false);
+        return "Too many wrong codes. Every request waiting for a code was cancelled; ask again for a new one.";
+      }
+      return "That code is wrong or expired.";
+    }
+    this.wrongCodes = 0;
     if (p.kind === "limits") {
-      this.d.store.setLimits(JSON.parse(p.payload) as Limits);
+      // Only the fields the owner asked to change, laid over the limits as they
+      // are now. A code issued earlier never undoes a later /stop or a later
+      // tightening of other fields.
+      const changes = JSON.parse(p.payload) as Partial<Limits>;
+      delete changes.paused;
+      this.d.store.setLimits({ ...this.limits(), ...changes });
       return `✅ Limits updated.\n${describeLimits(this.limits())}`;
     }
     if (p.kind === "resume") {
       this.d.store.setLimits({ ...this.limits(), paused: false });
       return "✅ Fren is back on. The watcher is running again.";
     }
+    if (p.kind === "closeall") return this.closeAllNow();
     if (p.kind === "fund") {
       const { venue, usd, to } = JSON.parse(p.payload) as { venue: FundVenue; usd: number; to: string };
       return this.runFunding(venue, usd, to).catch((err: Error) => `❌ ${err.message}`);
@@ -295,7 +338,7 @@ export class Fren {
       this.d.store.setLimits(next);
       return { text: `✅ Limits updated.\n${describeLimits(next)}` };
     }
-    return this.issueCode("limits", JSON.stringify(next), `Loosen your limits to:\n${describeLimits(next)}`);
+    return this.issueCode("limits", JSON.stringify(changedFields(current, next)), `Loosen your limits to:\n${describeLimits(next)}`);
   }
 
   async requestResume(): Promise<OwnerRequestResult> {
@@ -305,31 +348,61 @@ export class Fren {
 
   // -- kill switch -----------------------------------------------------------
 
-  async stop(flatten: boolean): Promise<string> {
+  /**
+   * Pause: no new trades, waiting entries are cancelled, the agent can't act on its own.
+   * Open positions stay as they are, and so do the stops and take-profits already standing
+   * on the exchange. Waiting exits (a close or a sale) are kept for when Fren is resumed.
+   * Closing everything is a separate command: closeAll().
+   */
+  async stop(langIn?: unknown): Promise<string> {
+    const lang = langIn === undefined ? this.ownerLang : asLang(langIn);
+    this.ownerLang = lang;
     const limits = this.limits();
     this.d.store.setLimits({ ...limits, paused: true });
+    // Codes handed out before the stop (loosen limits, fund, plans) die with it.
+    this.d.store.dropAllPending();
     let cancelled = 0;
     for (const status of ["active", "pending_confirm"] as const) {
       for (const p of this.d.store.plansWithStatus(status)) {
-        for (const s of this.d.store.getSteps(p.id)) {
-          if (s.status === "waiting" || s.status === "pending") {
-            this.d.store.setStep(p.id, s.idx, "cancelled", "Stopped by kill switch");
-            cancelled++;
+        const steps = this.d.store.getSteps(p.id);
+        let keptExits = 0;
+        for (const s of steps) {
+          if (s.status !== "waiting" && s.status !== "pending") continue;
+          const leg = p.plan.steps[s.idx]?.leg;
+          const isExit = isExitLeg(leg);
+          if (isExit && status === "active") {
+            keptExits++;
+            continue;
           }
+          this.d.store.setStep(p.id, s.idx, "cancelled", "Stopped by kill switch");
+          cancelled++;
         }
-        this.d.store.dropPendingForPlan(p.id);
-        this.d.store.setPlanStatus(p.id, "cancelled");
+        if (keptExits === 0) {
+          this.d.store.dropPendingForPlan(p.id);
+          this.d.store.setPlanStatus(p.id, "cancelled");
+        }
       }
     }
-    const lines = [`🛑 Stopped. Nothing new will execute and the watcher is paused.`];
-    if (cancelled) lines.push(`Cancelled ${cancelled} pending or waiting step(s).`);
-    if (flatten) {
-      const closes = await this.d.hyperliquid.flatten(limits.mode);
-      lines.push(...(closes.length ? closes : ["No leveraged positions to close."]));
-      lines.push("Spot tokens were left as they are.");
-    }
-    lines.push("Send /resume to turn trading back on.");
-    return lines.join("\n");
+    // Positions are read after the pause is set, so a slow venue can't delay the pause itself.
+    const open = await Promise.race([
+      this.positions().catch(() => null),
+      new Promise<null>((r) => setTimeout(() => r(null), 8000).unref?.()),
+    ]);
+    return pauseMessage(lang, cancelled, open);
+  }
+
+  /** Close every leveraged position. Paper closes at once; live waits for the owner's code. Works while stopped. */
+  async requestCloseAll(): Promise<OwnerRequestResult> {
+    if (this.limits().mode === "paper") return { text: await this.closeAllNow() };
+    const open = await this.d.hyperliquid.positions("live").catch(() => null);
+    if (open && open.length === 0) return { text: "No leveraged positions to close." };
+    const what = open ? open.map((p) => p.symbol).join(", ") : "every leveraged position";
+    return this.issueCode("closeall", "", `Close ${what} now at market? Spot tokens stay as they are.`);
+  }
+
+  private async closeAllNow(): Promise<string> {
+    const closes = await this.d.hyperliquid.flatten(this.limits().mode);
+    return [...(closes.length ? closes : ["No leveraged positions to close."]), "Spot tokens were left as they are."].join("\n");
   }
 
   async cancel(planId: string): Promise<string> {
@@ -347,19 +420,70 @@ export class Fren {
 
   private async snapshot(): Promise<MarketSnapshot> {
     const snap: MarketSnapshot = { now: new Date(), prices: new Map(), funding: new Map() };
-    const markets = await this.d.hyperliquid.markets.all(true).catch(() => []);
-    for (const m of markets) {
-      snap.prices.set(snapshotKey("hyperliquid", m.name), m.midPx);
-      snap.funding.set(snapshotKey("hyperliquid", m.name), m.fundingHourlyPct);
+    // Prices come from one light request. If it fails the watcher is blind, and
+    // the owner hears about it: a missing price must never look like "no news".
+    let hlOk = true;
+    try {
+      const mids = await this.d.hyperliquid.markets.mids();
+      for (const [name, px] of mids) snap.prices.set(snapshotKey("hyperliquid", name), px);
+      // Funding and the rare market without a mid come from the cached list, if it is current.
+      const markets = await this.d.hyperliquid.markets.all().catch(() => []);
+      for (const m of markets) {
+        const k = snapshotKey("hyperliquid", m.name);
+        if (!snap.prices.has(k)) snap.prices.set(k, m.midPx);
+        snap.funding.set(k, m.fundingHourlyPct);
+      }
+    } catch {
+      hlOk = false;
     }
+    await this.feedCheck("Hyperliquid", hlOk, this.watchesHyperliquid(), this.d.hyperliquid.markets.retryInSec);
     const mints = new Set<string>();
     for (const p of this.d.store.plansWithStatus("active")) {
       for (const st of p.plan.steps) for (const c of st.when) if (c.type === "price" && c.venue === "jupiter") mints.add(c.market);
     }
-    const px = await this.d.jupiter.prices([...mints]).catch(() => new Map<string, number>());
+    let jupOk = true;
+    const px = await this.d.jupiter.prices([...mints]).catch(() => {
+      jupOk = false;
+      return new Map<string, number>();
+    });
+    await this.feedCheck("Jupiter", jupOk, mints.size > 0, 0);
     for (const [mint, v] of px) snap.prices.set(snapshotKey("jupiter", mint), v);
     snap.tradable = await this.tradableNow();
     return snap;
+  }
+
+  /** True when something depends on live Hyperliquid prices: an open position or a waiting condition. */
+  private watchesHyperliquid(): boolean {
+    if (this.d.store.paperPositions().length > 0 || this.liveOpenPositions > 0) return true;
+    return this.d.store.plansWithStatus("active").some((p) => p.plan.steps.some((st) => st.when.some((c) => c.type !== "time" && c.type !== "tradable" && c.venue === "hyperliquid")));
+  }
+
+  private feeds = new Map<string, { fails: number; warned: boolean }>();
+
+  /**
+   * Two failed passes in a row (≈ 30 s) while something is being watched: tell
+   * the owner stops and conditions are not being watched. Once the prices are
+   * back, say so. One message per outage, not one per pass.
+   */
+  private async feedCheck(name: string, ok: boolean, watching: boolean, retryInSec: number): Promise<void> {
+    const f = this.feeds.get(name) ?? { fails: 0, warned: false };
+    this.feeds.set(name, f);
+    if (ok) {
+      f.fails = 0;
+      if (f.warned) {
+        f.warned = false;
+        await this.d.notifier.alert(`✅ ${name} prices are back. Stops and conditions are being watched again.`);
+      }
+      return;
+    }
+    f.fails++;
+    if (f.fails >= 2 && watching && !f.warned) {
+      f.warned = true;
+      const retry = retryInSec > 0 ? ` I'll retry in about ${retryInSec}s.` : " I keep retrying.";
+      await this.d.notifier.alert(
+        `⚠️ I can't get ${name} prices right now (rate-limited or unreachable). Until they're back I can't watch your stops, targets and conditions, so nothing will fire on its own.${retry}`,
+      );
+    }
   }
 
   /** Which waiting snipe targets trade right now. Only asks about tokens someone is waiting on. */
@@ -409,9 +533,14 @@ export class Fren {
     this.ticking = true;
     try {
       const limits = this.limits();
-      if (limits.paused) return;
       const snap = await this.snapshot();
       await this.paperExits(snap);
+      // Paused: the watcher keeps running but only exits fire (sales, closes, paper stops);
+      // entries, buys, snipes and bets wait for /resume or were cancelled by the pause.
+      if (limits.paused) {
+        await this.fireReady(snap, false, true);
+        return;
+      }
       if (limits.mode === "paper") await this.settlePaperBets();
       await this.fireReady(snap, false);
     } finally {
@@ -420,13 +549,14 @@ export class Fren {
   }
 
   /** Fire every waiting step whose conditions hold in this snapshot. */
-  private async fireReady(snap: MarketSnapshot, snipesOnly: boolean): Promise<void> {
+  private async fireReady(snap: MarketSnapshot, snipesOnly: boolean, exitsOnly = false): Promise<void> {
     for (const rec of this.d.store.plansWithStatus("active")) {
       for (const s of this.d.store.getSteps(rec.id)) {
         if (s.status !== "waiting") continue;
         const step = rec.plan.steps[s.idx];
         if (!step) continue;
         if (snipesOnly && !step.when.some((c) => c.type === "tradable")) continue;
+        if (exitsOnly && !isExitLeg(step.leg)) continue;
         if (step.expiresAt && snap.now.getTime() > new Date(step.expiresAt).getTime()) {
           this.d.store.setStep(rec.id, s.idx, "expired", "Expired before its conditions were met");
           await this.d.notifier.alert(`⌛ Expired without firing: ${describeStep(step)}`);
@@ -448,7 +578,8 @@ export class Fren {
           continue;
         }
         r.index = s.idx;
-        const decision = evaluatePolicy([r], this.limits(), this.policyState(rec.mode), { preApproved: true });
+        // An exit may fire while paused; every other cap still applies.
+        const decision = evaluatePolicy([r], exitsOnly ? { ...this.limits(), paused: false } : this.limits(), this.policyState(rec.mode), { preApproved: true });
         if (decision.verdict === "reject") {
           this.d.store.setStep(rec.id, s.idx, "rejected", describeDecision(decision, [r]));
           await this.d.notifier.alert(`❌ Conditions met but your limits blocked it:\n${describeDecision(decision, [r])}`);
@@ -695,4 +826,19 @@ function describePosition(p: PositionView): string {
   if (p.venue === "polymarket") return `${size} shares of ${p.symbol} worth ${fmtUsd(p.valueUsd)}${pnl}`;
   if (p.venue === "yield") return `${fmtUsd(p.valueUsd)} USDC lent on ${p.symbol}${p.pnlUsd !== null && p.pnlUsd > 0.005 ? ` (+${fmtUsd(p.pnlUsd)} interest)` : ""}`;
   return `${p.size} ${p.symbol} worth ${fmtUsd(p.valueUsd)}${pnl}`;
+}
+
+/** A step that only reduces exposure: closing a perp or selling a token. */
+function isExitLeg(leg: { kind: string; side?: string } | undefined): boolean {
+  return leg?.kind === "perp_close" || (leg?.kind === "swap" && leg.side === "sell");
+}
+
+/** The limits that differ between two sets. `paused` is never carried: only /stop and /resume touch it. */
+function changedFields(from: Limits, to: Limits): Partial<Limits> {
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(to) as (keyof Limits)[]) {
+    if (k === "paused") continue;
+    if (JSON.stringify(from[k]) !== JSON.stringify(to[k])) out[k] = to[k];
+  }
+  return out as Partial<Limits>;
 }

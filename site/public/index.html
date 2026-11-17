@@ -6,7 +6,7 @@
     <title>Fren · Your trading Fren lives in your chats</title>
     <meta
       name="description"
-      content="Text it on Telegram or WhatsApp. Fren handles perps, memes, options and bets for you, and your keys never leave your box."
+      content="Text it on Telegram or WhatsApp. Fren (beta) trades perps, memes, options and bets for you, and your keys stay on your own server."
     />
     <meta name="theme-color" content="#ffffff" />
     <meta property="og:type" content="website" />
@@ -14,7 +14,7 @@
     <meta property="og:title" content="Fren · Your trading Fren lives in your chats" />
     <meta
       property="og:description"
-      content="Text it on Telegram or WhatsApp. Perps, memes, options, bets and yield, and your keys never leave your box."
+      content="Text it on Telegram or WhatsApp. Fren is in beta. Perps, memes, options, bets and yield, and your keys stay on your own server."
     />
     <meta property="og:image" content="https://getfren.netlify.app/assets/og.png" />
     <meta property="og:image:width" content="1200" />
@@ -53,6 +53,7 @@
         </svg>
         <span class="loader__gm">gm</span>
       </div>
+      <span class="loader__skip" id="loader-skip">Tap or press Esc to skip</span>
     </div>
     <div class="progress" id="progress" aria-hidden="true">
       <span><i></i></span><span><i></i></span><span><i></i></span>
@@ -66,6 +67,7 @@
             <ellipse class="lid" cx="84" cy="40" rx="16.5" ry="16.5" fill="currentColor" />
             <use href="#fren-word" fill="currentColor" />
           </svg>
+          <span class="beta">Beta</span>
         </a>
         <a class="btn btn--sm" href="#setup">Get your Fren</a>
       </div>
@@ -79,57 +81,13 @@
               Your trading <span class="plq">Fren</span> lives in your&nbsp;chats.
             </h1>
             <p class="hero__sub">
-              Text it on Telegram or WhatsApp. Fren handles perps, memes, options and bets for you, and your
-              keys never leave your box.
+              Tell it what to trade in plain words, right in Telegram or WhatsApp. It runs on your own server, so your keys stay with you.
             </p>
             <div class="cta__buttons">
-              <a class="btn" href="#setup"
-                ><svg
-                  class="btn__ic"
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M21.2 4.1 2.9 11.2c-.8.3-.8 1.4 0 1.7l4.5 1.6 1.8 5.4c.2.7 1.1.9 1.6.4l2.6-2.5 4.7 3.4c.6.4 1.4.1 1.6-.6l3-15.2c.2-.9-.7-1.6-1.5-1.3Z"
-                    stroke="currentColor"
-                    stroke-width="1.8"
-                    stroke-linejoin="round"
-                  />
-                  <path
-                    d="m7.4 14.5 10.4-7-7.6 8.1-.4 4"
-                    stroke="currentColor"
-                    stroke-width="1.8"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  /></svg
-                >Telegram</a
-              >
-              <a class="btn" href="#setup"
-                ><svg
-                  class="btn__ic"
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3Z"
-                    stroke="currentColor"
-                    stroke-width="1.8"
-                    stroke-linejoin="round"
-                  />
-                  <path
-                    d="M9.1 7.9c.3-.3.7-.3 1-.1l.9 1.9c.1.3 0 .6-.2.8l-.6.6a6.2 6.2 0 0 0 2.9 2.9l.6-.6c.2-.2.5-.3.8-.2l1.9.9c.2.3.2.7-.1 1-.9.9-2.2 1.1-3.3.5a9.4 9.4 0 0 1-4.4-4.4c-.6-1.1-.4-2.4.5-3.3Z"
-                    fill="currentColor"
-                  /></svg
-                >WhatsApp</a
-              >
+              <a class="btn" href="#setup">Get your Fren&nbsp;→</a>
             </div>
-          </div>
+            <p class="hero__chats"><span><span class="nb">~10 min to set up</span> · <span class="nb">$10/month server, or use your own computer</span></span></p>
+                      </div>
           <div class="dotfield" id="dotfield" aria-hidden="true"></div>
           <div class="dotfield dotfield--fin" id="dotfield-fin" aria-hidden="true"></div>
           <div class="hint" id="hint" aria-hidden="true">
@@ -151,7 +109,7 @@
           <div class="box box--back" id="box-back" aria-hidden="true"></div>
           <div class="box box--front" id="box-front" aria-hidden="true">
             <span class="box__row">
-              <span class="box__led"></span> <span class="box__label">Your box</span>
+              <span class="box__led"></span> <span class="box__label">Your server</span>
             </span>
             <p class="box__caption" id="box-caption">Your keys never leave it.</p>
           </div>
@@ -178,8 +136,8 @@
                   <circle cx="20" cy="28" r="2.5" fill="currentColor" />
                   <path d="M30 14l2-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg
               ></span>
-              <h3>Your caps</h3>
-              <p>Your own limits apply to every trade.</p>
+              <h3>Your limits</h3>
+              <p>Every trade stays inside the limits you set.</p>
             </div>
             <div class="tile" data-s="1">
               <span class="tile__top"
@@ -242,7 +200,7 @@
                   /></svg
               ></span>
               <h3>The AI never signs</h3>
-              <p>It plans the trades. Your box signs them.</p>
+              <p>It plans the trades. Your server signs them.</p>
             </div>
             <div class="tile tile--kill" data-s="3">
               <span class="tile__top">
@@ -300,55 +258,11 @@
                   <div class="chat__final" id="chat-final">
                     <div class="chat__top">
                       <p class="chat__you">Let’s make some moves</p>
-                      <p class="chat__say">Ready when you are. Where should I text&nbsp;you?</p>
+                      <p class="chat__say">Ready when you are. Telegram or WhatsApp, your&nbsp;pick.</p>
                     </div>
                     <div class="chat__ctas">
-                      <p class="chat__trust">Self-custody · Your caps · Confirm codes · Kill switch</p>
-                      <a class="btn" href="#setup"
-                        ><svg
-                          class="btn__ic"
-                          width="20"
-                          height="20"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          aria-hidden="true"
-                        >
-                          <path
-                            d="M21.2 4.1 2.9 11.2c-.8.3-.8 1.4 0 1.7l4.5 1.6 1.8 5.4c.2.7 1.1.9 1.6.4l2.6-2.5 4.7 3.4c.6.4 1.4.1 1.6-.6l3-15.2c.2-.9-.7-1.6-1.5-1.3Z"
-                            stroke="currentColor"
-                            stroke-width="1.8"
-                            stroke-linejoin="round"
-                          />
-                          <path
-                            d="m7.4 14.5 10.4-7-7.6 8.1-.4 4"
-                            stroke="currentColor"
-                            stroke-width="1.8"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                          /></svg
-                        >Telegram</a
-                      >
-                      <a class="btn" href="#setup"
-                        ><svg
-                          class="btn__ic"
-                          width="20"
-                          height="20"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          aria-hidden="true"
-                        >
-                          <path
-                            d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3Z"
-                            stroke="currentColor"
-                            stroke-width="1.8"
-                            stroke-linejoin="round"
-                          />
-                          <path
-                            d="M9.1 7.9c.3-.3.7-.3 1-.1l.9 1.9c.1.3 0 .6-.2.8l-.6.6a6.2 6.2 0 0 0 2.9 2.9l.6-.6c.2-.2.5-.3.8-.2l1.9.9c.2.3.2.7-.1 1-.9.9-2.2 1.1-3.3.5a9.4 9.4 0 0 1-4.4-4.4c-.6-1.1-.4-2.4.5-3.3Z"
-                            fill="currentColor"
-                          /></svg
-                        >WhatsApp</a
-                      >
+                      <p class="chat__trust">Your keys · Your limits · Confirm codes · Kill switch</p>
+                      <a class="btn" href="#setup">Get your Fren&nbsp;→</a>
                     </div>
                   </div>
                 </div>
@@ -365,55 +279,69 @@
           <div class="float float--you" id="lets">Let’s make some moves</div>
         </div>
       </section>
+      <section class="steps5" id="steps" aria-labelledby="steps-title">
+        <div class="wrap">
+          <h2 id="steps-title">Five steps, all in your browser</h2>
+          <p>Nothing to install by hand. Here is everything we'll ask for, up front.</p>
+          <ol>
+            <li><b>Server</b><span>Your own server, rented in your name. Just an email, no ID.</span></li>
+            <li><b>Pay</b><span>The server is $10 a month, paid in USDC, USDT, BTC or XMR.</span></li>
+            <li><b>Install</b><span>We set Fren up for you. Usually 3 to 5 minutes, nothing to type.</span></li>
+            <li class="key"><b>AI brain</b><span>Get an AI key (we show you how). You pay the AI company directly, usually a few dollars a month.</span></li>
+            <li><b>Chat</b><span>Pick Telegram or WhatsApp, then say gm.</span></li>
+          </ol>
+          <p class="steps5__limits steps5__paper">Starts in paper mode: real prices, pretend money. No real money moves until you say so.</p>
+          <p class="steps5__limits">No ID needed. Nothing to install.</p>
+          <p class="steps5__limits">Safe limits from day one: $500 a trade, 20x max leverage, and a confirm code for anything over $50. Change them whenever you want.</p>
+        </div>
+      </section>
       <section class="setup" id="setup" aria-labelledby="setup-title">
         <div class="wrap">
           <p class="setup__eyebrow">Get your Fren</p>
-          <h2 class="setup__title" id="setup-title">Pick where your <span class="plq">box</span> lives.</h2>
+          <h2 class="setup__title" id="setup-title">Pick where your <span class="plq">Fren</span> lives.</h2>
           <p class="setup__sub">
-            Fren runs on a machine you own, so your keys never leave it. Set it up in a few minutes, then text it on
-            Telegram or WhatsApp.
+            Fren runs on a machine you own, so your keys stay with you. Pick one, then text it on Telegram or WhatsApp.
           </p>
           <div class="setup__grid">
             <article class="way way--vps">
               <span class="way__tag">Easiest · always on</span>
-              <h3>On a VPS</h3>
+              <h3>On a cloud server</h3>
               <p class="way__desc">
-                Fren runs 24/7, even when your laptop sleeps. No KYC, pay in crypto, $10 a month. All in your
-                browser: we rent the server, install Fren and connect your chat.
+                Runs 24/7, even when your laptop sleeps. We rent a server in your name (it costs $10 a month, paid in USDC, USDT,
+                BTC or XMR, no ID) and set Fren up for you. All in your browser.
               </p>
-              <ol class="way__steps">
-                <li>Pick a plan and pay in USDC, USDT, BTC or XMR</li>
-                <li>Connect Telegram or WhatsApp in your browser</li>
-                <li>Send USDC to your new wallet</li>
-              </ol>
-              <a class="btn btn--wide" href="vps/" id="vps-cta">Start the VPS wizard&nbsp;→</a>
+              <a class="btn btn--wide" href="vps/" id="vps-cta">Set up in your browser&nbsp;→</a>
             </article>
             <article class="way way--local">
-              <span class="way__tag">On your own machine</span>
+              <span class="way__tag">On your own computer</span>
               <h3>On your computer</h3>
-              <p class="way__desc">One command on Mac, Linux or Windows (WSL). Fren runs while your computer is on.</p>
+              <p class="way__desc">
+                One command on Mac, Linux or Windows (WSL). No server bill, you bring your own AI key. Fren runs while your
+                computer is on, and asks the same questions right in your terminal.
+              </p>
               <div class="cmd">
                 <code class="cmd__text" id="cmd-text">curl -fsSL https://getfren.netlify.app/install.sh | bash</code>
                 <button type="button" class="cmd__copy" id="cmd-copy" aria-label="Copy install command">Copy</button>
               </div>
               <ol class="way__steps">
                 <li>Paste it in your terminal</li>
-                <li>Log in to your AI model, then choose Telegram or WhatsApp</li>
-                <li>Send USDC to your new wallet</li>
+                <li>Add your AI key, then pick Telegram or WhatsApp</li>
+                <li>Start in paper mode</li>
               </ol>
             </article>
           </div>
           <p class="setup__note">
-            Every Fren starts in paper mode with safe caps: $500 a trade, 20x max leverage, and a confirm code for
-            anything over $100. Go live and change your caps whenever you want.
+            Every Fren starts in paper mode with safe limits: $500 a trade, 20x max leverage, and a confirm code for
+            anything over $50. Change them whenever you want.
           </p>
+          <p class="setup__note" id="fee-note" hidden></p>
         </div>
       </section>
-    </main>
+          </main>
     <footer class="foot wrap">
       <span>© 2026 Fren · <a href="brand/">Brand</a></span>
       <span class="foot__risk"
-        >Fren is software you run yourself. Leverage, meme coins, options and prediction markets are risky and you can
+        >Fren is in beta: it starts in paper mode (pretend money), and real trading stays off until you switch it on. Fren is software you run yourself. Leverage, meme coins, options and prediction markets are risky and you can
         lose everything you put in. Not financial advice.</span
       >
     </footer>

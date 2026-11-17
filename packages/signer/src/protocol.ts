@@ -19,6 +19,7 @@ export const SIGNER_METHODS: readonly SignerMethod[] = [
   "hlApproveAgent",
   "solSignTransaction",
   "hlDepositFromArbitrum",
+  "hlWithdrawToSelf",
   "evmSendTransaction",
   "deriveSignOrder",
   "deriveAuthHeaders",
