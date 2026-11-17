@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { frenPaths } from "./config.js";
-import { findTelegramOwner, runSetup, systemdUnit, type Prompt, type Runner, type SetupDeps } from "./setup.js";
+import { findTelegramOwner, guardExisting, runSetup, systemdUnit, type Prompt, type Runner, type SetupDeps } from "./setup.js";
 
 const TOKEN = "123456789:AAtesttokentesttokentesttokentest";
 
@@ -131,6 +131,14 @@ describe("fren setup", () => {
     const deny = runs.find((r) => r.startsWith("openclaw config set tools.deny "));
     expect(JSON.parse(deny!.slice("openclaw config set tools.deny ".length))).toEqual(expect.arrayContaining(["group:runtime", "group:fs", "group:automation"]));
     expect(runs).toContain("openclaw config set tools.elevated.enabled false");
+    // Loop guard: no background turns, a deadline per answer, loop detection, no groups.
+    expect(runs).toContain(`openclaw config set agents.defaults.heartbeat.every "0m"`);
+    expect(runs).toContain("openclaw config set cron.enabled false");
+    expect(runs).toContain("openclaw config set agents.defaults.timeoutSeconds 120");
+    expect(runs).toContain("openclaw config set tools.loopDetection.enabled true");
+    expect(runs).toContain("openclaw config set tools.exec.notifyOnExit false");
+    expect(runs).toContain("openclaw config set plugins.entries.fren.hooks.allowConversationAccess true");
+    expect(runs).toContain(`openclaw config set channels.telegram.groupPolicy "disabled"`);
     // Server mode: the VPS installer owns the services.
     expect(runs.some((r) => r.startsWith("systemctl") || r.startsWith("openclaw daemon"))).toBe(false);
 
@@ -178,6 +186,9 @@ describe("fren setup", () => {
     expect(runs).toContain("openclaw channels add --channel whatsapp --account default");
     expect(runs).toContain(`openclaw config set channels.whatsapp.allowFrom ["+447700900123"]`);
     expect(runs).toContain(`openclaw config set commands.ownerAllowFrom ["whatsapp:+447700900123"]`);
+    expect(runs).toContain(`openclaw config set channels.whatsapp.groupPolicy "disabled"`);
+    expect(runs).toContain("openclaw config set channels.whatsapp.selfChatMode false");
+    expect(runs).toContain("openclaw config set agents.defaults.heartbeat.every \"0m\"");
     // Not linked during "channels add", so it asks for the QR again.
     expect(runs).toContain("[tty] openclaw channels login --channel whatsapp");
     expect(JSON.parse(readFileSync(d.paths.config, "utf8")).notify).toEqual([{ channel: "whatsapp", to: "+447700900123" }]);
@@ -226,5 +237,25 @@ describe("systemdUnit", () => {
     expect(u).toContain("User=fren");
     expect(u).toContain("ExecStart=/usr/bin/node /opt/fren/cli.js start");
     expect(u).toContain("WantedBy=multi-user.target");
+  });
+});
+
+describe("fren guard", () => {
+  it("puts the loop guard on an existing install for the channels it has, then restarts the gateway", async () => {
+    const runs: string[] = [];
+    const run: Runner = async (file, args) => {
+      runs.push(`${file} ${args.join(" ")}`);
+      // Only Telegram is set up here.
+      if (args[0] === "config" && args[1] === "get") return { code: args[2] === "channels.telegram" ? 0 : 1, stdout: "", stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const said: string[] = [];
+    await guardExisting({ run, openclawBin: "openclaw" }, (t) => said.push(t));
+    expect(runs).toContain(`openclaw config set agents.defaults.heartbeat.every "0m"`);
+    expect(runs).toContain("openclaw config set agents.defaults.timeoutSeconds 120");
+    expect(runs).toContain(`openclaw config set channels.telegram.groupPolicy "disabled"`);
+    expect(runs.some((r) => r.startsWith("openclaw config set channels.whatsapp"))).toBe(false);
+    expect(runs.at(-1)).toBe("openclaw daemon restart");
+    expect(said.join("\n")).toMatch(/Loop guard on \(telegram\)/);
   });
 });

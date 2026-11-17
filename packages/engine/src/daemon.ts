@@ -8,6 +8,7 @@ import { Fren } from "./engine.js";
 import type { Fetch } from "./http.js";
 import { GatewayLine, OwnerNotifier, TelegramLine, type Exec, type OwnerLine } from "./notify.js";
 import { Store } from "./store.js";
+import { AgentBudget } from "./guard.js";
 import { HyperliquidVenue } from "./venues/hyperliquid.js";
 import { JupiterVenue } from "./venues/jupiter.js";
 import { OnlinePumpFun } from "./venues/pumpfun.js";
@@ -117,7 +118,14 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
   }
 
   const fren = buildFren({ config, store, signer });
-  const server = createApi(fren, token);
+  const budget = new AgentBudget(store, () => {
+    try {
+      return loadConfig(paths).agentGuard;
+    } catch {
+      return config.agentGuard;
+    }
+  });
+  const server = createApi(fren, token, budget);
   await new Promise<void>((res) => server.listen(config.api.port, config.api.host, res));
 
   const timer = setInterval(() => {

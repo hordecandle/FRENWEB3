@@ -2,13 +2,14 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { BetQuery } from "./bets.js";
 import { describeLimits, type Fren, type FundVenue } from "./engine.js";
+import type { AgentBudget } from "./guard.js";
 
 /**
  * Local HTTP API for the OpenClaw plugin. Bound to 127.0.0.1 and gated by a
  * bearer token. It exposes only what the plugin's tools and commands need;
  * there is no route that returns key material.
  */
-export function createApi(fren: Fren, token: string): Server {
+export function createApi(fren: Fren, token: string, budget?: AgentBudget): Server {
   const expected = Buffer.from(token);
 
   const authed = (req: IncomingMessage) => {
@@ -24,6 +25,9 @@ export function createApi(fren: Fren, token: string): Server {
     "GET /yield": async () => ({ text: await fren.yieldRates() }),
     "GET /limits": async () => ({ limits: fren.limits(), text: describeLimits(fren.limits()) }),
     "GET /events": async (_b, url) => ({ events: fren.recentEvents(Number(url.searchParams.get("since") ?? 0)) }),
+    // The plugin asks before every agent turn; without a budget (old callers) it keeps its own count.
+    "GET /agent/guard": async () => (budget ? { guard: budget.limits(), usedToday: budget.usedToday() } : { guard: null }),
+    "POST /agent/turn": async () => (budget ? budget.take() : { allow: true, used: 0, limit: 0 }),
     "POST /plans": async (b) => fren.submit(b.plan),
     "POST /approve": async (b) => ({ text: await fren.approve(String(b.code ?? "")) }),
     "POST /limits": async (b) => fren.changeLimits(String(b.args ?? "")),

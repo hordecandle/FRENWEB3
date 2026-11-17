@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { generateKeys, readKeystoreAddresses, writeKeystore } from "@fren/signer";
 import { z } from "zod";
+import { AgentGuard } from "./guard.js";
 
 export const FrenConfig = z.object({
   /** "testnet" uses Hyperliquid testnet; Jupiter has no testnet, so use paper mode for spot there. */
@@ -60,6 +61,11 @@ export const FrenConfig = z.object({
   snipeIntervalMs: z.number().int().min(500).default(2_000),
   /** Starting paper balance in USDC. */
   paperStartingUsd: z.number().positive().default(10_000),
+  /**
+   * Caps on the AI agent so a loop can't burn the owner's AI key:
+   * { turnsPerDay: 200, turnsPerMinute: 6, toolCallsPerTurn: 12 }. See guard.ts.
+   */
+  agentGuard: AgentGuard,
 });
 export type FrenConfig = z.infer<typeof FrenConfig>;
 

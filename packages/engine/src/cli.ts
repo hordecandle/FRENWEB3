@@ -8,7 +8,7 @@ import { readKeystoreAddresses } from "@fren/signer";
 import { frenPaths, initFren, loadConfig, parseNotify } from "./config.js";
 import { startDaemon } from "./daemon.js";
 import { ENGINE_USER, isolate, isolatedEngineUnit } from "./isolate.js";
-import { isolatedMarker, runSetup, systemSetupDeps } from "./setup.js";
+import { guardExisting, isolatedMarker, runSetup, systemSetupDeps } from "./setup.js";
 import { serveSetup } from "./setup-web.js";
 import { serveBotBroker } from "./managed-bot.js";
 import type { Runner } from "./setup.js";
@@ -33,6 +33,11 @@ const HELP = `fren: self-hosted on-chain trading agent backend
       FREN_MANAGER_BOT_TOKEN (bot management on in @BotFather). Run by Fren, not owners.
   fren start
       Run the engine: signer process, local API for OpenClaw and the watcher.
+  fren guard
+      Put the loop guard on an existing install (setup does it for new ones):
+      no background AI turns, a time limit per answer, loop detection, groups
+      off, then restart the OpenClaw gateway. Caps per message, minute and day
+      live in agentGuard in config.json (see the README).
   fren wallet
       Print wallet addresses.
   fren status
@@ -145,6 +150,9 @@ Next: \`fren start\`, then install the OpenClaw plugin (see README), or run \`fr
       if (values.service && !values.undo) await installIsolatedService(deps.run, agentUser, engineUser, res.engineFrenHome);
       return;
     }
+    case "guard":
+      await guardExisting(systemSetupDeps(paths), (t) => console.log(t));
+      return;
     case "wallet": {
       if (isolatedMarker(paths)) {
         // The keystore is the engine user's now: ask the engine.

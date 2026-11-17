@@ -240,7 +240,59 @@ export async function finishSetup(
   const res = initFren(deps.paths, { network: o.network, ...(o.jupiterApiKey ? { jupiterApiKey: o.jupiterApiKey } : {}), ...o.line });
   await mustRun(deps, deps.openclawBin, ["plugins", "install", "--link", "--accept-capabilities", "--force", deps.pluginDir], "install the Fren plugin");
   await lockDownAgentTools(deps);
+  await applyLoopGuard(deps);
   return res;
+}
+
+/**
+ * The agent spends the owner's AI key, so it must not be able to spin. OpenClaw
+ * settings (same keys on 2026.10.5 and 2026.11.x):
+ * - no heartbeat and no automations: by default OpenClaw wakes the agent every
+ *   30 min with the whole chat history; Fren's engine watches stops itself;
+ * - one answer may take at most LOOP_GUARD_TURN_SECONDS (default is 48 hours),
+ *   which also ends OpenClaw's model retries on errors;
+ * - OpenClaw's tool-loop detection on (off by default);
+ * - no wake-up turns after background commands (the agent has none anyway);
+ * - the Fren plugin may see turns, for its own caps (guard.ts in the plugin):
+ *   tool calls per answer, answers per minute and per day.
+ * Groups and WhatsApp self-chat are shut per channel (LOOP_GUARD_CHANNEL).
+ */
+export const LOOP_GUARD_TURN_SECONDS = 120;
+export const LOOP_GUARD: [string, string][] = [
+  ["agents.defaults.heartbeat.every", JSON.stringify("0m")],
+  ["cron.enabled", "false"],
+  ["agents.defaults.timeoutSeconds", String(LOOP_GUARD_TURN_SECONDS)],
+  ["tools.loopDetection.enabled", "true"],
+  ["tools.exec.notifyOnExit", "false"],
+  ["plugins.entries.fren.hooks.allowConversationAccess", "true"],
+];
+export const LOOP_GUARD_CHANNEL: Record<"telegram" | "whatsapp", [string, string][]> = {
+  telegram: [["channels.telegram.groupPolicy", JSON.stringify("disabled")]],
+  whatsapp: [
+    ["channels.whatsapp.groupPolicy", JSON.stringify("disabled")],
+    // Fren's own number writing to itself is never a message from the owner.
+    ["channels.whatsapp.selfChatMode", "false"],
+  ],
+};
+
+export async function applyLoopGuard(deps: Pick<SetupDeps, "run" | "openclawBin">, channels: ("telegram" | "whatsapp")[] = []): Promise<void> {
+  for (const [path, value] of LOOP_GUARD) await setConfig(deps, path, value);
+  for (const ch of channels) for (const [path, value] of LOOP_GUARD_CHANNEL[ch]) await setConfig(deps, path, value);
+}
+
+/**
+ * `fren guard`: the same settings for a Fren that is already installed, for
+ * whichever channels OpenClaw has. Then the gateway restarts to load them.
+ */
+export async function guardExisting(deps: Pick<SetupDeps, "run" | "openclawBin">, say: (t: string) => void): Promise<void> {
+  const channels: ("telegram" | "whatsapp")[] = [];
+  for (const ch of ["telegram", "whatsapp"] as const) {
+    if ((await deps.run(deps.openclawBin, ["config", "get", `channels.${ch}`])).code === 0) channels.push(ch);
+  }
+  await applyLoopGuard(deps, channels);
+  say(`✓ Loop guard on${channels.length ? ` (${channels.join(", ")})` : ""}: no background AI turns, ${LOOP_GUARD_TURN_SECONDS} s per answer, loop detection, groups off`);
+  const restarted = (await deps.run(deps.openclawBin, ["daemon", "restart"])).code === 0;
+  say(restarted ? "✓ OpenClaw gateway restarted" : `! Restart the OpenClaw gateway yourself: ${deps.openclawBin} daemon restart`);
 }
 
 /**
@@ -401,6 +453,7 @@ export async function configureTelegram(deps: Pick<SetupDeps, "run" | "openclawB
   await setConfig(deps, "channels.telegram.dmPolicy", "allowlist");
   await setConfig(deps, "commands.ownerAllowFrom", JSON.stringify([`telegram:${ownerId}`]));
   await setConfig(deps, "agents.defaults.typingMode", JSON.stringify("instant")); // "typing…" right away, not after the model's first token
+  for (const [path, value] of LOOP_GUARD_CHANNEL.telegram) await setConfig(deps, path, value);
   await mustRun(deps, deps.openclawBin, ["channels", "add", "--channel", "telegram", "--token", token], "add the Telegram channel");
   await telegram(deps.fetchFn, token, "sendMessage", { chat_id: ownerId, text: "✅ Fren found you. Setup is finishing; I'll be ready in a minute." });
   return { telegram: { botToken: token, ownerChatId: ownerId } };
@@ -526,6 +579,7 @@ export async function configureWhatsAppOwner(deps: Pick<SetupDeps, "run" | "open
   await setConfig(deps, "channels.whatsapp.allowFrom", JSON.stringify([number]));
   await setConfig(deps, "channels.whatsapp.dmPolicy", "allowlist");
   await setConfig(deps, "commands.ownerAllowFrom", JSON.stringify([`whatsapp:${number}`]));
+  for (const [path, value] of LOOP_GUARD_CHANNEL.whatsapp) await setConfig(deps, path, value);
   return { notify: [{ channel: "whatsapp", to: number }] };
 }
 
