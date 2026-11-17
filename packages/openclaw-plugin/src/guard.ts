@@ -20,7 +20,7 @@ export interface GuardLimits {
   toolCallsPerTurn: number;
 }
 
-export const DEFAULT_GUARD: GuardLimits = { turnsPerDay: 200, turnsPerMinute: 6, toolCallsPerTurn: 12 };
+export const DEFAULT_GUARD: GuardLimits = { turnsPerDay: 200, turnsPerMinute: 10, toolCallsPerTurn: 20 };
 
 /** What the plugin's hooks see; a subset of OpenClaw's PluginHookAgentContext. */
 export interface TurnContext {
@@ -58,6 +58,8 @@ interface TurnDecision {
   notice?: string;
 }
 
+const TOO_FAST = "Too many messages at once, give me a few seconds and send it again. /fren_stop always works.";
+
 const day = (at: number) => new Date(at).toISOString().slice(0, 10);
 
 export class LoopGuard {
@@ -65,6 +67,8 @@ export class LoopGuard {
   private limitsAt = 0;
   /** Per chat, start times of recent turns. */
   private readonly recent = new Map<string, number[]>();
+  /** Per chat, when the "too many messages" line was last sent. */
+  private readonly told = new Map<string, number>();
   /** Per run, tool calls so far. */
   private readonly toolCalls = new Map<string, { n: number; at: number }>();
   /** Used only when the engine can't be reached. */
@@ -105,6 +109,11 @@ export class LoopGuard {
     const times = (this.recent.get(key) ?? []).filter((x) => t - x < 60_000);
     if (times.length >= limits.turnsPerMinute) {
       this.recent.set(key, times);
+      // One short line per minute, so a fast typist isn't left thinking the bot froze.
+      if (t - (this.told.get(key) ?? 0) >= 60_000) {
+        this.told.set(key, t);
+        return { handled: true, reply: { text: TOO_FAST }, reason: "fren-guard: too many messages this minute" };
+      }
       return silent("too many messages this minute");
     }
 

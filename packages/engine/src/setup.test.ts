@@ -134,7 +134,7 @@ describe("fren setup", () => {
     // Loop guard: no background turns, a deadline per answer, loop detection, no groups.
     expect(runs).toContain(`openclaw config set agents.defaults.heartbeat.every "0m"`);
     expect(runs).toContain("openclaw config set cron.enabled false");
-    expect(runs).toContain("openclaw config set agents.defaults.timeoutSeconds 120");
+    expect(runs).toContain("openclaw config set agents.defaults.timeoutSeconds 600");
     expect(runs).toContain("openclaw config set tools.loopDetection.enabled true");
     expect(runs).toContain("openclaw config set tools.exec.notifyOnExit false");
     expect(runs).toContain("openclaw config set plugins.entries.fren.hooks.allowConversationAccess true");
@@ -252,7 +252,7 @@ describe("fren guard", () => {
     const said: string[] = [];
     await guardExisting({ run, openclawBin: "openclaw" }, (t) => said.push(t));
     expect(runs).toContain(`openclaw config set agents.defaults.heartbeat.every "0m"`);
-    expect(runs).toContain("openclaw config set agents.defaults.timeoutSeconds 120");
+    expect(runs).toContain("openclaw config set agents.defaults.timeoutSeconds 600");
     expect(runs).toContain(`openclaw config set channels.telegram.groupPolicy "disabled"`);
     expect(runs.some((r) => r.startsWith("openclaw config set channels.whatsapp"))).toBe(false);
     expect(runs.at(-1)).toBe("openclaw daemon restart");

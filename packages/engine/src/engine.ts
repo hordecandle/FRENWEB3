@@ -85,6 +85,11 @@ export class Fren {
   private ticking = false;
   private sniping = false;
 
+  /** A line to the owner outside the agent's chat (for results the chat may never see). */
+  async tellOwner(text: string): Promise<boolean> {
+    return this.d.notifier.sendPrivate(text).catch(() => false);
+  }
+
   constructor(private readonly d: FrenDeps) {
     this.venues = { hyperliquid: d.hyperliquid, jupiter: d.jupiter, relay: d.relay, derive: d.derive, polymarket: d.polymarket, yield: d.yield };
   }
