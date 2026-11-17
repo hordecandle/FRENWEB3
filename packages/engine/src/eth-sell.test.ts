@@ -164,6 +164,7 @@ describe("attacks on an ETH sale", () => {
 describe("ETH in paper mode", () => {
   it("buys and sells ETH by ticker on Arbitrum", async () => {
     const t = buildTestFren();
+    t.store.setLimits({ ...t.store.getLimits(), autoApproveUsd: 100 }); // the default is $50; a $100 buy would ask for a code
     const buy = await t.fren.submit({ request: "buy eth", steps: [{ leg: { kind: "swap", venue: "relay", chain: "arbitrum", side: "buy", token: "ETH", amount: { type: "usd", usd: 100 } } }] });
     expect(buy.text).toMatch(/Paper: Bought 0\.05000 ETH on Arbitrum for \$100 at \$2,000/);
     const sell = await t.fren.submit(sellEth("arbitrum", { type: "fraction", fraction: 0.5 }));

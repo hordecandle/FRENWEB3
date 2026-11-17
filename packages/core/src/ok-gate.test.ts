@@ -57,3 +57,15 @@ describe("with auto-approve above $0 a sale is measured by what it sells", () =>
     expect(evaluatePolicy([{ index: 0, step: plan.steps[0]!, symbol: "SOL", spendUsd: 20, notionalUsd: 20 }], at(100), state).verdict).toBe("execute");
   });
 });
+
+describe("the default auto-approve level is $50", () => {
+  it("is 50, and a $60 buy asks for the code while a $40 one runs", () => {
+    expect(DEFAULT_LIMITS.autoApproveUsd).toBe(50);
+    const buy = (usd: number): ResolvedStep => {
+      const plan = parsePlan({ request: "buy", steps: [{ leg: { kind: "swap", venue: "jupiter", side: "buy", token: "SOL", amount: { type: "usd", usd } }, when: [] }] });
+      return { index: 0, step: plan.steps[0]!, symbol: "SOL", spendUsd: usd, notionalUsd: usd };
+    };
+    expect(evaluatePolicy([buy(60)], DEFAULT_LIMITS, state).verdict).toBe("confirm");
+    expect(evaluatePolicy([buy(40)], DEFAULT_LIMITS, state).verdict).toBe("execute");
+  });
+});
