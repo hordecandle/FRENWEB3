@@ -350,7 +350,7 @@ export const hostnameFor = (rec) => "fren-" + rec.id.toLowerCase().replace(/[^a-
 
 function friendly(step) {
   if (/basics/i.test(step)) return "Preparing the server…";
-  if (/node|openclaw/i.test(step)) return "Installing OpenClaw…";
+  if (/node|openclaw/i.test(step)) return "Installing Fren…";
   if (/download/i.test(step)) return "Downloading Fren…";
   if (/build/i.test(step)) return "Building Fren (a couple of minutes)…";
   if (/https/i.test(step)) return "Securing your setup page…";
