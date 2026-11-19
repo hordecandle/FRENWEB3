@@ -1,6 +1,6 @@
 import { PublicKey, SystemProgram, VersionedTransaction, type AddressLookupTableAccount } from "@solana/web3.js";
 import { SignerRuleError } from "./errors.js";
-import { checkJupiterIx, checkJupiterLendIx, checkKaminoIx, type IxContext, type IxEffects } from "./solana-ix.js";
+import { checkCctpIx, checkJupiterIx, checkJupiterLendIx, checkKaminoIx, CCTP_TOKEN_MESSENGER_MINTER_V2, type IxContext, type IxEffects } from "./solana-ix.js";
 
 export { SignerRuleError };
 
@@ -57,6 +57,8 @@ export const SOLANA_PROGRAMS = {
   kaminoScope: "HFn8GnPADiny6XqUoWE8uRPPxb29ikn4yTuPa9MF2fWJ",
   /** Kamino opens a lookup table for the wallet on its first deposit. Only create and extend are allowed. */
   addressLookupTable: "AddressLookupTab1e1111111111111111111111111",
+  /** Circle CCTP V2, to move USDC to the wallet's own Arbitrum address. */
+  cctp: CCTP_TOKEN_MESSENGER_MINTER_V2,
 } as const;
 
 const NATIVE_MINT = new PublicKey("So11111111111111111111111111111111111111112");
@@ -90,6 +92,8 @@ export interface SolanaTxRules {
    * the transaction refused.
    */
   lookupTables?: AddressLookupTableAccount[];
+  /** The wallet's own EVM address: where a CCTP transfer must mint. */
+  evmOwner?: string;
 }
 
 export interface SolanaTxReport {
@@ -172,6 +176,8 @@ export function checkSolanaTransaction(tx: VersionedTransaction, owner: PublicKe
       merge(checkJupiterIx(ctx));
     } else if (program === SOLANA_PROGRAMS.jupiterLend) {
       merge(checkJupiterLendIx(ctx));
+    } else if (program === SOLANA_PROGRAMS.cctp) {
+      merge(checkCctpIx(ctx, rules.evmOwner));
     } else if (program === SOLANA_PROGRAMS.kaminoLend) {
       merge(checkKaminoIx(ctx));
     } else if (program === SOLANA_PROGRAMS.pumpFun || program === SOLANA_PROGRAMS.pumpAmm) {

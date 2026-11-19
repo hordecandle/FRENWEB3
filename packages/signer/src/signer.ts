@@ -158,6 +158,7 @@ export function createSigner(keys: KeyMaterial, options: SignerOptions = {}): Si
       const report: SolSignResult["report"] = checkSolanaTransaction(tx, sol.publicKey, {
         ...(req.jitoTipLamports !== undefined ? { jitoTipLamports: req.jitoTipLamports } : {}),
         lookupTables,
+        evmOwner: addresses.evm,
       });
 
       if (connection) {

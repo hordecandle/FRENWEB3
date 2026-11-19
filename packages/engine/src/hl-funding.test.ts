@@ -104,3 +104,63 @@ describe("a perp pays for itself", () => {
     expect(t.fake.exchange.map((b) => (b.action as { type: string }).type)).toEqual([]);
   });
 });
+
+describe("topping Arbitrum up from Solana", () => {
+  function withBridge(arbitrumUsdc: number, solanaUsdc: number) {
+    const bridged: number[] = [];
+    const real = createSigner(generateKeys());
+    const deposits: number[] = [];
+    let pending = 0;
+    let t: ReturnType<typeof buildTestFren>;
+    const signer: SignerApi = {
+      ...real,
+      async hlDepositFromArbitrum({ amountUsd }) {
+        deposits.push(amountUsd);
+        pending += amountUsd;
+        return { txHash: `0x${"cd".repeat(32)}` };
+      },
+    };
+    const balances = { [ARB_USDC]: usdc(arbitrumUsdc) };
+    t = buildTestFren({
+      signer,
+      live: true,
+      evmBalances: balances,
+      solanaBridge: {
+        async bridge(usd) {
+          bridged.push(usd);
+          t.fake.solanaUsdc -= usd;
+          balances[ARB_USDC] = balances[ARB_USDC]! + usdc(usd);
+          return [`✅ Sent ${usd} USDC from Solana`, "✅ arrived on Arbitrum"];
+        },
+        finishPending: async () => [],
+      },
+    });
+    t.fake.hlFreeDefault = 0;
+    t.fake.solanaUsdc = solanaUsdc;
+    t.fake.onHlWait = () => {
+      if (pending) (t.fake.hlFree[""] = (t.fake.hlFree[""] ?? 0) + pending), (pending = 0);
+    };
+    return { t, bridged, deposits };
+  }
+
+  it("bridges only the gap from Solana, then deposits and trades, all after one code", async () => {
+    const { t, bridged, deposits } = withBridge(20, 110);
+    const res = await t.fren.submit(long("xyz:GOLD", 50, 10));
+    expect(res.verdict).toBe("needs_code");
+    expect(res.text).toMatch(/moves \$30\.75 USDC from your Solana wallet to it with Circle's bridge/);
+    expect(res.text).toMatch(/moves \$50\.75 USDC from your Arbitrum wallet into your Hyperliquid account/);
+    expect(bridged).toHaveLength(0);
+    const out = await t.fren.approve(codeFrom(t.notifier.sent));
+    expect(bridged).toEqual([30.75]);
+    expect(deposits).toEqual([50.75]);
+    expect(out).toMatch(/Sent 30\.75 USDC from Solana[\s\S]*Moved \$50\.75 USDC from Arbitrum[\s\S]*✅ Longed/);
+  });
+
+  it("still refuses when Solana and Arbitrum together are short", async () => {
+    const { t, bridged } = withBridge(10, 20);
+    const res = await t.fren.submit(long("xyz:GOLD", 50, 10));
+    expect(res.verdict).toBe("rejected");
+    expect(res.text).toMatch(/\$10\.00 USDC on Arbitrum, \$20\.00 USDC on Solana/);
+    expect(bridged).toHaveLength(0);
+  });
+});

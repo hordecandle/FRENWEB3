@@ -1,4 +1,4 @@
-import { ComputeBudgetProgram, Connection, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
+import { ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
 import { JITO_TIP_ACCOUNTS } from "@fren/signer";
 import { price as fmtPrice, shortToken, usd as fmtUsd, type PlanStep, type ResolvedStep, type SwapLeg } from "@fren/core";
 import type { SignerApi } from "@fren/signer";
@@ -514,6 +514,25 @@ export class JupiterVenue implements SpotVenueAdapter {
     const msg = new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message();
     const tx = Buffer.from(new VersionedTransaction(msg).serialize()).toString("base64");
     return this.signAndSend(tx, maxSol, tip, lastValidBlockHeight);
+  }
+
+  /**
+   * Send instructions that need one more signer than the wallet (a fresh
+   * account the instruction creates). The extra keys sign first; the signer
+   * checks and adds the wallet's signature. Returns the signature.
+   */
+  async sendWithSigners(instructions: TransactionInstruction[], extra: Keypair[], maxSolSpendLamports: number): Promise<string> {
+    const owner = await this.owner();
+    const ixs = [ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 500_000 }), ...instructions];
+    const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash("confirmed");
+    const tx = new VersionedTransaction(new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message());
+    tx.sign(extra);
+    return this.signAndSend(Buffer.from(tx.serialize()).toString("base64"), maxSolSpendLamports, 0, lastValidBlockHeight);
+  }
+
+  /** The wallet's Solana address. */
+  async walletKey(): Promise<PublicKey> {
+    return this.owner();
   }
 
   /** Jito's block engine lands tipped transactions faster than plain RPC. We send to both. */

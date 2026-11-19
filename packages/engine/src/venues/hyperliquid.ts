@@ -104,6 +104,8 @@ export interface HyperliquidVenueOptions {
   arbitrumUsdc?: () => Promise<number>;
   /** USDC on the wallet's Solana address, named when Hyperliquid can't be funded from Arbitrum. */
   solanaUsdc?: () => Promise<number>;
+  /** Moves Solana USDC to the Arbitrum wallet when Arbitrum is short (mainnet only). */
+  solanaBridge?: { bridge(amountUsd: number): Promise<string[]>; finishPending(): Promise<string[]> };
   sleep?: (ms: number) => Promise<void>;
   /** How long to wait for a deposit to show up on Hyperliquid. Default 5 minutes. */
   depositWaitMs?: number;
@@ -122,6 +124,8 @@ export interface PerpFunding {
   fromMainUsd: number;
   /** Deposited from the Arbitrum wallet. */
   depositUsd: number;
+  /** Bridged from the Solana wallet to Arbitrum first, to make up the deposit. */
+  bridgeUsd: number;
   /** Still missing after both; non-zero means the trade can't be paid for. */
   shortUsd: number;
 }
@@ -174,7 +178,7 @@ export class HyperliquidVenue implements VenueAdapter {
     const f = await this.fundingPlan(m, margin, leg.leverage);
     if (f.shortUsd > 0) throw new VenueError(await this.shortMessage(m, f));
     const notes = this.fundingNotes(m, f);
-    return notes.length ? { ...base, notes, movesUsd: f.depositUsd + f.fromMainUsd, mustConfirm: true } : base;
+    return notes.length ? { ...base, notes, movesUsd: f.depositUsd + f.fromMainUsd + f.bridgeUsd, mustConfirm: true } : base;
   }
 
   /** Work out where this trade's margin comes from, without moving anything. */
@@ -190,20 +194,33 @@ export class HyperliquidVenue implements VenueAdapter {
       short = Math.max(0, short - fromMainUsd);
     }
     let depositUsd = 0;
+    let bridgeUsd = 0;
     if (short > 0) {
       const arb = this.o.arbitrumUsdc ? await this.o.arbitrumUsdc().catch(() => 0) : 0;
       const want = Math.max(HL_MIN_DEPOSIT, roundUpCents(short));
-      if (want <= arb + 1e-9) {
+      let covered = want <= arb + 1e-9;
+      if (!covered && this.o.solanaBridge && this.o.solanaUsdc) {
+        const sol = await this.o.solanaUsdc().catch(() => 0);
+        const gap = roundUpCents(want - Math.max(0, arb));
+        if (gap <= sol + 1e-9) {
+          bridgeUsd = gap;
+          covered = true;
+        }
+      }
+      if (covered) {
         depositUsd = want;
         short = 0;
         if (m.dex) fromMainUsd = roundUpCents(fromMainUsd + Math.min(want, needUsd - freeUsd - fromMainUsd));
       }
     }
-    return { needUsd, freeUsd, fromMainUsd, depositUsd, shortUsd: roundUpCents(short) };
+    return { needUsd, freeUsd, fromMainUsd, depositUsd, bridgeUsd, shortUsd: roundUpCents(short) };
   }
 
   private fundingNotes(m: PerpMarket, f: PerpFunding): string[] {
     const notes: string[] = [];
+    if (f.bridgeUsd > 0) {
+      notes.push(`Your Arbitrum wallet is short, so Fren first moves ${fmtUsd(f.bridgeUsd)} USDC from your Solana wallet to it with Circle's bridge (usually a few minutes; it needs a little ETH on Arbitrum for gas).`);
+    }
     if (f.depositUsd > 0) notes.push(`To pay for it, Fren first moves ${fmtUsd(f.depositUsd)} USDC from your Arbitrum wallet into your Hyperliquid account (it takes about a minute).`);
     if (f.fromMainUsd > 0) notes.push(`${m.name} trades on Hyperliquid's ${m.dex} market, so Fren moves ${fmtUsd(f.fromMainUsd)} USDC there inside your Hyperliquid account.`);
     return notes;
@@ -213,14 +230,17 @@ export class HyperliquidVenue implements VenueAdapter {
     const arb = this.o.arbitrumUsdc ? await this.o.arbitrumUsdc().catch(() => 0) : 0;
     const sol = this.o.solanaUsdc ? await this.o.solanaUsdc().catch(() => 0) : 0;
     const where = [`${fmtUsd(f.freeUsd)} free for ${m.name} on Hyperliquid`, `${fmtUsd(arb)} USDC on Arbitrum`, ...(sol > 0 ? [`${fmtUsd(sol)} USDC on Solana`] : [])];
-    return `This needs about ${fmtUsd(f.needUsd)} of USDC on Hyperliquid and there isn't enough to move there: you have ${where.join(", ")}. Fren deposits from Arbitrum, at least ${fmtUsd(HL_MIN_DEPOSIT)} at a time.`;
+    return `This needs about ${fmtUsd(f.needUsd)} of USDC on Hyperliquid and there isn't enough to move there: you have ${where.join(", ")}. Fren deposits from Arbitrum (at least ${fmtUsd(HL_MIN_DEPOSIT)} at a time)${this.o.solanaBridge ? " and tops Arbitrum up from Solana" : ""}.`;
   }
 
   /** Move the margin into place, then wait until Hyperliquid shows it. */
   private async fund(m: PerpMarket, margin: number, leverage: number): Promise<string[]> {
+    // A transfer from Solana that didn't finish last time lands first.
+    const finished = this.o.solanaBridge ? await this.o.solanaBridge.finishPending().catch(() => [] as string[]) : [];
     const f = await this.fundingPlan(m, margin, leverage);
     if (f.shortUsd > 0) throw new VenueError(await this.shortMessage(m, f));
-    const done: string[] = [];
+    const done: string[] = [...finished];
+    if (f.bridgeUsd > 0) done.push(...(await this.o.solanaBridge!.bridge(f.bridgeUsd)));
     if (f.depositUsd > 0) {
       const before = Number((await this.clearinghouse("")).withdrawable) || 0;
       const { txHash } = await this.signer().hlDepositFromArbitrum({ amountUsd: f.depositUsd, isTestnet: this.o.isTestnet });

@@ -515,6 +515,8 @@ export interface TestFrenOptions {
   geoblocked?: () => Promise<boolean>;
   /** Overrides for the Hyperliquid market cache (dexes, ttl, backoff). */
   hlMarkets?: import("./venues/hyperliquid-markets.js").HyperliquidMarketsOptions;
+  /** Solana-to-Arbitrum bridge for Hyperliquid funding. */
+  solanaBridge?: import("./venues/hyperliquid.js").HyperliquidVenueOptions["solanaBridge"];
 }
 
 /** The whole engine wired to fakes: Hyperliquid, Jupiter, pump.fun, Relay, Derive and Polymarket. */
@@ -573,6 +575,7 @@ export function buildTestFren(opts: TestFrenOptions = {}) {
       fake.onHlWait?.();
     },
     depositWaitMs: 50,
+    ...(opts.solanaBridge ? { solanaBridge: opts.solanaBridge } : {}),
   });
   const derive = new DeriveVenue({
     fetchFn: fake.fetch,
