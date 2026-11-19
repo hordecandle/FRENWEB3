@@ -1,6 +1,7 @@
 // Operator-only actions, for when a paid server needs fixing by hand.
-// Needs FREN_ADMIN_KEY (at least 24 characters) in Netlify's environment;
-// without it this endpoint answers 404 like any unknown path.
+// The key is the EQVPS reseller token itself: whoever holds it can already
+// wipe these servers at EQVPS, so this grants nothing new and needs no extra
+// setting. Anything else gets the same 404 as an unknown path.
 //
 //   POST /api/vps/admin { key, action: "reinstall", hostname: "fren-…" }
 //
@@ -13,7 +14,7 @@ import { handle, json, wizard } from "./lib/runtime.mjs";
 import { hostnameFor, UserError } from "./lib/wizard.mjs";
 
 const keyOk = (given) => {
-  const want = (process.env.FREN_ADMIN_KEY ?? "").trim();
+  const want = (process.env.EQVPS_RESELLER_TOKEN ?? "").trim();
   if (want.length < 24 || typeof given !== "string") return false;
   const a = Buffer.from(given);
   const b = Buffer.from(want);
