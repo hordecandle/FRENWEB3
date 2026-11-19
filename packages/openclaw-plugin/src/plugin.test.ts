@@ -45,7 +45,13 @@ describe("OpenClaw plugin against a real engine", () => {
 
   it("registers every declared tool and the owner commands", () => {
     expect([...reg.tools.keys()].sort()).toEqual([...TOOL_NAMES].sort());
-    expect([...reg.commands.keys()].sort()).toEqual(["close_all", "fren_code", "fren_dashboard", "fren_stop", "limits", "ok", "positions", "resume", "stop", "wallet"]);
+    expect([...reg.commands.keys()].sort()).toEqual(["close_all", "fren_code", "fren_dashboard", "fren_stop", "fren_update", "limits", "ok", "positions", "resume", "stop", "wallet"]);
+  });
+
+  it("/fren_update is owner-only and says plainly when the machine can't update", async () => {
+    const cmd = reg.commands.get("fren_update");
+    expect((await cmd.handler({ senderIsOwner: false, args: "" })).text).toMatch(/Only the owner/);
+    expect((await cmd.handler({ senderIsOwner: true, args: "" })).text).toMatch(/aren.t set up on this machine/);
   });
 
   it("hides trading tools from people who aren't the owner", () => {

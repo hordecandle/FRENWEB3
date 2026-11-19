@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { BetQuery } from "./bets.js";
 import type { Dashboard } from "./dashboard.js";
+import type { Updater } from "./updater.js";
 import { describeLimits, type Fren, type FundVenue } from "./engine.js";
 import type { AgentBudget } from "./guard.js";
 
@@ -10,7 +11,7 @@ import type { AgentBudget } from "./guard.js";
  * bearer token. It exposes only what the plugin's tools and commands need;
  * there is no route that returns key material.
  */
-export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts: { slowMs?: number; dashboard?: Dashboard | null } = {}): Server {
+export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts: { slowMs?: number; dashboard?: Dashboard | null; updater?: Updater | null; onGatewayUp?: () => void } = {}): Server {
   const slowMs = opts.slowMs ?? 90_000;
   const expected = Buffer.from(token);
 
@@ -43,8 +44,11 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     /** The Fren plugin calls this when the OpenClaw gateway starts: the chat line is up. */
     "POST /gateway/up": async () => {
       opts.dashboard?.chatUp();
+      opts.onGatewayUp?.();
       return { ok: true };
     },
+    /** /fren_update: asks the server's root updater to install the latest Fren in place. */
+    "POST /update": async () => (opts.updater ? opts.updater.request() : { text: "Updates aren't set up on this machine." }),
     "POST /dashboard/link": async () =>
       opts.dashboard ? opts.dashboard.sendLink() : { text: "The dashboard isn't set up on this machine. It comes with the VPS install (install.sh --server --web)." },
     "POST /fund": async (b) => {

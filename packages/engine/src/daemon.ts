@@ -20,6 +20,7 @@ import { polymarketGeoblock, SdkPolymarketData, SdkPolymarketTrader } from "./ve
 import { AaveUsdc } from "./venues/aave.js";
 import { JupiterLendUsdc, KaminoUsdc } from "./venues/solana-lend.js";
 import { YieldVenue, type YieldProtocolAdapter } from "./venues/yield.js";
+import { Updater } from "./updater.js";
 
 export interface BuildOptions {
   config: FrenConfig;
@@ -137,7 +138,17 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
     await new Promise<void>((res) => dashServer.listen(port, "127.0.0.1", res));
     console.log(`dashboard on http://127.0.0.1:${port}, public at ${dashUrl}`);
   }
-  const server = createApi(fren, token, budget, { dashboard });
+  const updater = new Updater(paths.home);
+  // Back from /fren_update: say how it went once the chat line is up again.
+  let updated = updater.takeResult();
+  const tellUpdated = () => {
+    if (!updated) return;
+    const text = updated;
+    updated = null;
+    void fren.tellOwner(text).catch(() => {});
+  };
+  if (updated) setTimeout(tellUpdated, 5 * 60_000).unref();
+  const server = createApi(fren, token, budget, { dashboard, updater, onGatewayUp: () => setTimeout(tellUpdated, 5000) });
   await new Promise<void>((res) => server.listen(config.api.port, config.api.host, res));
 
   const timer = setInterval(() => {

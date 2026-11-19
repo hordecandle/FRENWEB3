@@ -7,7 +7,7 @@
 // Pure logic: the chain, EQVPS, storage and the install trigger are passed in,
 // so it runs the same in Netlify Functions and in tests.
 
-import { randomBytes, randomInt } from "node:crypto";
+import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { fromUnits, isTxHash, NETWORKS, toUnits, walletUri } from "./chain.mjs";
 
 const OS_NAME = "Ubuntu 24.04";
@@ -317,10 +317,15 @@ export function createWizard(deps) {
    * @param {(o: { host: string, port: number, password: string, command: string, onLine(l: string): void }) => Promise<{ code: number, output: string }>} ssh
    * @param {string} command  the install command to run on the server
    */
-  async function install(id, ssh, command) {
+  /**
+   * @param {string} [updateKey] the server keeps this to fetch later versions
+   *   with /fren_update; we keep only its hash.
+   */
+  async function install(id, ssh, command, updateKey) {
     const rec = await load(id);
     if (rec.stage !== "installing" || rec.installClaimed) return;
     rec.installClaimed = true;
+    if (updateKey) rec.updateKeyHash = sha256(updateKey);
     await save(rec);
     let last = 0;
     const onLine = async (line) => {
@@ -386,9 +391,14 @@ export function createWizard(deps) {
   }
 
   /** The Fren source is only handed out to a server while its install runs. */
-  async function mayDownload(id) {
+  /** During the install, or later for /fren_update with the key that server got. */
+  async function mayDownload(id, key) {
     const rec = await load(id);
-    return rec.stage === "installing";
+    if (rec.stage === "installing") return true;
+    if (rec.stage !== "ready" || !rec.updateKeyHash || typeof key !== "string" || key.length < 20) return false;
+    const a = Buffer.from(sha256(key), "hex");
+    const b = Buffer.from(rec.updateKeyHash, "hex");
+    return a.length === b.length && timingSafeEqual(a, b);
   }
 
   return { plans, start, status, submitTx, install, retry, reinstall, view, mayDownload };
@@ -397,6 +407,8 @@ export function createWizard(deps) {
 const amountKey = (network, units) => `amt-${network}-${units}`;
 
 /** A hostname EQVPS accepts, unique per order. */
+const sha256 = (s) => createHash("sha256").update(s).digest("hex");
+
 export const hostnameFor = (rec) => "fren-" + rec.id.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12);
 
 function friendly(step) {
