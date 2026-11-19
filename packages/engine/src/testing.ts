@@ -515,7 +515,7 @@ export interface TestFrenOptions {
   geoblocked?: () => Promise<boolean>;
   /** Overrides for the Hyperliquid market cache (dexes, ttl, backoff). */
   hlMarkets?: import("./venues/hyperliquid-markets.js").HyperliquidMarketsOptions;
-  /** Solana-to-Arbitrum bridge for Hyperliquid funding. */
+  /** Solana-to-Arbitrum bridge for Hyperliquid funding and EVM buys. */
   solanaBridge?: import("./venues/hyperliquid.js").HyperliquidVenueOptions["solanaBridge"];
 }
 
@@ -539,6 +539,8 @@ export function buildTestFren(opts: TestFrenOptions = {}) {
     waitForTx: async (_chain, hash) => void evmTxs.push(hash),
     fillTimeoutMs: 1_000,
     evmRead: async () => encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }, { type: "uint256" }], [0n, 10n ** 27n, fake.aaveRateRay]),
+    solanaUsdc: async () => fake.solanaUsdc,
+    ...(opts.solanaBridge ? { solanaBridge: opts.solanaBridge } : {}),
   });
   const solanaSent: { txBase64: string; maxSolSpendLamports: number }[] = [];
   const solana: SolanaAccess = {

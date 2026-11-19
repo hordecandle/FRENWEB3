@@ -75,6 +75,59 @@ export interface JupiterVenueOptions {
   snipeTipLamports?: number;
   /** Pause before the first retry after a 429 (doubles for the second). Default 800 ms. */
   retryDelayMs?: number;
+  /** USDC the wallet's EVM side holds per chain, so a buy can be paid from there. */
+  evmUsdc?: () => Promise<Partial<Record<"arbitrum" | "base", number>>>;
+  /** Moves USDC from the wallet's own Arbitrum or Base address to its own Solana address. Returns the owner's line. */
+  bridgeIn?: (usd: number) => Promise<string>;
+  /** How long to wait for bridged USDC to land on Solana. Default 90 s. */
+  bridgeWaitMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/** SOL kept on the wallet when a buy is paid in SOL: fees, a new token account's rent. */
+export const SOL_BUY_RESERVE_LAMPORTS = 20_000_000n;
+
+export type SolanaPayment =
+  | { kind: "usdc" }
+  | { kind: "sol"; lamports: bigint }
+  | { kind: "bridge"; usd: number }
+  | { kind: "short"; message: string };
+
+const roundUpCents = (n: number) => Math.ceil(n * 100 - 1e-9) / 100;
+
+/**
+ * How to pay for a Solana buy of `usd`: the wallet's USDC; else its SOL
+ * (keeping a reserve for fees); else USDC brought over from Arbitrum or Base.
+ * A snipe pays in SOL first when it can: it skips a swap, and launches trade
+ * against SOL.
+ */
+export function solanaPayment(a: {
+  usd: number;
+  usdcRaw: bigint;
+  lamports: bigint;
+  solPx: number | null;
+  tipLamports: number;
+  evmUsdc: Partial<Record<"arbitrum" | "base", number>>;
+  canBridge: boolean;
+  preferSol: boolean;
+}): SolanaPayment {
+  const needRaw = BigInt(Math.floor(a.usd * 1e6));
+  const hasUsdc = a.usdcRaw >= needRaw;
+  const spare = a.lamports - SOL_BUY_RESERVE_LAMPORTS - BigInt(a.tipLamports);
+  const solNeed = a.solPx ? BigInt(Math.ceil((a.usd / a.solPx) * 1e9)) : null;
+  const hasSol = solNeed !== null && spare >= solNeed;
+  if (hasUsdc && !(a.preferSol && hasSol)) return { kind: "usdc" };
+  if (hasSol) return { kind: "sol", lamports: solNeed! };
+  const usdc = Number(a.usdcRaw) / 1e6;
+  // Relay keeps a small fee, so bring a little more than the gap.
+  const gap = a.usd - usdc;
+  const bridge = roundUpCents(gap + Math.max(0.3, gap * 0.01));
+  const evmBest = Math.max(a.evmUsdc.arbitrum ?? 0, a.evmUsdc.base ?? 0);
+  if (a.canBridge && evmBest >= bridge) return { kind: "bridge", usd: bridge };
+  const solUsd = a.solPx && spare > 0n ? (Number(spare) / 1e9) * a.solPx : 0;
+  const parts = [`${fmtUsd(usdc)} USDC and about ${fmtUsd(solUsd)} of spare SOL on Solana`];
+  for (const c of ["arbitrum", "base"] as const) if (a.evmUsdc[c] !== undefined) parts.push(`${fmtUsd(a.evmUsdc[c]!)} USDC on ${c === "arbitrum" ? "Arbitrum" : "Base"}`);
+  return { kind: "short", message: `This buy needs ${fmtUsd(a.usd)}, and no wallet has enough: ${parts.join(", ")}.` };
 }
 
 /** Default Jito tip on a snipe: 0.001 SOL. The signer refuses anything over its own cap. */
@@ -377,13 +430,30 @@ export class JupiterVenue implements SpotVenueAdapter {
     let inputMint: string;
     let outputMint: string;
     let amount: bigint;
+    /** What paying for the buy took, for the owner, and SOL's price when it was paid in SOL. */
+    let paid: string[] = [];
+    let solPx = 0;
     if (leg.side === "buy") {
       inputMint = USDC_MINT;
       outputMint = t.mint;
       if (leg.amount.type === "tokens") throw new VenueError('Say how much USDC to spend on a buy: amount {type:"usd"}.');
       const usdcRaw = await this.rawBalance(owner, USDC_MINT);
-      amount = leg.amount.type === "usd" ? BigInt(Math.floor(leg.amount.usd * 1e6)) : (usdcRaw * BigInt(Math.floor(leg.amount.fraction * 1e6))) / 1_000_000n;
-      if (amount > usdcRaw) throw new VenueError(`Your wallet has ${fmtUsd(Number(usdcRaw) / 1e6)} USDC; this needs ${fmtUsd(Number(amount) / 1e6)}.`);
+      if (leg.amount.type === "usd") {
+        amount = BigInt(Math.floor(leg.amount.usd * 1e6));
+        if (amount > usdcRaw || ctx.snipe) {
+          const pay = await this.payFor(owner, leg.amount.usd, usdcRaw, tip, Boolean(ctx.snipe), t.mint !== SOL_MINT);
+          paid = pay.lines;
+          if (pay.solPx) {
+            inputMint = SOL_MINT;
+            amount = pay.raw;
+            solPx = pay.solPx;
+          } else {
+            amount = pay.raw;
+          }
+        }
+      } else {
+        amount = (usdcRaw * BigInt(Math.floor(leg.amount.fraction * 1e6))) / 1_000_000n;
+      }
     } else {
       inputMint = t.mint;
       outputMint = USDC_MINT;
@@ -414,17 +484,55 @@ export class JupiterVenue implements SpotVenueAdapter {
       // Young pump.fun coins trade only on their bonding curve, which Jupiter may not route yet.
       const curve = this.o.pumpFun ? await this.o.pumpFun.curve(t.mint).catch(() => null) : null;
       if (!curve || curve.complete) throw err;
-      return this.curveSwap(leg, t, curve, owner, amount, tip, ctx);
+      return this.withPaid(paid, await this.curveSwap(leg, t, curve, owner, amount, tip, ctx, inputMint === SOL_MINT && leg.side === "buy" ? solPx : 0));
     }
     const signature = await this.jupiterSwap(owner, quote, inputMint, amount, tip);
 
-    const inDec = inputMint === USDC_MINT ? 6 : t.decimals;
-    const outDec = outputMint === USDC_MINT ? 6 : t.decimals;
-    const inUi = Number(quote.inAmount) / 10 ** inDec;
-    const outUi = Number(quote.outAmount) / 10 ** outDec;
-    const usd = leg.side === "buy" ? inUi : outUi;
+    const decimals = (mint: string) => (mint === USDC_MINT ? 6 : mint === SOL_MINT ? 9 : t.decimals);
+    const inUi = Number(quote.inAmount) / 10 ** decimals(inputMint);
+    const outUi = Number(quote.outAmount) / 10 ** decimals(outputMint);
+    const usd = leg.side === "buy" ? (inputMint === SOL_MINT ? inUi * solPx : inUi) : outUi;
     const qty = leg.side === "buy" ? outUi : inUi;
-    return this.recordLive(leg, t, ctx, qty, usd, signature, "");
+    return this.withPaid(paid, this.recordLive(leg, t, ctx, qty, usd, signature, ""));
+  }
+
+  private withPaid(paid: string[], res: ExecResult): ExecResult {
+    return paid.length ? { ...res, text: [...paid, res.text].join("\n") } : res;
+  }
+
+  /**
+   * Pay for a buy the USDC alone can't cover (or a snipe): in SOL, or with
+   * USDC brought over from the wallet's EVM side. Returns what to swap from.
+   */
+  private async payFor(owner: PublicKey, usd: number, usdcRaw: bigint, tip: number, preferSol: boolean, solAllowed: boolean): Promise<{ raw: bigint; solPx?: number; lines: string[] }> {
+    const [lamports, px, evmUsdc] = await Promise.all([
+      // Buying SOL itself can't be paid in SOL.
+      solAllowed ? this.connection.getBalance(owner).then(BigInt) : Promise.resolve(0n),
+      this.prices([SOL_MINT]).then((m) => m.get(SOL_MINT) ?? null).catch(() => null),
+      this.o.evmUsdc ? this.o.evmUsdc().catch(() => ({})) : Promise.resolve({}),
+    ]);
+    const pay = solanaPayment({ usd, usdcRaw, lamports, solPx: px, tipLamports: tip, evmUsdc, canBridge: Boolean(this.o.bridgeIn), preferSol });
+    const needRaw = BigInt(Math.floor(usd * 1e6));
+    if (pay.kind === "usdc") return { raw: needRaw, lines: [] };
+    if (pay.kind === "sol") {
+      const why = usdcRaw >= needRaw ? "" : `, since your Solana wallet had ${fmtUsd(Number(usdcRaw) / 1e6)} USDC`;
+      return { raw: pay.lamports, solPx: px!, lines: [`↪ Paid with ${fmtQty(Number(pay.lamports) / 1e9)} SOL${why}.`] };
+    }
+    if (pay.kind === "short") throw new VenueError(pay.message);
+    const line = await this.o.bridgeIn!(pay.usd);
+    // Relay reports the fill when it pays out; give the RPC a moment to see it.
+    const sleep = this.o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const deadline = Date.now() + (this.o.bridgeWaitMs ?? 90_000);
+    let have = usdcRaw;
+    while ((have = await this.rawBalance(owner, USDC_MINT).catch(() => have)) < needRaw) {
+      if (Date.now() > deadline) {
+        // A cent or two of fees short still buys, with what arrived.
+        if (have * 100n >= needRaw * 98n && have > usdcRaw) return { raw: have, lines: [line] };
+        throw new VenueError(`${line}\nIt hasn't reached your Solana wallet yet, so nothing was bought. Ask again in a minute.`);
+      }
+      await sleep(3_000);
+    }
+    return { raw: needRaw, lines: [line] };
   }
 
   private recordLive(leg: SwapLeg, t: TokenInfo, ctx: ExecContext, qty: number, usd: number, signature: string, suffix: string): ExecResult {
@@ -484,17 +592,20 @@ export class JupiterVenue implements SpotVenueAdapter {
    * Trade a coin on its pump.fun bonding curve. SOL-priced curves need SOL, so
    * a buy first swaps the USDC to SOL, and a sell swaps the SOL back to USDC.
    */
-  private async curveSwap(leg: SwapLeg, t: TokenInfo, curve: PumpCurve, owner: PublicKey, amount: bigint, tip: number, ctx: ExecContext): Promise<ExecResult> {
+  /** `paidSolPx` set: a buy's `amount` is lamports of SOL at that price; otherwise USDC. */
+  private async curveSwap(leg: SwapLeg, t: TokenInfo, curve: PumpCurve, owner: PublicKey, amount: bigint, tip: number, ctx: ExecContext, paidSolPx = 0): Promise<ExecResult> {
     const pump = this.o.pumpFun!;
     if (curve.quote === "other") throw new VenueError(`${t.symbol}'s curve is priced in another coin, which Fren can't trade yet.`);
     const slippagePct = leg.maxSlippageBps / 100;
     const user = owner.toBase58();
 
     if (leg.side === "buy") {
+      const paidMint = paidSolPx ? SOL_MINT : USDC_MINT;
+      const curveMint = curve.quote === "SOL" ? SOL_MINT : USDC_MINT;
       let quoteRaw = amount;
-      if (curve.quote === "SOL") {
-        const q = await this.quote(USDC_MINT, SOL_MINT, amount, 100);
-        await this.jupiterSwap(owner, q, USDC_MINT, amount, 0);
+      if (paidMint !== curveMint) {
+        const q = await this.quote(paidMint, curveMint, amount, 100);
+        await this.jupiterSwap(owner, q, paidMint, amount, 0);
         quoteRaw = BigInt((q as { otherAmountThreshold?: string }).otherAmountThreshold ?? q.outAmount);
       }
       const before = await this.rawBalance(owner, t.mint);
@@ -503,7 +614,8 @@ export class JupiterVenue implements SpotVenueAdapter {
       const signature = await this.sendInstructions(owner, trade.instructions, maxSol, tip);
       const got = (await this.rawBalance(owner, t.mint).catch(() => before + trade.expectedOutRaw)) - before;
       const qty = Number(got > 0n ? got : trade.expectedOutRaw) / 10 ** t.decimals;
-      return this.recordLive(leg, t, ctx, qty, Number(amount) / 1e6, signature, " on the pump.fun curve");
+      const usd = paidSolPx ? (Number(amount) / 1e9) * paidSolPx : Number(amount) / 1e6;
+      return this.recordLive(leg, t, ctx, qty, usd, signature, " on the pump.fun curve");
     }
 
     const solBefore = BigInt(await this.connection.getBalance(owner));

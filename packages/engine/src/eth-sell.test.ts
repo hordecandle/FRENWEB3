@@ -161,7 +161,7 @@ describe("attacks on an ETH sale", () => {
   it("Relay asks for more ETH than the sale: nothing is sent", async () => {
     const { t, sent, run } = await live({ "arbitrum:native": HELD });
     t.fake.relaySteps = nativeSwapStep((b) => String(BigInt(String(b.amount)) + 1n));
-    expect(await run(sellEth("arbitrum", { type: "fraction", fraction: 0.5 }))).toMatch(/❌ .*Relay asked to send .* ETH for a sale of .* ETH/);
+    expect(await run(sellEth("arbitrum", { type: "fraction", fraction: 0.5 }))).toMatch(/❌ .*Relay asked to send .* ETH for a trade of .* ETH/);
     expect(sent).toHaveLength(0);
   });
 
@@ -177,7 +177,7 @@ describe("attacks on an ETH sale", () => {
     const { t, sent, run } = await live(balances);
     t.fake.relaySteps = nativeSwapStep(() => "1000");
     const out = await run({ request: "sell dog", steps: [{ leg: { kind: "swap", venue: "relay", chain: "base", side: "sell", token: BASE_DOG, amount: { type: "fraction", fraction: 1 } } }] });
-    expect(out).toMatch(/❌ .*doesn't sell ETH/);
+    expect(out).toMatch(/❌ .*doesn't use ETH/);
     expect(sent).toHaveLength(0);
   });
 
@@ -185,7 +185,7 @@ describe("attacks on an ETH sale", () => {
     const { t, sent, run } = await live({ "arbitrum:native": HELD, "arbitrum:0xaf88d065e77c8cc2239327c5edb3a432268e5831": 500_000_000n });
     t.fake.relaySteps = nativeSwapStep(() => "1");
     const out = await run({ request: "buy brett", steps: [{ leg: { kind: "swap", venue: "relay", chain: "base", side: "buy", token: "BRETT", amount: { type: "usd", usd: 10 } } }] });
-    expect(out).toMatch(/❌ .*doesn't sell ETH/);
+    expect(out).toMatch(/❌ .*doesn't use ETH/);
     expect(sent).toHaveLength(0);
   });
 

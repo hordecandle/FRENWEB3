@@ -93,7 +93,7 @@ export function toolSpecs(client: EngineClient): ToolSpec[] {
         "One plan can hold several legs; legs with `when` conditions wait for the watcher.",
         'To snipe a launch, add when: [{type:"tradable", venue, chain, token}] with the same contract address.',
         "Never invent token addresses: use one the user gave or one fren_markets returned.",
-        "Fren finds the chain of a 0x contract, moves the user's own USDC where the trade needs it, and asks for a code only above the user's auto-approve amount: just send the trade.",
+        "Fren finds the chain of a 0x contract, pays from whichever of the user's wallets has the money (USDC, SOL or ETH, bridging between chains), and asks for a code only above the user's auto-approve amount: just send the trade.",
       ].join(" "),
       parameters: Type.Object({ plan: Type.Unsafe<Record<string, unknown>>(planSchema) }),
       run: async (p, ctx) => deliverOwnerCode(await client.call<OwnerResult>("POST", "/plans", { plan: p.plan }), ctx),
