@@ -33,7 +33,9 @@ describe("Fren's persona in the OpenClaw workspace", () => {
     expect(existsSync(join(ws, "BOOTSTRAP.md"))).toBe(false);
     const agents = readFileSync(join(ws, "AGENTS.md"), "utf8");
     expect(agents).toMatch(/You are Fren/);
-    expect(agents).toMatch(/no access to files, git, code/i);
+    expect(agents).toMatch(/no access to the owner's files, git, a browser or this computer/i);
+    expect(agents).toMatch(/`fren_run_code`/);
+    expect(agents).toMatch(/sandbox can't sign or spend/);
     expect(agents).not.toMatch(/Birth Sequence|avatar, git/); // the starter text is gone
     expect(readFileSync(join(ws, "AGENTS.md.openclaw"), "utf8")).toMatch(/OpenClaw starter/);
     expect(readFileSync(join(ws, "IDENTITY.md"), "utf8")).toMatch(/Name: Fren/);

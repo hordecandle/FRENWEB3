@@ -17,7 +17,8 @@
       "fren_deposit_hyperliquid",
       "fren_bet_quote",
       "fren_fund",
-      "fren_yield"
+      "fren_yield",
+      "fren_run_code"
     ]
   },
   "activation": {
@@ -34,6 +35,10 @@
       "tokenFile": {
         "type": "string",
         "description": "Path to the engine API token. Default ~/.fren/api-token"
+      },
+      "sandboxSocket": {
+        "type": "string",
+        "description": "The code sandbox's socket (fren sandbox). Default /run/fren-sandbox.sock"
       }
     }
   }

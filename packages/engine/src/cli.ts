@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -8,6 +8,7 @@ import { readKeystoreAddresses } from "@fren/signer";
 import { frenPaths, initFren, loadConfig, parseNotify } from "./config.js";
 import { startDaemon } from "./daemon.js";
 import { ENGINE_USER, isolate, isolatedEngineUnit } from "./isolate.js";
+import { installSandbox } from "./sandbox.js";
 import { guardExisting, isolatedMarker, personaExisting, runSetup, systemSetupDeps } from "./setup.js";
 import { serveSetup } from "./setup-web.js";
 import { serveBotBroker } from "./managed-bot.js";
@@ -51,6 +52,11 @@ const HELP = `fren: self-hosted on-chain trading agent backend
       system user (fren-engine) that the AI agent's user can't read; the agent
       keeps only a copy of the API token. --service runs the engine as that
       user under systemd. --undo moves the files back (to run setup again).
+  sudo fren sandbox [--agent-user U] [--undo]
+      Linux: a place for the AI agent to write and run code (node, python,
+      bash): each run is its own systemd service with a throwaway user, no
+      keys, no access to this machine's services, and time and memory limits.
+      Checks itself from inside and stays off if a check fails.
 `;
 
 async function main() {
@@ -152,6 +158,21 @@ Next: \`fren start\`, then install the OpenClaw plugin (see README), or run \`fr
         { agentUser, agentHome, engineUser, undo: values.undo ?? false },
       );
       if (values.service && !values.undo) await installIsolatedService(deps.run, agentUser, engineUser, res.engineFrenHome);
+      return;
+    }
+    case "sandbox": {
+      const { values } = parseArgs({
+        args: rest,
+        options: { "agent-user": { type: "string" }, undo: { type: "boolean", default: false } },
+      });
+      const agentUser = values["agent-user"] ?? process.env.SUDO_USER ?? "fren";
+      const agentHome = execFileSync("getent", ["passwd", agentUser], { encoding: "utf8" }).split(":")[5]!;
+      // The root-owned copy `fren isolate` made, when there is one.
+      const node = existsSync("/opt/fren/bin/node") ? "/opt/fren/bin/node" : process.execPath;
+      await installSandbox(
+        { run: systemSetupDeps(paths).run, say: (t) => console.log(t), uid: process.getuid?.() ?? -1, platform: process.platform },
+        { agentUser, agentHome, node, runnerSource: join(dirname(fileURLToPath(import.meta.url)), "sandbox-runner.js"), undo: values.undo ?? false },
+      );
       return;
     }
     case "guard":
