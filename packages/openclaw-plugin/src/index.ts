@@ -3,6 +3,7 @@ import { definePluginEntry, type OpenClawPluginApi, type OpenClawPluginToolConte
 import { EngineClient, type OwnerResult } from "./client.js";
 import { LoopGuard, type ToolContext, type TurnContext } from "./guard.js";
 import planSchema from "./plan-schema.json" with { type: "json" };
+import { SANDBOX_BUSY, SANDBOX_MISSING, SandboxBusy, SandboxUnavailable, formatRun, runWhenFree, type RunCodeRequest } from "./sandbox.js";
 
 /**
  * Fren for OpenClaw. The agent gets tools that propose plans and read state;
@@ -23,6 +24,7 @@ export const TOOL_NAMES = [
   "fren_bet_quote",
   "fren_fund",
   "fren_yield",
+  "fren_run_code",
 ] as const;
 
 type ToolName = (typeof TOOL_NAMES)[number];
@@ -67,7 +69,7 @@ export function noteLang(body: unknown) {
 }
 const langBody = () => (lastLang ? { lang: lastLang } : {});
 
-export function toolSpecs(client: EngineClient): ToolSpec[] {
+export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string } = {}): ToolSpec[] {
   return [
     {
       name: "fren_wallet",
@@ -188,11 +190,42 @@ export function toolSpecs(client: EngineClient): ToolSpec[] {
       }),
       run: async (p, ctx) => deliverOwnerCode(await client.call<OwnerResult>("POST", "/fund", { venue: p.venue, amountUsd: p.amountUsd }), ctx),
     },
+    {
+      name: "fren_run_code",
+      label: "Run code",
+      description: [
+        "Write a script and run it in Fren's sandbox, and get back what it printed.",
+        "The sandbox is a locked-down user of its own: no wallet keys, no Fren engine, nothing on this machine, but the internet is open.",
+        "Use it whenever code gets a better answer than guessing: reading chain data from public RPCs and explorers, calling APIs, math, backtests,",
+        "parsing data, checking a contract, or writing and testing a program for the owner.",
+        "node runs as an ES module (import, top-level await); python3 and bash too. Files stay in the working folder between runs,",
+        "so install packages once (npm i viem; python3 -m venv .venv && .venv/bin/pip install pandas) and reuse them. Up to 150 s and 768 MB per run.",
+        "It can't sign or spend: anything that moves money still goes through fren_trade.",
+      ].join(" "),
+      parameters: Type.Object({
+        language: Type.Union([Type.Literal("node"), Type.Literal("python"), Type.Literal("bash")]),
+        code: Type.String({ description: "The whole script. Print what you need to see; long output is cut." }),
+        timeoutSec: Type.Optional(Type.Number({ minimum: 1, maximum: 150, description: "Default 60." })),
+        reset: Type.Optional(Type.Boolean({ description: "Empty the working folder first (installed packages and saved files go too)." })),
+      }),
+      run: async (p) => {
+        const req: RunCodeRequest = { lang: p.language as RunCodeRequest["lang"], code: String(p.code ?? "") };
+        if (typeof p.timeoutSec === "number") req.timeoutSec = p.timeoutSec;
+        if (p.reset === true) req.reset = true;
+        try {
+          return formatRun(await runWhenFree(req, opts.sandboxSocket ? { socket: opts.sandboxSocket } : {}));
+        } catch (err) {
+          if (err instanceof SandboxUnavailable) return SANDBOX_MISSING;
+          if (err instanceof SandboxBusy) return SANDBOX_BUSY;
+          throw err;
+        }
+      },
+    },
   ];
 }
 
-function registerTools(api: OpenClawPluginApi, client: EngineClient) {
-  for (const spec of toolSpecs(client)) {
+function registerTools(api: OpenClawPluginApi, client: EngineClient, opts: { sandboxSocket?: string }) {
+  for (const spec of toolSpecs(client, opts)) {
     api.registerTool(
       (ctx) => {
         // Only the owner trades. Other people in a group chat never see these tools.
@@ -401,12 +434,12 @@ export default definePluginEntry({
   name: "Fren",
   description: "Trade perps, spot, options and prediction markets from chat. Keys stay in the local Fren engine.",
   register(api) {
-    const cfg = (api.pluginConfig ?? {}) as { apiUrl?: string; tokenFile?: string };
+    const cfg = (api.pluginConfig ?? {}) as { apiUrl?: string; tokenFile?: string; sandboxSocket?: string };
     const client = new EngineClient({
       ...(cfg.apiUrl ? { apiUrl: cfg.apiUrl } : {}),
       ...(cfg.tokenFile ? { tokenFile: cfg.tokenFile } : {}),
     });
-    registerTools(api, client);
+    registerTools(api, client, cfg.sandboxSocket ? { sandboxSocket: cfg.sandboxSocket } : {});
     const mode = api.registrationMode;
     if (mode !== "cli-metadata" && mode !== "setup-only" && mode !== "tool-discovery") {
       registerCommands(api, client);

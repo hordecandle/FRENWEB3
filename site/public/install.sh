@@ -368,6 +368,7 @@ if [ "\$(id -u)" = 0 ]; then
   as_agent() { runuser -u $SERVICE_USER -- env HOME=$SERVICE_HOME PATH="$PATH" "$NODE_BIN" "$FREN_CLI" "\$@"; }
   case "\$1" in
     isolate) shift; exec "$NODE_BIN" "$FREN_CLI" isolate --agent-user $SERVICE_USER "\$@" ;;
+    sandbox) shift; exec "$NODE_BIN" "$FREN_CLI" sandbox --agent-user $SERVICE_USER "\$@" ;;
     setup)
       # Setup writes the keys as $SERVICE_USER, then they're sealed away again.
       # While they're unsealed the agent stays off, even across a reboot, and
@@ -635,10 +636,22 @@ UNIT
   chmod 644 /etc/fren/update.enabled
 }
 
+# Somewhere for the AI agent to write and run code: a throwaway user per run,
+# no keys, no access to this machine's services (`fren sandbox`). Optional:
+# Fren works without it, the agent just can't run code.
+install_sandbox() {
+  # Python with venv and pip, so scripts can install packages into the sandbox's own folder.
+  if have apt-get && ! python3 -c 'import ensurepip, venv' >/dev/null 2>&1; then
+    pkg_install python3 python3-venv python3-pip || warn "Couldn't install Python for the code sandbox; Node and bash scripts still work."
+  fi
+  "$NODE_BIN" "$FREN_CLI" sandbox --agent-user "$SERVICE_USER" || warn "The code sandbox is off, so Fren can't run code. Everything else works."
+}
+
 # --update: start the new version; if it won't run, put the old one back.
 finish_update() {
   write_server_units
   install_updater
+  install_sandbox
   # The agent's instructions come with the code: refresh them too (safe to repeat).
   "$FREN_BIN" persona >/dev/null 2>&1 || warn "Couldn't refresh Fren's chat instructions; the old ones stay."
   systemctl restart fren.service fren-openclaw.service
@@ -664,6 +677,7 @@ finish_update() {
 if [[ $SETUP -eq 0 ]]; then
   [[ $SERVER -eq 1 ]] && write_server_units
   [[ $SERVER -eq 1 ]] && install_updater
+  [[ $SERVER -eq 1 ]] && install_sandbox
   drop_installer_key
   lock_root
   bold ""
@@ -674,6 +688,7 @@ fi
 if [[ $WEB -eq 1 ]]; then
   web_setup
   install_updater
+  install_sandbox
   drop_installer_key
   lock_root
   exit 0
@@ -693,6 +708,7 @@ if [[ $SERVER -eq 1 ]]; then
   # The engine and its keys move to their own user; the AI agent can't read them.
   "$NODE_BIN" "$FREN_CLI" isolate --agent-user "$SERVICE_USER" --service || die "Couldn't lock Fren's keys away from the AI agent. Fren wasn't started."
   install_updater
+  install_sandbox
   systemctl enable fren-openclaw.service >/dev/null 2>&1
   systemctl restart fren-openclaw.service
   sleep 3

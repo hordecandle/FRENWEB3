@@ -4,7 +4,7 @@ A self-hosted [OpenClaw](https://github.com/openclaw/openclaw) agent that trades
 
 Status: **beta, early backend**. Everything below runs in paper mode and on fakes in tests; none of the live venues (Hyperliquid, Jupiter, pump.fun, Relay, Derive, Polymarket, Jupiter Lend, Kamino, Aave) has placed a real order yet, so all of them are beta, and so are the Telegram and WhatsApp chat lines. Real trading is off until you switch it on.
 
-It does Hyperliquid perps (crypto, gold, stocks, indices), Solana spot through Jupiter, pump.fun coins (on the curve and after), launch snipes, tokens on Base and Robinhood Chain through Relay, options on Derive, Polymarket bets, USDC yield on Jupiter Lend, Kamino and Aave, conditional orders, stops and targets, paper mode, and a kill switch (see [docs/ROADMAP.md](docs/ROADMAP.md) for what's next).
+It does Hyperliquid perps (crypto, gold, stocks, indices), Solana spot through Jupiter, pump.fun coins (on the curve and after), launch snipes, tokens on Base and Robinhood Chain through Relay, options on Derive, Polymarket bets, USDC yield on Jupiter Lend, Kamino and Aave, conditional orders, stops and targets, paper mode, and a kill switch. On a server it can also write and run code (Node, Python, bash) in a sandbox with no keys. See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next.
 
 ## How it works
 
@@ -24,6 +24,8 @@ fren engine (local HTTP API on 127.0.0.1)
 ```
 
 The model thinks, but it never signs and never polls. Anything that spends over your auto-approve level, loosens a limit, or turns Fren back on after a stop needs a code that goes straight to you on Telegram or WhatsApp, around the model. See [docs/SECURITY.md](docs/SECURITY.md).
+
+When code gets a better answer (reading a chain, a backtest, a script the owner asked for), the agent writes it and runs it with `fren_run_code`. On a server that goes to a sandbox (`fren sandbox`): every run is its own systemd service with a throwaway user, no keys, no way to reach the engine or anything else on the machine, and time and memory limits.
 
 | Package | What |
 | --- | --- |
