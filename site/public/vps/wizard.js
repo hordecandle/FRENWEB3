@@ -278,6 +278,7 @@
         $("start-again").hidden = false;
         return;
       }
+      if (!$("s-build").hidden) $("progress").textContent = "Can't reach Fren right now. Trying again…";
       timer = setTimeout(poll, 8000); // network blip: keep trying
     }
   }
@@ -386,11 +387,14 @@
   // ---- boot ----
   (async () => {
     renderPlans(FALLBACK);
-    show("s-plan", "plan");
     if (id) {
+      // An existing order: never flash the "buy a server" screen while it loads.
+      show("s-build", "build");
+      $("progress").textContent = "Loading your order…";
       poll();
       return;
     }
+    show("s-plan", "plan");
     try {
       const info = await api("plans");
       if (!info.open || !info.networks?.length) {
