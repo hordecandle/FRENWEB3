@@ -139,6 +139,14 @@ export class FakeVenues {
       items: [{ status: "incomplete", data: { from: body.user, to: RELAY_ROUTER, data: "0xdeadbeef", value: "0", chainId: body.originChainId } }],
     },
   ];
+  /** Free USDC on each Hyperliquid dex ("" is the main one). Plenty by default, so trades need no deposit. */
+  hlFree: Record<string, number> = {};
+  /** Free USDC on a dex not named in hlFree. */
+  hlFreeDefault = 1_000_000;
+  /** Times the venue waited for a deposit to land. */
+  hlTicks = 0;
+  /** Called on each of those waits, e.g. to credit a deposit. */
+  onHlWait: (() => void) | null = null;
   /** Every POST body sent to /exchange. */
   exchange: Record<string, unknown>[] = [];
   /** What /exchange returns for orders. */
@@ -314,12 +322,19 @@ export class FakeVenues {
         return json(this.universe(dex ? (this.builder[dex] ?? []) : this.main));
       }
       if (body.type === "clearinghouseState") {
-        return json({ marginSummary: { accountValue: "0" }, withdrawable: "0", assetPositions: [] });
+        const dex = (body.dex as string | undefined) ?? "";
+        return json({ marginSummary: { accountValue: "0" }, withdrawable: String(this.hlFree[dex] ?? this.hlFreeDefault), assetPositions: [] });
       }
     }
     if (url.pathname === "/exchange") {
       this.exchange.push(body);
       const action = body.action as Record<string, unknown>;
+      if (action.type === "sendAsset") {
+        const amt = Number(action.amount);
+        const to = String(action.destinationDex);
+        this.hlFree[""] = (this.hlFree[""] ?? this.hlFreeDefault) - amt;
+        this.hlFree[to] = (this.hlFree[to] ?? this.hlFreeDefault) + amt;
+      }
       if (action.type === "order") return json({ status: "ok", response: { type: "order", data: { statuses: [this.orderStatus(action)] } } });
       return json({ status: "ok", response: { type: "default" } });
     }
@@ -500,6 +515,8 @@ export interface TestFrenOptions {
   geoblocked?: () => Promise<boolean>;
   /** Overrides for the Hyperliquid market cache (dexes, ttl, backoff). */
   hlMarkets?: import("./venues/hyperliquid-markets.js").HyperliquidMarketsOptions;
+  /** Solana-to-Arbitrum bridge for Hyperliquid funding. */
+  solanaBridge?: import("./venues/hyperliquid.js").HyperliquidVenueOptions["solanaBridge"];
 }
 
 /** The whole engine wired to fakes: Hyperliquid, Jupiter, pump.fun, Relay, Derive and Polymarket. */
@@ -551,6 +568,14 @@ export function buildTestFren(opts: TestFrenOptions = {}) {
     store,
     signer,
     markets: { ttlMs: 0, now: () => clock.t, ...opts.hlMarkets },
+    arbitrumUsdc: async () => (await relay.usdcBalances()).arbitrum ?? 0,
+    solanaUsdc: async () => fake.solanaUsdc,
+    sleep: async () => {
+      fake.hlTicks++;
+      fake.onHlWait?.();
+    },
+    depositWaitMs: 50,
+    ...(opts.solanaBridge ? { solanaBridge: opts.solanaBridge } : {}),
   });
   const derive = new DeriveVenue({
     fetchFn: fake.fetch,

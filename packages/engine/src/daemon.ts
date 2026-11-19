@@ -14,6 +14,7 @@ import { HyperliquidVenue } from "./venues/hyperliquid.js";
 import { JupiterVenue } from "./venues/jupiter.js";
 import { OnlinePumpFun } from "./venues/pumpfun.js";
 import { RelayVenue } from "./venues/relay.js";
+import { SolanaToArbitrum } from "./venues/cctp.js";
 import { DeriveVenue } from "./venues/derive.js";
 import { PolymarketVenue } from "./venues/polymarket.js";
 import { polymarketGeoblock, SdkPolymarketData, SdkPolymarketTrader } from "./venues/polymarket-sdk.js";
@@ -41,7 +42,30 @@ export function ownerLines(config: FrenConfig, fetchFn: Fetch, exec?: Exec): Own
 
 export function buildFren({ config, store, signer, fetchFn = fetch, exec }: BuildOptions): Fren {
   const isTestnet = config.network === "testnet";
-  const hyperliquid = new HyperliquidVenue({ fetchFn, apiUrl: hyperliquidApiUrl(config), isTestnet, store, signer, markets: { dexes: config.hyperliquidDexes } });
+  const hyperliquid = new HyperliquidVenue({
+    fetchFn,
+    apiUrl: hyperliquidApiUrl(config),
+    isTestnet,
+    store,
+    signer,
+    markets: { dexes: config.hyperliquidDexes },
+    // Read lazily: relay and jupiter are built just below.
+    arbitrumUsdc: async () => (await relay.usdcBalances()).arbitrum ?? 0,
+    solanaUsdc: async () => (await jupiter.usdcBalance()) ?? 0,
+    // Circle's bridge runs on mainnet only.
+    ...(signer && !isTestnet
+      ? {
+          solanaBridge: new SolanaToArbitrum({
+            fetchFn,
+            kv: store,
+            sendSolana: (ixs, extra, maxSol) => jupiter.sendWithSigners(ixs, extra, maxSol),
+            solanaOwner: () => jupiter.walletKey(),
+            evmOwner: async () => (await signer.addresses()).evm,
+            sendArbitrum: (to, data) => relay.sendTx("arbitrum", to, data),
+          }),
+        }
+      : {}),
+  });
   const jupiter = new JupiterVenue({
     fetchFn,
     apiUrl: jupiterApiUrl(config),

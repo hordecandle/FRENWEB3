@@ -238,3 +238,48 @@ export function checkKaminoIx(ctx: IxContext): IxEffects {
       throw new SignerRuleError(`Kamino instruction ${d} is not one the signer allows (borrowing, flash loans and other markets are refused).`);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Circle CCTP V2: burn USDC on Solana, mint it to the wallet's own EVM address on Arbitrum
+
+/** Circle's CCTP V2 Token Messenger Minter on Solana (same id on devnet). */
+export const CCTP_TOKEN_MESSENGER_MINTER_V2 = "CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe";
+/** CCTP domain ids. */
+export const CCTP_DOMAIN = { arbitrum: 3, solana: 5 } as const;
+export const CCTP_IX = { depositForBurn: disc("d73c3d2e723780b0") } as const;
+
+/** An EVM address as CCTP's 32-byte mint recipient: left-padded with zeros. */
+export function evmAsBytes32(evm: string): Buffer {
+  const hex = evm.toLowerCase().replace(/^0x/, "");
+  if (!/^[0-9a-f]{40}$/.test(hex)) throw new SignerRuleError(`${evm} is not an EVM address.`);
+  return Buffer.concat([Buffer.alloc(12), Buffer.from(hex, "hex")]);
+}
+
+/**
+ * deposit_for_burn only, and only to the wallet itself on Arbitrum:
+ * accounts 0 owner, 1 event_rent_payer, 2 sender_authority_pda, 3 burn_token_account,
+ * 4 denylist_account, 5 message_transmitter, 6 token_messenger, 7 remote_token_messenger,
+ * 8 token_minter, 9 local_token, 10 burn_token_mint, 11 message_sent_event_data, ...programs.
+ * Data: discriminator, amount u64, destination_domain u32, mint_recipient [32],
+ * destination_caller [32], max_fee u64, min_finality_threshold u32.
+ */
+export function checkCctpIx(ctx: IxContext, evmOwner: string | undefined): IxEffects {
+  const d = ctx.data.subarray(0, 8).toString("hex");
+  if (d !== CCTP_IX.depositForBurn) throw new SignerRuleError(`CCTP instruction ${d} is not one the signer allows (only deposit_for_burn).`);
+  if (!evmOwner) throw new SignerRuleError("A CCTP transfer needs the wallet's EVM address to check against.");
+  needAccounts(ctx, 12, "CCTP deposit_for_burn");
+  if (ctx.data.length !== 8 + 8 + 4 + 32 + 32 + 8 + 4) throw new SignerRuleError("CCTP deposit_for_burn: unexpected instruction data.");
+  requireOwner(ctx, 0, "CCTP deposit_for_burn");
+  requireOwner(ctx, 1, "CCTP deposit_for_burn rent payer");
+  requireEq(ctx, 10, USDC_MINT, "CCTP burn mint");
+  const from = requireOwnerAta(ctx, 3, USDC_MINT, "CCTP burn account");
+  if (ctx.acct(11) === ctx.owner) throw new SignerRuleError("CCTP event account can't be the wallet.");
+  const amount = u64At(ctx.data, 8, "CCTP deposit_for_burn");
+  const domain = ctx.data.readUInt32LE(16);
+  if (domain !== CCTP_DOMAIN.arbitrum) throw new SignerRuleError(`CCTP transfers go to Arbitrum only, not domain ${domain}.`);
+  if (!ctx.data.subarray(20, 52).equals(evmAsBytes32(evmOwner))) throw new SignerRuleError("CCTP transfers must mint to the wallet's own Arbitrum address.");
+  if (!ctx.data.subarray(52, 84).equals(Buffer.alloc(32))) throw new SignerRuleError("CCTP transfer must not name a destination caller.");
+  const maxFee = u64At(ctx.data, 84, "CCTP deposit_for_burn");
+  if (maxFee * 100n > amount) throw new SignerRuleError("CCTP fee cap is over 1% of the transfer.");
+  return { spends: [{ account: from, maxRaw: amount }], mustIncrease: [] };
+}

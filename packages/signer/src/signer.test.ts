@@ -86,6 +86,29 @@ describe("hyperliquid rules", () => {
     expect(sneaky.action.destination).toBe(addressesOf(keys).evm.toLowerCase());
   });
 
+  it("moves USDC to a builder dex only inside its own Hyperliquid account", async () => {
+    const keys = generateKeys();
+    const s = createSigner(keys);
+    const me = addressesOf(keys).evm.toLowerCase();
+    const res = await s.hlMoveToDex({ dex: "xyz", amountUsd: 50.75, isTestnet: false });
+    expect(res.action).toMatchObject({ type: "sendAsset", destination: me, sourceDex: "", destinationDex: "xyz", token: "USDC:0x6d1e7cde53ba9467b783cb7c530ce054", amount: "50.75", fromSubAccount: "" });
+    const { recoverTypedDataAddress } = await import("viem");
+    const { SendAssetTypes } = await import("@nktkas/hyperliquid/api/exchange");
+    const a = res.action as Record<string, string>;
+    const who = await recoverTypedDataAddress({
+      domain: { name: "HyperliquidSignTransaction", version: "1", chainId: 0xa4b1, verifyingContract: "0x0000000000000000000000000000000000000000" },
+      types: SendAssetTypes,
+      primaryType: "HyperliquidTransaction:SendAsset",
+      message: { ...a, nonce: BigInt(res.nonce) },
+      signature: { r: res.signature.r, s: res.signature.s, v: BigInt(res.signature.v) },
+    });
+    expect(who.toLowerCase()).toBe(me);
+    const sneaky = await s.hlMoveToDex({ dex: "xyz", amountUsd: 5, isTestnet: true, destination: "0x000000000000000000000000000000000000dead" } as never);
+    expect(sneaky.action.destination).toBe(me);
+    await expect(s.hlMoveToDex({ dex: "../evil", amountUsd: 5, isTestnet: true })).rejects.toThrow(/builder dex/);
+    await expect(s.hlMoveToDex({ dex: "xyz", amountUsd: -1, isTestnet: true })).rejects.toThrow(/amount/);
+  });
+
   it("only approves its own agent", async () => {
     const keys = generateKeys();
     const res = await createSigner(keys).hlApproveAgent({ isTestnet: true });

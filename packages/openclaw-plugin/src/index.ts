@@ -140,7 +140,8 @@ export function toolSpecs(client: EngineClient): ToolSpec[] {
     {
       name: "fren_deposit_hyperliquid",
       label: "Fund Hyperliquid",
-      description: "Move USDC from the user's own Arbitrum address into their own Hyperliquid account (minimum 5 USDC).",
+      description:
+        "Move USDC from the user's own Arbitrum address into their own Hyperliquid account (minimum 5 USDC). Not needed before a long or short: fren_trade moves the margin into Hyperliquid by itself (after the owner's code). Use this only when the user asks to deposit.",
       parameters: Type.Object({ amountUsd: Type.Number({ minimum: 5 }) }),
       run: async (p) => (await client.call<{ text: string }>("POST", "/deposit/hyperliquid", { amountUsd: p.amountUsd })).text,
     },

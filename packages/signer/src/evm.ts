@@ -132,7 +132,42 @@ export interface EvmTxRequest {
   gas?: string;
 }
 
-export type EvmTxKind = "relay" | "approve" | "aave";
+export type EvmTxKind = "relay" | "approve" | "aave" | "cctp";
+
+/** Circle CCTP V2 MessageTransmitter, where a USDC transfer from Solana is minted. Lower-case. */
+export const CCTP_MESSAGE_TRANSMITTER_V2: Record<number, string> = {
+  42161: "0x81d40f21f12a8f0e3252bccb954d722d4c464b64",
+  421614: "0xe737e5cebeeba77efe34d4aa090756590b1ce275",
+};
+
+const CCTP_RECEIVE = [
+  {
+    type: "function",
+    name: "receiveMessage",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "message", type: "bytes" },
+      { name: "attestation", type: "bytes" },
+    ],
+    outputs: [{ type: "bool" }],
+  },
+] as const;
+
+/**
+ * A CCTP V2 message carries a burn: 148-byte header (version, source and
+ * destination domain, nonce, sender, recipient, destination caller,
+ * finality), then the body (version, burn token, mint recipient, ...).
+ * Only a USDC transfer to this chain's domain, minting to the wallet, is relayed.
+ */
+export function checkCctpReceive(data: `0x${string}`, owner: string): void {
+  const { functionName, args } = decodeFunctionData({ abi: CCTP_RECEIVE, data });
+  if (functionName !== "receiveMessage") throw new SignerRuleError("Only receiveMessage may be called on CCTP.");
+  const msg = Buffer.from(args[0].slice(2), "hex");
+  if (msg.length < 148 + 4 + 32 + 32 + 32) throw new SignerRuleError("CCTP message is too short.");
+  if (msg.readUInt32BE(8) !== 3) throw new SignerRuleError("CCTP message is not for Arbitrum.");
+  const recipient = msg.subarray(148 + 4 + 32 + 12, 148 + 4 + 32 + 32).toString("hex");
+  if (`0x${recipient}` !== owner.toLowerCase()) throw new SignerRuleError("CCTP message does not mint to the wallet itself.");
+}
 
 /**
  * `owner` is the wallet sending: Aave calls must name it as the beneficiary.
@@ -158,6 +193,11 @@ export function checkEvmTransaction(req: EvmTxRequest, owner?: string): { kind: 
     if (toAave && to !== aave.usdc) throw new SignerRuleError("Aave approvals are for USDC only.");
     if (amount > MAX_APPROVAL_RAW) throw new SignerRuleError("Unlimited token approvals are not allowed.");
     return { kind: "approve", spender, valueWei };
+  }
+  if (CCTP_MESSAGE_TRANSMITTER_V2[req.chainId] === to) {
+    if (!owner) throw new SignerRuleError("CCTP calls need the sending wallet to check against.");
+    checkCctpReceive(req.data, owner);
+    return { kind: "cctp", valueWei };
   }
   const aave = AAVE_POOLS[req.chainId];
   if (aave && to === aave.pool) {

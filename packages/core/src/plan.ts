@@ -75,6 +75,14 @@ export const SwapAmount = z.discriminatedUnion("type", [
 ]);
 export type SwapAmount = z.infer<typeof SwapAmount>;
 
+/** A swap can also sell an exact number of tokens ("sell 1.5 SOL"). */
+export const SwapLegAmount = z.discriminatedUnion("type", [
+  ...SwapAmount.options,
+  /** Sell exactly this many tokens (in whole tokens, not dollars). */
+  z.object({ type: z.literal("tokens"), tokens: z.number().positive().finite() }),
+]);
+export type SwapLegAmount = z.infer<typeof SwapLegAmount>;
+
 export const SwapLeg = z.object({
   kind: z.literal("swap"),
   venue: SpotVenue.describe('"jupiter" for Solana tokens (pump.fun included), "relay" for tokens on Base, Robinhood Chain or Arbitrum.'),
@@ -83,7 +91,9 @@ export const SwapLeg = z.object({
   side: z.enum(["buy", "sell"]),
   /** Token mint or contract address (preferred) or a well-known symbol such as "SOL" or "JUP". */
   token: z.string().min(1).describe("Token mint / contract address (CA) or a ticker. Tickers only resolve to verified tokens."),
-  amount: SwapAmount.describe('Buys: {type:"usd"} spends that much USDC. Sells: {type:"fraction"} of the balance, or {type:"usd"} worth.'),
+  amount: SwapLegAmount.describe(
+    'Buys: {type:"usd"} spends that much USDC. Sells: {type:"tokens", tokens} for a number of tokens ("sell 1.5 SOL" is tokens 1.5), {type:"fraction"} of the balance, or {type:"usd"} only when the user names a dollar amount ("sell $50 of SOL").',
+  ),
   maxSlippageBps: z.number().int().min(1).max(5000).default(100),
 });
 export type SwapLeg = z.infer<typeof SwapLeg>;

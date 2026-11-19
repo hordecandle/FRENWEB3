@@ -195,7 +195,7 @@
                   "token": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Token mint / contract address (CA) or a ticker. Tickers only resolve to verified tokens. \"ETH\" with relay on arbitrum or base is the wallet's own native ETH: selling it gives USDC on that chain and always leaves a little ETH for gas."
+                    "description": "Token mint / contract address (CA) or a ticker. Tickers only resolve to verified tokens."
                   },
                   "amount": {
                     "oneOf": [
@@ -233,9 +233,26 @@
                           "type",
                           "fraction"
                         ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "tokens"
+                          },
+                          "tokens": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "tokens"
+                        ]
                       }
                     ],
-                    "description": "Buys: {type:\"usd\"} spends that much USDC. Sells: {type:\"fraction\"} of the balance, or {type:\"usd\"} worth."
+                    "description": "Buys: {type:\"usd\"} spends that much USDC. Sells: {type:\"tokens\", tokens} for a number of tokens (\"sell 1.5 SOL\" is tokens 1.5), {type:\"fraction\"} of the balance, or {type:\"usd\"} only when the user names a dollar amount (\"sell $50 of SOL\")."
                   },
                   "maxSlippageBps": {
                     "default": 100,
