@@ -47,7 +47,7 @@ function fakeReseller() {
     s.calls.push(`${m} ${path}`);
     const json = (status, v) => new Response(JSON.stringify(v), { status });
     if (init.headers.authorization !== "Bearer rk_test") return json(401, { message: "Unauthenticated." });
-    if (path === "/os") return json(200, { data: [{ id: 9, name: "Debian 12" }, { id: 4, name: "Ubuntu 24.04" }] });
+    if (path === "/os") return json(200, { data: [{ os_id: 9, name: "Debian 12", family: "linux" }, { os_id: 4, name: "Ubuntu 24.04", family: "linux" }] }); // shape seen live
     if (path === "/clients" && m === "GET") return json(200, { data: s.clients });
     if (path === "/clients") {
       const c = { id: 500 + s.clients.length, email: body.email };

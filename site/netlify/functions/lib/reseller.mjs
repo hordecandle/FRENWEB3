@@ -49,7 +49,7 @@ export function resellerClient({ token, base = "https://b2b.eqvps.com/api/resell
     async osId(name) {
       const list = await call("GET", "/os");
       const os = (Array.isArray(list) ? list : (list.os ?? [])).find((o) => o.name === name);
-      return os?.id ?? null;
+      return os?.os_id ?? os?.id ?? null;
     },
 
     /** client_id for this email: reuses an existing client rather than making a second one. */
