@@ -96,6 +96,12 @@ export function resellerClient({ token, base = "https://b2b.eqvps.com/api/resell
       return j.password ?? j.root_password ?? null;
     },
 
+    /** Wipes the server and installs this OS. { password } when EQVPS returns the new one. */
+    async reinstall(id, osId) {
+      const j = await call("POST", `/services/${id}/reinstall`, { os_id: osId });
+      return { password: j?.password ?? j?.root_password ?? null };
+    },
+
     async setAutorenew(id, enabled) {
       await call("POST", `/services/${id}/autorenew`, { enabled });
     },

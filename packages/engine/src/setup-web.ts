@@ -224,7 +224,12 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       sendJson(res, 200, await route(body));
     } catch (err) {
       if (!(err instanceof UserError)) console.error(err);
-      const msg = err instanceof UserError ? err.message : "Something went wrong on your server. Try again in a minute.";
+      // Only the owner (with the token) sees this page, so show what broke: a bare
+      // "something went wrong" left the first paid buyer with nothing to report.
+      const msg =
+        err instanceof UserError
+          ? err.message
+          : `Something went wrong on your server: ${String((err as Error)?.message ?? err).slice(0, 300)}`;
       sendJson(res, err instanceof UserError ? 400 : 500, { error: msg });
     }
   });

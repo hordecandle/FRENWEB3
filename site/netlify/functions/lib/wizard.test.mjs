@@ -70,6 +70,7 @@ function fakeReseller() {
       if (!svc) return json(404, { message: "no such service" });
       if (sv[2] === "/autorenew") return (svc.autorenew = body.enabled), json(200, {});
       if (sv[2] === "/password") return json(200, { password: "reset-pw" });
+      if (sv[2] === "/reinstall") return (svc.reinstalledWith = body.os_id), json(200, { data: { status: "reinstalling" } });
       return json(200, { data: svc.status === "active" ? { status: "active", ip: "1.2.3.4", hostname: svc.hostname, password: "root-pw" } : { status: svc.status } });
     }
     return json(404, { message: "nope" });
@@ -339,6 +340,26 @@ describe("VPS wizard", () => {
     expect(triggered).toHaveLength(2);
     tick(18 * 60_000);
     expect(await wizard.status(id)).toMatchObject({ stage: "failed", retryable: true });
+  });
+
+  it("reinstalls the same server on request, waits for it, and installs with a fresh password", async () => {
+    const { wizard, db, rs, triggered, tick, id } = await installing();
+    await expect(wizard.reinstall(id)).rejects.toThrow(/no finished server/);
+    await wizard.install(id, OK("old"), "u");
+    expect(await wizard.reinstall(id)).toMatchObject({ stage: "provisioning", progress: expect.stringMatching(/reinstalling/i) });
+    expect(rs.services[0].reinstalledWith).toBe(4);
+    expect(db.get(id).setupUrl).toBeUndefined();
+    // EQVPS still says "active" right after: don't SSH into the old system.
+    tick(30_000);
+    expect((await wizard.status(id)).stage).toBe("provisioning");
+    expect(triggered).toEqual([id]);
+    tick(4 * 60_000);
+    expect((await wizard.status(id)).stage).toBe("installing");
+    expect(db.get(id).password).toBe("reset-pw");
+    expect(triggered).toEqual([id, id]);
+    await wizard.install(id, OK("new"), "u");
+    expect(await wizard.status(id)).toMatchObject({ stage: "ready", setupUrl: expect.stringContaining("t=new") });
+    expect(rs.calls.filter((c) => c === "POST /orders")).toHaveLength(1);
   });
 
   it("rejects bad input and unknown ids", async () => {
