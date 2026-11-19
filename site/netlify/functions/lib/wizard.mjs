@@ -340,7 +340,13 @@ export function createWizard(deps) {
     return v;
   }
 
-  return { plans, start, status, submitTx, install, retry, view };
+  /** The Fren source is only handed out to a server while its install runs. */
+  async function mayDownload(id) {
+    const rec = await load(id);
+    return rec.stage === "installing";
+  }
+
+  return { plans, start, status, submitTx, install, retry, view, mayDownload };
 }
 
 const amountKey = (network, units) => `amt-${network}-${units}`;
@@ -350,7 +356,7 @@ export const hostnameFor = (rec) => "fren-" + rec.id.toLowerCase().replace(/[^a-
 
 function friendly(step) {
   if (/basics/i.test(step)) return "Preparing the server…";
-  if (/node|openclaw/i.test(step)) return "Installing OpenClaw…";
+  if (/node|openclaw/i.test(step)) return "Installing Fren…";
   if (/download/i.test(step)) return "Downloading Fren…";
   if (/build/i.test(step)) return "Building Fren (a couple of minutes)…";
   if (/https/i.test(step)) return "Securing your setup page…";

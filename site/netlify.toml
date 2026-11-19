@@ -1,8 +1,11 @@
 [build]
   publish = "public"
+  # Pack Fren's source (the repo is private) for new servers: see vps-src.mjs.
+  command = "mkdir -p fren-src && git -C .. archive --format=tar.gz --prefix=fren/ -o site/fren-src/fren.tar.gz HEAD"
 
 [functions]
   directory = "netlify/functions"
+  included_files = ["fren-src/fren.tar.gz"]
 
 [[headers]]
   for = "/*"

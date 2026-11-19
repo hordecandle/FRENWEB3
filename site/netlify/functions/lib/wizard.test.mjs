@@ -304,6 +304,17 @@ describe("VPS wizard", () => {
     }, "x");
   });
 
+  it("hands out the Fren code only while that order's install runs", async () => {
+    const { wizard, id } = await installing();
+    expect(await wizard.mayDownload(id)).toBe(true);
+    await wizard.install(id, OK(), "x");
+    expect(await wizard.mayDownload(id)).toBe(false);
+    const other = setup();
+    const { id: unpaid } = await other.wizard.start("a@b.co", "base");
+    expect(await other.wizard.mayDownload(unpaid)).toBe(false);
+    await expect(other.wizard.mayDownload("x".repeat(32))).rejects.toThrow(/couldn't find/);
+  });
+
   it("a broken install retries once by itself, then offers a button, on the same server", async () => {
     const { wizard, db, rs, triggered, id } = await installing();
     await wizard.install(id, BAD, "u");
