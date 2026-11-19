@@ -541,6 +541,12 @@ export class JupiterVenue implements SpotVenueAdapter {
     return views;
   }
 
+  /** Native SOL, in SOL. */
+  async solBalance(): Promise<number | null> {
+    if (!this.o.signer) return null;
+    return (await this.connection.getBalance(await this.owner())) / 1e9;
+  }
+
   async usdcBalance(): Promise<number | null> {
     if (!this.o.signer) return null;
     return Number(await this.rawBalance(await this.owner(), USDC_MINT)) / 1e6;

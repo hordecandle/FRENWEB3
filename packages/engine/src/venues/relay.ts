@@ -665,6 +665,18 @@ export class RelayVenue implements SpotVenueAdapter {
     return out;
   }
 
+  /** ETH for gas on each funding chain, so the wallet shows what was sent even before it's USDC. */
+  async ethBalances(): Promise<Partial<Record<EvmChain, number>>> {
+    if (!this.o.signer) return {};
+    const owner = await this.owner();
+    const out: Partial<Record<EvmChain, number>> = {};
+    for (const c of FUNDING_CHAINS) {
+      const bal = await this.balanceOf(c, NATIVE_ETH, owner).catch(() => null);
+      if (bal !== null) out[c] = Number(bal) / 1e18;
+    }
+    return out;
+  }
+
   /** Spot tokens are left alone by the kill switch. */
   async flatten(): Promise<string[]> {
     return [];
