@@ -22,6 +22,7 @@ import { AaveUsdc } from "./venues/aave.js";
 import { JupiterLendUsdc, KaminoUsdc } from "./venues/solana-lend.js";
 import { YieldVenue, type YieldProtocolAdapter } from "./venues/yield.js";
 import { Updater } from "./updater.js";
+import { SnipeFeed, solanaMentions } from "./snipe-feed.js";
 
 export interface BuildOptions {
   config: FrenConfig;
@@ -189,7 +190,18 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
   const timer = setInterval(() => {
     fren.tick().catch((err: Error) => console.error(`watcher: ${err.message}`));
   }, config.watcherIntervalMs);
+  // Solana launches: a live feed fires the snipe the moment the coin moves; polling is the fallback.
+  const feed = config.snipeFeed
+    ? new SnipeFeed({
+        source: solanaMentions(
+          new Connection(config.solanaRpcUrl, { commitment: "processed", ...(config.solanaWsUrl ? { wsEndpoint: config.solanaWsUrl } : {}) }),
+        ),
+        targets: () => fren.snipeTargets().filter((t) => t.venue === "jupiter").map((t) => t.token),
+        fire: () => fren.snipeTick().catch((err: Error) => console.error(`snipes: ${err.message}`)),
+      })
+    : null;
   const snipeTimer = setInterval(() => {
+    feed?.sync();
     fren.snipeTick().catch((err: Error) => console.error(`snipes: ${err.message}`));
   }, config.snipeIntervalMs);
 
@@ -201,6 +213,7 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
   const shutdown = () => {
     clearInterval(timer);
     clearInterval(snipeTimer);
+    feed?.close();
     server.close();
     dashServer?.close();
     signer?.close();
