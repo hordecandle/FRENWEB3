@@ -199,3 +199,18 @@ h1,h2,h3,p{margin:0} a{color:inherit}
 .err{color:var(--bad);font-size:14px;margin-top:var(--cap-gap);min-height:1px}
 .err:empty{display:none}
 .copied{color:var(--ok)}
+
+/* ===== Payment details ===== */
+.payrows{display:grid;gap:12px;min-width:0}
+.payrow{display:grid;grid-template-columns:84px minmax(0,1fr) auto;align-items:center;gap:6px 10px;font-size:16px}
+.payrow>span:first-child{color:var(--muted);font-size:14px}
+.payrow b{font-weight:600}
+.payrow .mono{font-size:22px}
+.payrow .val{white-space:nowrap}
+.payrows--full{margin-top:14px}
+.pay .payrows{align-self:center}
+.pay .payrow{grid-template-columns:84px max-content auto;justify-content:start}
+@media (max-width:520px){.pay .payrow{grid-template-columns:max-content auto}}
+.payrow .addr{margin-top:0;min-width:0}
+@media (max-width:520px){.payrow{grid-template-columns:minmax(0,1fr) auto}.payrow>span:first-child{grid-column:1/-1}}
+.tile[aria-checked="true"]{border-color:var(--ink);box-shadow:var(--sh-btn)}

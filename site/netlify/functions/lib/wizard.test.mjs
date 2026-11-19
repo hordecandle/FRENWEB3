@@ -1,225 +1,374 @@
 import { describe, expect, it } from "vitest";
-import { eqvpsClient } from "./eqvps.mjs";
-import { createWizard, view } from "./wizard.mjs";
+import { chainClient, fromUnits, toUnits, USDC, walletUri } from "./chain.mjs";
+import { resellerClient } from "./reseller.mjs";
+import { createWizard, hostnameFor } from "./wizard.mjs";
 
-const PRODUCTS = {
-  data: [
-    {
-      id: 13,
-      slug: "micro-ip",
-      name: "Micro-IP",
-      price: { amount: 10 },
-      specs: { vcpu: 2, memory_mb: 2048, disk_gb: 25, ipv4: 1 },
-      available_os: [
-        { id: 5, name: "Debian 12" },
-        { id: 4, name: "Ubuntu 24.04" },
-      ],
-    },
-    { id: 6, slug: "micro", name: "Micro", price: { amount: 5 }, specs: { vcpu: 2, memory_mb: 2048, disk_gb: 25, ipv4: 0 }, available_os: [] },
-    { id: 15, slug: "ai-agent-ip", name: "AI-Agent-IP", price: { amount: 15 }, specs: { vcpu: 4, memory_mb: 4096, disk_gb: 40, ipv4: 1 }, available_os: [{ id: 4, name: "Ubuntu 24.04" }] },
-  ],
-};
+const BASE_ADDR = "0x1111111111111111111111111111111111111111";
+const SOL_ADDR = "FrenPay1111111111111111111111111111111111";
+const TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const pad = (a) => "0x" + a.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+const hex = (n) => "0x" + BigInt(n).toString(16);
+const txh = (n) => "0x" + String(n).padStart(64, "0");
 
-/** A fake EQVPS behind fetch, with the shapes from its REST quickstart. */
-function fakeEqvps({ existing = false } = {}) {
-  const calls = [];
-  const state = { services: [{ id: 3, status: "active" }], paid: false, booted: false, orderBody: null };
+/** A fake Base node behind fetch: USDC transfer logs and receipts. */
+function fakeBase() {
+  const s = { head: 1_000, logs: [], receipts: new Map(), calls: [] };
+  const fetchFn = async (_url, init) => {
+    const { method, params, id } = JSON.parse(init.body);
+    s.calls.push(method);
+    const ok = (result) => new Response(JSON.stringify({ jsonrpc: "2.0", id, result }));
+    if (method === "eth_blockNumber") return ok(hex(s.head));
+    if (method === "eth_getLogs") {
+      const [{ address, topics, fromBlock, toBlock }] = params;
+      return ok(s.logs.filter((l) => l.address === address && l.topics[0] === topics[0] && l.topics[2] === topics[2] && l.block >= Number(fromBlock) && l.block <= Number(toBlock)));
+    }
+    if (method === "eth_getTransactionReceipt") return ok(s.receipts.get(params[0]) ?? null);
+    if (method === "eth_getBlockByNumber") return ok({ timestamp: hex(Math.floor(s.blockTime / 1000)) });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { message: "unknown" } }));
+  };
+  /** A USDC transfer of `amount` to our address, mined at `block`. */
+  s.pay = (amount, { block = s.head, tx = txh(s.logs.length + 1), to = BASE_ADDR, confirm = true } = {}) => {
+    const log = { address: USDC.base.mint, topics: [TRANSFER, pad("0x2222222222222222222222222222222222222222"), pad(to)], data: hex(toUnits(amount)), transactionHash: tx, block };
+    s.logs.push(log);
+    s.receipts.set(tx, { status: "0x1", blockNumber: hex(block), logs: [log] });
+    if (confirm) s.head = Math.max(s.head, block + 4);
+    return tx;
+  };
+  return { s, fetchFn };
+}
+
+/** A fake EQVPS reseller API behind fetch. */
+function fakeReseller() {
+  const s = { clients: [], services: [], calls: [], orderFails: 0 };
   const fetchFn = async (url, init = {}) => {
-    const path = new URL(url).pathname.replace("/api/v1/eqvps", "");
+    const path = new URL(url).pathname.replace("/api/reseller", "");
     const body = init.body ? JSON.parse(init.body) : undefined;
-    const auth = init.headers?.authorization;
-    calls.push(`${init.method ?? "GET"} ${path}`);
+    const m = init.method ?? "GET";
+    s.calls.push(`${m} ${path}`);
     const json = (status, v) => new Response(JSON.stringify(v), { status });
-    if (path === "/products") return json(200, PRODUCTS);
-    if (path === "/auth/register") {
-      if (existing) return json(422, { message: "The email has already been taken.", errors: { email: ["The email has already been taken."] } });
-      return json(201, { token: "tok-new", token_type: "Bearer", user: {} });
+    if (init.headers.authorization !== "Bearer rk_test") return json(401, { message: "Unauthenticated." });
+    if (path === "/os") return json(200, { data: [{ id: 9, name: "Debian 12" }, { id: 4, name: "Ubuntu 24.04" }] });
+    if (path === "/clients" && m === "GET") return json(200, { data: s.clients });
+    if (path === "/clients") {
+      const c = { id: 500 + s.clients.length, email: body.email };
+      s.clients.push(c);
+      return json(201, { data: { client_id: c.id } });
     }
-    if (path === "/auth/otp/request") return json(200, { message: "sent" });
-    if (path === "/auth/otp/verify") return body.code === "123456" ? json(200, { token: "tok-old" }) : json(422, { message: "Invalid code." });
-    if (!auth?.startsWith("Bearer tok-")) return json(401, { message: "Unauthenticated." });
-    if (path === "/services") return json(200, { data: state.services });
+    if (path === "/services" && m === "GET") return json(200, { data: s.services });
     if (path === "/orders") {
-      state.orderBody = body;
-      return json(200, { invoice: { id: 77 } });
+      if (s.orderFails > 0) {
+        s.orderFails--;
+        return json(500, { message: "busy" });
+      }
+      const svc = { id: 41 + s.services.length, hostname: body.hostname, status: "provisioning", body };
+      s.services.push(svc);
+      return json(201, { data: { service_id: svc.id } });
     }
-    if (path === "/invoices/77/pay") return json(200, { checkout_url: "https://payram.eqvps.com/pay/abc" });
-    const m = path.match(/^\/services\/(\d+)$/);
-    if (m) {
-      const id = Number(m[1]);
-      if (id === 3) return json(200, { status: "active", access: { host: "9.9.9.9", port: 22 } });
-      return json(200, state.booted ? { status: "active", access: { host: "1.2.3.4", port: 22, command: "ssh root@1.2.3.4" } } : { status: "pending" });
+    const sv = path.match(/^\/services\/(\d+)(\/\w+)?$/);
+    if (sv) {
+      const svc = s.services.find((x) => x.id === Number(sv[1]));
+      if (!svc) return json(404, { message: "no such service" });
+      if (sv[2] === "/autorenew") return (svc.autorenew = body.enabled), json(200, {});
+      if (sv[2] === "/password") return json(200, { password: "reset-pw" });
+      return json(200, { data: svc.status === "active" ? { status: "active", ip: "1.2.3.4", hostname: svc.hostname, password: "root-pw" } : { status: svc.status } });
     }
     return json(404, { message: "nope" });
   };
-  return { eqvps: eqvpsClient({ base: "https://api.test/api/v1/eqvps", fetchFn }), calls, state };
+  s.boot = () => s.services.forEach((x) => (x.status = "active"));
+  return { s, fetchFn };
 }
 
-function setup(opts) {
-  const fake = fakeEqvps(opts);
+function setup({ addresses = { base: BASE_ADDR, solana: SOL_ADDR }, reseller = true, planId = "77", contact = "" } = {}) {
+  const base = fakeBase();
+  const rs = fakeReseller();
+  const chain = chainClient({ baseRpc: "https://base.test", solanaRpc: "https://sol.test", fetchFn: base.fetchFn });
   const db = new Map();
   const triggered = [];
-  let t = 1_000;
+  let t = 1_700_000_000_000;
+  base.s.blockTime = t;
   const wizard = createWizard({
-    eqvps: fake.eqvps,
+    config: { priceUsd: 10, addresses, planId, contact },
+    chain,
+    reseller: reseller ? resellerClient({ token: "rk_test", base: "https://b2b.test/api/reseller", fetchFn: rs.fetchFn }) : null,
     store: { get: async (id) => (db.has(id) ? structuredClone(db.get(id)) : null), set: async (id, v) => void db.set(id, structuredClone(v)) },
-    keygen: () => ({ publicKey: "ssh-ed25519 AAAAkey fren-installer", privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----x" }),
     triggerInstall: async (id) => void triggered.push(id),
     now: () => t,
   });
-  return { wizard, fake, db, triggered, tick: (ms) => (t += ms) };
+  return { wizard, base: base.s, rs: rs.s, db, triggered, tick: (ms) => (t += ms) };
 }
 
+/** Polls past the 8 s RPC throttle. */
+async function poll(t, id) {
+  t.tick(9_000);
+  return t.wizard.status(id);
+}
+
+describe("amounts", () => {
+  it("converts USDC amounts exactly", () => {
+    expect(toUnits("10.0437")).toBe(10_043_700n);
+    expect(toUnits(10)).toBe(10_000_000n);
+    expect(fromUnits(10_043_700n)).toBe("10.0437");
+    expect(fromUnits(10_000_000n)).toBe("10.00");
+  });
+
+  it("builds wallet links that fill in token, amount and address", () => {
+    expect(walletUri("base", BASE_ADDR, "10043700")).toBe(`ethereum:${USDC.base.mint}@8453/transfer?address=${BASE_ADDR}&uint256=10043700`);
+    expect(walletUri("solana", SOL_ADDR, "10043700")).toMatch(new RegExp(`^solana:${SOL_ADDR}\\?amount=10\\.0437&spl-token=${USDC.solana.mint}`));
+  });
+});
+
 describe("VPS wizard", () => {
-  it("offers the one Fren server plan", async () => {
-    const { wizard } = setup();
-    expect(await wizard.plans()).toEqual([{ slug: "micro-ip", name: "Micro-IP", priceUsd: 10, vcpu: 2, ramGb: 2, diskGb: 25, recommended: true }]);
+  it("stays closed until every setting is there", async () => {
+    for (const opts of [{ reseller: false }, { planId: "" }, { addresses: {} }]) {
+      const { wizard } = setup(opts);
+      expect((await wizard.plans()).open).toBe(false);
+      await expect(wizard.start("a@b.co", "base")).rejects.toThrow(/isn't open yet/);
+    }
+    expect(await setup().wizard.plans()).toEqual({
+      open: true,
+      priceUsd: 10,
+      networks: [
+        { id: "base", label: "Base", token: "USDC" },
+        { id: "solana", label: "Solana", token: "USDC" },
+      ],
+    });
   });
 
-  it("registers, orders Ubuntu with the one-time key, and returns the checkout", async () => {
-    const { wizard, fake, db } = setup();
-    const v = await wizard.start(" Bee@Example.com ", "micro-ip");
-    expect(v).toMatchObject({ stage: "awaiting_payment", plan: "micro-ip", checkoutUrl: "https://payram.eqvps.com/pay/abc", amountUsd: 10 });
-    expect(v.id.length).toBeGreaterThanOrEqual(32);
-    expect(fake.state.orderBody).toEqual({ product: "micro-ip", os_id: 4, ssh_key: "ssh-ed25519 AAAAkey fren-installer" });
-    // Secrets stay server-side.
-    expect(JSON.stringify(v)).not.toMatch(/tok-|PRIVATE/);
-    expect(db.get(v.id).email).toBe("bee@example.com");
+  it("shows the exact amount, token, network and address, and orders nothing yet", async () => {
+    const t = setup();
+    const v = await t.wizard.start(" Bee@Example.com ", "base");
+    expect(v).toMatchObject({ stage: "awaiting_payment", network: "base", networkLabel: "Base", token: "USDC", address: BASE_ADDR });
+    expect(v.amount).toMatch(/^10\.0\d{1,3}$/);
+    expect(Number(v.amount)).toBeGreaterThan(10);
+    expect(Number(v.amount)).toBeLessThan(10.1);
+    expect(v.walletUri).toContain(String(toUnits(v.amount)));
+    expect(v.expiresAt).toBeGreaterThan(v.now);
+    expect(t.db.get(v.id).email).toBe("bee@example.com");
+    expect(t.rs.calls).toEqual([]); // no server account, no order, no email before payment
   });
 
-  it("signs existing EQVPS customers in with the emailed code", async () => {
-    const { wizard } = setup({ existing: true });
-    const v = await wizard.start("bee@example.com", "micro-ip");
-    expect(v.stage).toBe("needs_code");
-    await expect(wizard.code(v.id, "000000")).rejects.toThrow(/didn't work/);
-    const after = await wizard.code(v.id, "123 456");
-    expect(after.stage).toBe("awaiting_payment");
+  it("gives two open orders different amounts", async () => {
+    const t = setup();
+    const seen = new Set();
+    for (let i = 0; i < 30; i++) seen.add((await t.wizard.start(`a${i}@b.co`, "base")).amount);
+    expect(seen.size).toBe(30);
   });
 
-  it("waits for payment, then the server, then starts the install once", async () => {
-    const { wizard, fake, triggered, db } = setup();
-    const { id } = await wizard.start("bee@example.com", "micro-ip");
-    expect((await wizard.status(id)).stage).toBe("awaiting_payment");
-
-    // Paid: a new server shows up (the old one, id 3, is ignored).
-    fake.state.services.push({ id: 41, status: "pending" });
-    expect(await wizard.status(id)).toMatchObject({ stage: "provisioning", progress: expect.stringMatching(/Payment received/) });
-    expect(triggered).toEqual([]);
-
-    fake.state.booted = true;
-    expect((await wizard.status(id)).stage).toBe("installing");
-    expect(db.get(id)).toMatchObject({ serviceId: 41, host: "1.2.3.4", port: 22 });
-    expect((await wizard.status(id)).stage).toBe("installing");
-    expect(triggered).toEqual([id]);
+  it("never says paid without a matching transfer on-chain", async () => {
+    const t = setup();
+    const { id, amount } = await t.wizard.start("bee@example.com", "base");
+    t.base.pay("10"); // wrong amount
+    t.base.pay(amount, { to: "0x3333333333333333333333333333333333333333" }); // wrong address
+    for (let i = 0; i < 5; i++) expect((await poll(t, id)).stage).toBe("awaiting_payment");
+    // An RPC outage is a wait, not a payment.
+    t.base.head = NaN;
+    expect((await poll(t, id)).stage).toBe("awaiting_payment");
+    expect(t.rs.calls).toEqual([]);
+    expect(t.triggered).toEqual([]);
   });
 
-  it("installs over SSH, reports progress, keeps the setup link and forgets the secrets", async () => {
-    const { wizard, fake, db } = setup();
-    const { id } = await wizard.start("bee@example.com", "micro-ip");
-    fake.state.services.push({ id: 41 });
-    fake.state.booted = true;
-    await wizard.status(id);
+  it("does not take a transfer mined before the order", async () => {
+    const t = setup();
+    const { id, amount } = await t.wizard.start("bee@example.com", "base");
+    t.base.pay(amount, { block: 900 }); // before the order's starting block
+    t.base.head += 10;
+    expect((await poll(t, id)).stage).toBe("awaiting_payment");
+  });
 
+  it("waits for confirmations, then confirms the exact amount and orders the server once", async () => {
+    const t = setup();
+    const { id, amount } = await t.wizard.start("bee@example.com", "base");
+    const tx = t.base.pay(amount, { block: t.base.head + 1, confirm: false });
+    t.base.head += 2; // 1 confirmation
+    expect((await poll(t, id)).stage).toBe("awaiting_payment");
+    t.base.head += 5;
+    const v = await poll(t, id);
+    expect(v).toMatchObject({ stage: "provisioning", paidTx: tx, paidAmount: amount, paidTxUrl: `https://basescan.org/tx/${tx}` });
+    expect(v.address).toBeUndefined();
+    expect(t.rs.services).toHaveLength(1);
+    expect(t.rs.services[0]).toMatchObject({ hostname: hostnameFor({ id }), autorenew: false, body: { client_id: 500, plan_id: "77", os_id: 4 } });
+    expect(t.rs.clients).toEqual([{ id: 500, email: "bee@example.com" }]);
+
+    // Still booting: no install yet, no second order.
+    expect((await poll(t, id)).stage).toBe("provisioning");
+    expect(t.triggered).toEqual([]);
+    t.rs.boot();
+    expect((await poll(t, id)).stage).toBe("installing");
+    expect(t.db.get(id)).toMatchObject({ host: "1.2.3.4", port: 22, password: "root-pw" });
+    expect(t.triggered).toEqual([id]);
+    expect((await poll(t, id)).stage).toBe("installing");
+    expect(t.triggered).toEqual([id]);
+    expect(t.rs.calls.filter((c) => c === "POST /orders")).toHaveLength(1);
+  });
+
+  it("retries a refused order a few times, then says so without charging twice", async () => {
+    const t = setup({ contact: "help@fren.example" });
+    const { id, amount } = await t.wizard.start("bee@example.com", "base");
+    t.base.pay(amount);
+    t.rs.orderFails = 1;
+    expect((await poll(t, id)).stage).toBe("paid");
+    expect((await poll(t, id)).stage).toBe("provisioning");
+    expect(t.rs.services).toHaveLength(1);
+
+    const u = setup({ contact: "help@fren.example" });
+    const o = await u.wizard.start("bee@example.com", "base");
+    u.base.pay(o.amount);
+    u.rs.orderFails = 9;
+    for (let i = 0; i < 4; i++) await poll(u, o.id);
+    const v = await poll(u, o.id);
+    expect(v).toMatchObject({ stage: "failed", retryable: false, contact: "help@fren.example", error: expect.stringMatching(/got your payment/) });
+  });
+
+  it("finds an order that went through even if the answer got lost", async () => {
+    const t = setup();
+    const { id, amount } = await t.wizard.start("bee@example.com", "base");
+    t.base.pay(amount);
+    // The server exists already (e.g. the last attempt timed out after EQVPS made it).
+    t.rs.services.push({ id: 90, hostname: hostnameFor({ id }), status: "provisioning" });
+    expect((await poll(t, id)).stage).toBe("provisioning");
+    expect(t.rs.calls.filter((c) => c === "POST /orders")).toHaveLength(0);
+    expect(t.db.get(id).serviceId).toBe(90);
+  });
+
+  describe("pasted transaction", () => {
+    it("accepts a rounded amount from an exchange when it covers the price", async () => {
+      const t = setup();
+      const { id } = await t.wizard.start("bee@example.com", "base");
+      const tx = t.base.pay("10.05");
+      expect((await poll(t, id)).stage).toBe("awaiting_payment"); // not the exact amount, so no auto match
+      expect(await t.wizard.submitTx(id, tx)).toMatchObject({ stage: "paid", paidTx: tx, paidAmount: "10.05" });
+      expect((await poll(t, id)).stage).toBe("provisioning");
+    });
+
+    it("refuses too little, junk, failed, foreign and reused transactions", async () => {
+      const t = setup();
+      const a = await t.wizard.start("a@b.co", "base");
+      const b = await t.wizard.start("c@d.co", "base");
+      await expect(t.wizard.submitTx(a.id, "hello")).rejects.toThrow(/doesn't look like a Base transaction/);
+      await expect(t.wizard.submitTx(a.id, t.base.pay("9.5"))).rejects.toThrow(/sent 9.50 USDC. The server is 10.00/);
+      await expect(t.wizard.submitTx(a.id, t.base.pay("10", { to: "0x4444444444444444444444444444444444444444" }))).rejects.toThrow(/didn't send USDC/);
+      const failedTx = txh(999);
+      t.base.receipts.set(failedTx, { status: "0x0", blockNumber: hex(990), logs: [] });
+      await expect(t.wizard.submitTx(a.id, failedTx)).rejects.toThrow(/failed on-chain/);
+      await expect(t.wizard.submitTx(a.id, txh(12345))).rejects.toThrow(/isn't confirmed yet/);
+      // B's exact amount belongs to B.
+      await expect(t.wizard.submitTx(a.id, t.base.pay(b.amount))).rejects.toThrow(/different order/);
+      // One payment, one order.
+      const tx = t.base.pay("10.5");
+      await t.wizard.submitTx(a.id, tx);
+      await expect(t.wizard.submitTx(b.id, tx)).rejects.toThrow(/already used/);
+    });
+
+    it("refuses a transaction from before the order", async () => {
+      const t = setup();
+      t.base.blockTime -= 60 * 60_000;
+      const { id } = await t.wizard.start("a@b.co", "base");
+      await expect(t.wizard.submitTx(id, t.base.pay("10"))).rejects.toThrow(/before this order/);
+    });
+  });
+
+  it("an hour without payment shows expired, and a late exact payment still counts", async () => {
+    const t = setup();
+    const { id, amount } = await t.wizard.start("bee@example.com", "base");
+    t.tick(61 * 60_000);
+    expect((await poll(t, id)).stage).toBe("expired");
+    t.base.pay(amount);
+    expect((await poll(t, id)).stage).toBe("provisioning");
+  });
+
+  async function installing(opts) {
+    const t = setup(opts);
+    const { id, amount } = await t.wizard.start("bee@example.com", "base");
+    t.base.pay(amount);
+    await poll(t, id);
+    t.rs.boot();
+    await poll(t, id);
+    return { ...t, id };
+  }
+  const OK = (u = "abc") => async () => ({ code: 0, output: `lots\nFREN_SETUP_URL=https://1-2-3-4.sslip.io/setup?t=${u}\n` });
+  const BAD = async () => ({ code: 1, output: "x Couldn't download Fren from https://github.com/beeonchain/frenweb3.git.\n" });
+
+  it("installs over SSH with the first root password, keeps the setup link and forgets the password", async () => {
+    const { wizard, db, id } = await installing();
     let seen;
-    const ssh = async (o) => {
+    await wizard.install(id, async (o) => {
       seen = o;
       o.onLine("==> Building Fren (a couple of minutes)");
-      return { code: 0, output: "lots\nFREN_SETUP_URL=https://1-2-3-4.sslip.io/setup?t=abc123\n" };
-    };
-    await wizard.install(id, ssh, "https://getfren.netlify.app/install.sh");
-    expect(seen).toMatchObject({ host: "1.2.3.4", port: 22, privateKey: expect.stringContaining("PRIVATE") });
-    expect(seen.command).toBe("curl -fsSL https://getfren.netlify.app/install.sh | bash -s -- --server --web --drop-key fren-installer");
-    expect(await wizard.status(id)).toMatchObject({ stage: "ready", setupUrl: "https://1-2-3-4.sslip.io/setup?t=abc123" });
-    expect(db.get(id).privateKey).toBeUndefined();
-    expect(db.get(id).eqvpsToken).toBeUndefined();
-
-    // A second trigger does nothing.
+      return OK()();
+    }, "INSTALL");
+    expect(seen).toMatchObject({ host: "1.2.3.4", port: 22, password: "root-pw", command: "INSTALL" });
+    expect(await wizard.status(id)).toMatchObject({ stage: "ready", setupUrl: "https://1-2-3-4.sslip.io/setup?t=abc" });
+    expect(db.get(id).password).toBeUndefined();
     await wizard.install(id, async () => {
       throw new Error("should not run");
     }, "x");
   });
 
-  async function installing() {
-    const t = setup();
-    const { id } = await t.wizard.start("bee@example.com", "micro-ip");
-    t.fake.state.services.push({ id: 41 });
-    t.fake.state.booted = true;
-    await t.wizard.status(id);
-    return { ...t, id };
-  }
-  const BAD = async () => ({ code: 1, output: "x Couldn't download Fren from https://github.com/beeonchain/frenweb3.git.\n" });
-
-  it("a broken install retries once by itself, on the same server, with no second order", async () => {
-    const { wizard, fake, db, triggered, id } = await installing();
+  it("a broken install retries once by itself, then offers a button, on the same server", async () => {
+    const { wizard, db, rs, triggered, id } = await installing();
     await wizard.install(id, BAD, "u");
     expect(await wizard.status(id)).toMatchObject({ stage: "installing", progress: expect.stringMatching(/trying again/i) });
     expect(triggered).toEqual([id, id]);
-    expect(db.get(id).privateKey).toBeTruthy();
-    expect(db.get(id).eqvpsToken).toBeTruthy();
-    // The auto retry works.
-    await wizard.install(id, async () => ({ code: 0, output: "FREN_SETUP_URL=https://1-2-3-4.sslip.io/setup?t=ok\n" }), "u");
-    expect(await wizard.status(id)).toMatchObject({ stage: "ready", setupUrl: expect.stringContaining("t=ok") });
-    expect(db.get(id).privateKey).toBeUndefined();
-    expect(fake.calls.filter((c) => c === "POST /orders")).toHaveLength(1);
-  });
-
-  it("after the auto retry also fails: failed with a retry button, secrets kept, retry reaches ready on the same server", async () => {
-    const { wizard, fake, db, triggered, id } = await installing();
-    await wizard.install(id, BAD, "u");
     await wizard.install(id, BAD, "u");
     const v = await wizard.status(id);
-    expect(v).toMatchObject({ stage: "failed", retryable: true, error: expect.stringMatching(/paid for/), detail: expect.stringMatching(/Couldn't download Fren/) });
-    expect(v.error).not.toMatch(/PLACEHOLDER/);
-    expect(v.contact).toBeUndefined(); // no support address configured = no contact line
-    expect(JSON.stringify(v)).not.toMatch(/tok-|PRIVATE/);
-    expect(db.get(id).privateKey).toBeTruthy();
-    expect(db.get(id).eqvpsToken).toBeTruthy();
-
+    expect(v).toMatchObject({ stage: "failed", retryable: true, error: expect.stringMatching(/paid for/), detail: expect.stringMatching(/Couldn't download/) });
+    expect(JSON.stringify(v)).not.toMatch(/root-pw|rk_/);
+    expect(db.get(id).password).toBe("root-pw");
     expect(await wizard.retry(id)).toMatchObject({ stage: "installing" });
-    expect(triggered).toHaveLength(3);
-    let seen;
-    await wizard.install(id, async (o) => ((seen = o), { code: 0, output: "FREN_SETUP_URL=https://1-2-3-4.sslip.io/setup?t=late\n" }), "u");
-    expect(seen).toMatchObject({ host: "1.2.3.4" });
+    await wizard.install(id, OK("late"), "u");
     expect(await wizard.status(id)).toMatchObject({ stage: "ready" });
-    expect(fake.calls.filter((c) => c === "POST /orders")).toHaveLength(1);
-    expect(fake.calls.filter((c) => c === "POST /auth/register")).toHaveLength(1);
+    expect(rs.calls.filter((c) => c === "POST /orders")).toHaveLength(1);
     await expect(wizard.retry(id)).rejects.toThrow(/nothing to retry/);
   });
 
-  it("an unreachable server is retried the same way", async () => {
-    const { wizard, id } = await installing();
-    const down = async () => {
-      throw new Error("connect ETIMEDOUT");
-    };
-    await wizard.install(id, down, "u");
-    await wizard.install(id, down, "u");
-    expect(await wizard.status(id)).toMatchObject({ stage: "failed", retryable: true, detail: "connect ETIMEDOUT" });
-  });
-
-  it("an install that never reports back (function killed after 15 min) is retried, then offered again", async () => {
+  it("an install that never reports back is retried, then offered again", async () => {
     const { wizard, tick, triggered, id } = await installing();
     tick(18 * 60_000);
-    expect((await wizard.status(id)).stage).toBe("installing"); // auto retry, fresh clock
+    expect((await wizard.status(id)).stage).toBe("installing");
     expect(triggered).toHaveLength(2);
     tick(18 * 60_000);
     expect(await wizard.status(id)).toMatchObject({ stage: "failed", retryable: true });
   });
 
-  it("does not time out an install that is still within the function's 15 minutes", async () => {
-    const { wizard, tick, id } = await installing();
-    tick(14 * 60_000);
-    expect((await wizard.status(id)).stage).toBe("installing");
-  });
-
   it("rejects bad input and unknown ids", async () => {
     const { wizard } = setup();
-    await expect(wizard.start("nope", "micro-ip")).rejects.toThrow(/email/);
-    await expect(wizard.start("a@b.co", "micro")).rejects.toThrow(/plans/);
-    await expect(wizard.start("a@b.co", "ai-agent-ip")).rejects.toThrow(/plans/);
+    await expect(wizard.start("nope", "base")).rejects.toThrow(/email/);
+    await expect(wizard.start("a@b.co", "tron")).rejects.toThrow(/Base or Solana/);
     await expect(wizard.status("x".repeat(32))).rejects.toThrow(/couldn't find/);
+    await expect(wizard.status("../../etc/passwd/xxxxxxxxxxxxxxxx")).rejects.toThrow(/couldn't find/);
   });
 
-  it("never shows tokens or keys", () => {
-    expect(view({ id: "i", stage: "ready", plan: "p", eqvpsToken: "t", privateKey: "k", setupUrl: "u" })).toEqual({ id: "i", stage: "ready", plan: "p", setupUrl: "u" });
+  it("only offers the networks that have an address", async () => {
+    const { wizard } = setup({ addresses: { solana: SOL_ADDR } });
+    expect((await wizard.plans()).networks.map((n) => n.id)).toEqual(["solana"]);
+    await expect(wizard.start("a@b.co", "base")).rejects.toThrow(/Base or Solana/);
+  });
+});
+
+describe("Solana payments", () => {
+  it("reads USDC that reached the owner's token account", async () => {
+    const calls = [];
+    const tx = "5".repeat(88);
+    const fetchFn = async (_u, init) => {
+      const { method, params, id } = JSON.parse(init.body);
+      calls.push(method);
+      const ok = (result) => new Response(JSON.stringify({ jsonrpc: "2.0", id, result }));
+      if (method === "getTokenAccountsByOwner") return ok({ value: [{ pubkey: "ATA111111111111111111111111111111111" }] });
+      if (method === "getSignaturesForAddress") return ok(params[1].until ? [] : [{ signature: tx, blockTime: 1_700_000_100, err: null }]);
+      if (method === "getTransaction")
+        return ok({
+          blockTime: 1_700_000_100,
+          meta: {
+            err: null,
+            preTokenBalances: [{ mint: USDC.solana.mint, owner: SOL_ADDR, uiTokenAmount: { amount: "1000000" } }],
+            postTokenBalances: [{ mint: USDC.solana.mint, owner: SOL_ADDR, uiTokenAmount: { amount: "11043700" } }],
+          },
+        });
+    };
+    const c = chainClient({ baseRpc: "x", solanaRpc: "https://sol.test", fetchFn });
+    const r = await c.solana.transfersTo(SOL_ADDR, null);
+    expect(r).toEqual({ transfers: [{ tx, units: 10_043_700n, at: 1_700_000_100_000 }], next: tx });
+    expect((await c.solana.transfersTo(SOL_ADDR, tx)).transfers).toEqual([]);
+    expect(await c.solana.transferInTx(SOL_ADDR, tx)).toEqual({ tx, units: 10_043_700n, at: 1_700_000_100_000 });
   });
 });

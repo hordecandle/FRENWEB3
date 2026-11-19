@@ -1,159 +1,250 @@
-// The /vps wizard's state machine: an EQVPS account and order for the visitor,
-// the crypto checkout, then a one-time SSH install of Fren on the new server.
-// Pure logic: EQVPS, storage, key generation and the install trigger are passed
-// in, so it runs the same in Netlify Functions and in tests.
+// The /vps wizard's state machine:
+//   1. the buyer picks a network and gets an exact USDC amount and Fren's address;
+//   2. we watch the chain for that transfer (or check a pasted transaction hash);
+//   3. only then Fren orders the server from its EQVPS reseller balance;
+//   4. a one-time SSH session installs Fren and hands over the private setup page,
+//      where the owner adds an AI key and connects their Telegram bot.
+// Pure logic: the chain, EQVPS, storage and the install trigger are passed in,
+// so it runs the same in Netlify Functions and in tests.
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
+import { fromUnits, isTxHash, NETWORKS, toUnits, walletUri } from "./chain.mjs";
 
-/**
- * One plan, "Fren server": 2 vCPU, 2 GB, its own IPv4 (the setup page on the
- * server needs inbound HTTPS, so no shared-IP plans).
- */
-export const PLANS = ["micro-ip"];
-export const RECOMMENDED = "micro-ip";
-export const KEY_TAG = "fren-installer";
 const OS_NAME = "Ubuntu 24.04";
+/** How long the page asks the buyer to pay within. */
+export const PAY_WINDOW_MS = 60 * 60_000;
+/** How long an exact amount stays reserved for one order (late payments still match). */
+const RESERVE_MS = 24 * 60 * 60_000;
+/** Don't hit the RPC on every poll. */
+const CHECK_EVERY_MS = 8_000;
+/** A pasted transaction may be a little older than the order (clock skew, fast payers). */
+const TX_SLACK_MS = 10 * 60_000;
 // A Netlify background function lives 15 minutes at most, so an install that is
 // still "running" after that has been killed: give up on it a little later.
 const INSTALL_TIMEOUT_MS = 17 * 60_000;
-// One automatic retry, then the person gets a "Try again" button.
+const SERVER_BOOT_TIMEOUT_MS = 30 * 60_000;
 const AUTO_RETRIES = 1;
-// Support address from config (FREN_SUPPORT_CONTACT). Empty = no "write to" line at all.
-export const CONTACT = (process.env.FREN_SUPPORT_CONTACT || "").trim();
+const ORDER_TRIES = 3;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export class UserError extends Error {}
+export const NOT_OPEN = "Server setup isn't open yet. Please check back soon.";
+
+export class UserError extends Error {
+  constructor(message, status = 400) {
+    super(message);
+    this.status = status;
+  }
+}
 
 /**
  * @param {object} deps
- * @param {ReturnType<import("./eqvps.mjs").eqvpsClient>} deps.eqvps
+ * @param {{ priceUsd: number, addresses: { base?: string, solana?: string }, planId?: string|number, contact?: string }} deps.config
+ * @param {ReturnType<import("./chain.mjs").chainClient>} deps.chain
+ * @param {ReturnType<import("./reseller.mjs").resellerClient> | null} deps.reseller
  * @param {{ get(id: string): Promise<any>, set(id: string, v: any): Promise<void> }} deps.store
- * @param {() => { publicKey: string, privateKey: string }} deps.keygen  publicKey is "ssh-ed25519 AAAA..."
  * @param {(id: string) => Promise<void>} deps.triggerInstall
  * @param {() => number} [deps.now]
  */
 export function createWizard(deps) {
   const now = deps.now ?? Date.now;
+  const cfg = deps.config;
+  const contact = (cfg.contact ?? "").trim();
+  const networks = Object.keys(NETWORKS).filter((n) => cfg.addresses?.[n]);
+  const isOpen = () => Boolean(deps.reseller && cfg.planId && networks.length && cfg.priceUsd > 0);
+  const priceUnits = () => toUnits(cfg.priceUsd);
 
   async function plans() {
-    const products = await deps.eqvps.products();
-    return PLANS.map((slug) => products.find((p) => p.slug === slug))
-      .filter(Boolean)
-      .map((p) => ({
-        slug: p.slug,
-        name: p.name,
-        priceUsd: p.price.amount,
-        vcpu: p.specs.vcpu,
-        ramGb: Math.round(p.specs.memory_mb / 1024),
-        diskGb: p.specs.disk_gb,
-        recommended: p.slug === RECOMMENDED,
-      }));
+    return {
+      open: isOpen(),
+      priceUsd: cfg.priceUsd,
+      networks: networks.map((id) => ({ id, label: NETWORKS[id].label, token: NETWORKS[id].token })),
+    };
   }
 
-  async function start(email, plan) {
+  async function start(email, network) {
+    if (!isOpen()) throw new UserError(NOT_OPEN, 503);
     email = String(email ?? "").trim().toLowerCase();
     if (!EMAIL.test(email)) throw new UserError("That email doesn't look right.");
-    if (!PLANS.includes(plan)) throw new UserError("Pick one of the plans.");
-    const rec = { id: randomBytes(24).toString("base64url"), email, plan, stage: "new", createdAt: now() };
-    const reg = await deps.eqvps.register(email);
-    if (reg.token) {
-      rec.eqvpsToken = reg.token;
-      await order(rec);
-    } else if (reg.emailTaken) {
-      // Already an EQVPS customer: sign in with the code EQVPS emails them.
-      await deps.eqvps.requestCode(email);
-      rec.stage = "needs_code";
-    } else {
-      throw new UserError(reg.message || "The VPS provider didn't accept that email.");
-    }
+    if (!networks.includes(network)) throw new UserError("Pick Base or Solana.");
+    const rec = {
+      id: randomBytes(24).toString("base64url"),
+      email,
+      network,
+      address: cfg.addresses[network],
+      stage: "awaiting_payment",
+      createdAt: now(),
+      expiresAt: now() + PAY_WINDOW_MS,
+      cursor: await deps.chain[network].cursor(cfg.addresses[network]),
+    };
+    rec.units = (await reserveAmount(rec)).toString();
     await save(rec);
-    return view(rec);
-  }
-
-  async function code(id, codeIn) {
-    const rec = await load(id);
-    if (rec.stage !== "needs_code") return view(rec);
-    const c = String(codeIn ?? "").replace(/\s/g, "");
-    if (!/^\d{4,8}$/.test(c)) throw new UserError("Enter the code from the email.");
-    const token = await deps.eqvps.verifyCode(rec.email, c);
-    if (!token) throw new UserError("That code didn't work. Check the latest email from EQVPS.");
-    rec.eqvpsToken = token;
-    await order(rec);
-    await save(rec);
-    return view(rec);
-  }
-
-  async function order(rec) {
-    const products = await deps.eqvps.products();
-    const product = products.find((p) => p.slug === rec.plan);
-    if (!product) throw new UserError("That plan isn't available right now.");
-    const os = product.available_os.find((o) => o.name === OS_NAME);
-    if (!os) throw new UserError(`${OS_NAME} isn't available on that plan right now.`);
-    const keys = deps.keygen();
-    rec.privateKey = keys.privateKey;
-    rec.knownServiceIds = (await deps.eqvps.services(rec.eqvpsToken)).map((s) => s.id);
-    const o = await deps.eqvps.order(rec.eqvpsToken, { product: rec.plan, os_id: os.id, ssh_key: `${keys.publicKey.split(" ").slice(0, 2).join(" ")} ${KEY_TAG}` });
-    rec.amountUsd = product.price.amount;
-    if (o.serviceId) rec.serviceId = o.serviceId;
-    if (o.paid) {
-      rec.stage = "provisioning";
-    } else {
-      if (!o.invoiceId) throw new Error("EQVPS returned neither a server nor an invoice.");
-      rec.invoiceId = o.invoiceId;
-      const pay = await deps.eqvps.payInvoice(rec.eqvpsToken, o.invoiceId);
-      rec.checkoutUrl = pay.checkoutUrl;
-      if (pay.amountUsd) rec.amountUsd = pay.amountUsd;
-      rec.stage = "awaiting_payment";
-    }
-  }
-
-  /** Called by the page every few seconds; moves things along as EQVPS reports progress. */
-  async function status(id) {
-    const rec = await load(id);
-    if (rec.stage === "awaiting_payment" || rec.stage === "provisioning") {
-      const svc = await findService(rec);
-      if (svc) {
-        rec.serviceId = svc.id;
-        const detail = await deps.eqvps.service(rec.eqvpsToken, svc.id);
-        if (detail.status === "active" && detail.host) {
-          rec.host = detail.host;
-          rec.port = detail.port ?? 22;
-          rec.stage = "installing";
-          rec.progress = "Server is up. Installing Fren…";
-          rec.installStartedAt = now();
-          await save(rec);
-          await deps.triggerInstall(rec.id);
-          return view(rec);
-        }
-        rec.stage = "provisioning";
-        rec.progress = "Payment received. Your server is starting…";
-      }
-      await save(rec);
-    } else if (rec.stage === "installing" && now() - rec.installStartedAt > INSTALL_TIMEOUT_MS) {
-      await fail(rec, "Installing took longer than expected.", "timeout");
-    }
     return view(rec);
   }
 
   /**
-   * An install went wrong. The server is paid for, so keep the key and token:
-   * retry once on our own, then offer a button. Never a second order.
+   * The price plus 0.0001 to 0.0999 USDC, unique among open orders on that
+   * network, so a transfer of exactly this amount identifies the order.
+   */
+  async function reserveAmount(rec) {
+    for (let i = 0; i < 40; i++) {
+      const units = priceUnits() + BigInt(randomInt(1, 1000)) * 100n;
+      const key = amountKey(rec.network, units);
+      const held = await deps.store.get(key);
+      if (held && held.until > now() && held.id !== rec.id) continue;
+      await deps.store.set(key, { id: rec.id, until: now() + RESERVE_MS });
+      return units;
+    }
+    throw new UserError("Too many open orders right now. Try again in a minute.", 503);
+  }
+
+  /** Called by the page every few seconds; moves things along. */
+  async function status(id) {
+    const rec = await load(id);
+    if (rec.stage === "awaiting_payment" || rec.stage === "expired") await watchPayment(rec);
+    if (rec.stage === "paid" || rec.stage === "provisioning") await provision(rec);
+    else if (rec.stage === "installing" && now() - rec.installStartedAt > INSTALL_TIMEOUT_MS) await fail(rec, "Installing took longer than expected.", "timeout");
+    return view(rec);
+  }
+
+  async function watchPayment(rec) {
+    if (rec.lastCheckAt && now() - rec.lastCheckAt < CHECK_EVERY_MS) return;
+    rec.lastCheckAt = now();
+    if (now() - rec.createdAt > RESERVE_MS) {
+      rec.stage = "expired";
+      await save(rec);
+      return;
+    }
+    try {
+      const { transfers, next } = await deps.chain[rec.network].transfersTo(rec.address, rec.cursor);
+      rec.cursor = next;
+      const hit = transfers.find((t) => t.units === BigInt(rec.units) && (t.at == null || t.at >= rec.createdAt - 2 * 60_000));
+      if (hit && (await markPaid(rec, hit))) return;
+    } catch (err) {
+      // An RPC hiccup only delays the check; never treat it as paid or failed.
+      console.error("payment check", err.message);
+    }
+    if (rec.stage === "awaiting_payment" && now() > rec.expiresAt) rec.stage = "expired";
+    await save(rec);
+  }
+
+  /** "I've paid": the buyer pastes the transaction, e.g. when an exchange changed the amount. */
+  async function submitTx(id, txIn) {
+    const rec = await load(id);
+    if (rec.stage !== "awaiting_payment" && rec.stage !== "expired") return view(rec);
+    const tx = String(txIn ?? "").trim();
+    if (!isTxHash(rec.network, tx)) throw new UserError(`That doesn't look like a ${NETWORKS[rec.network].label} transaction ID.`);
+    const t = await deps.chain[rec.network].transferInTx(rec.address, tx);
+    if (!t || t.pending) throw new UserError("We can see that transaction isn't confirmed yet. Give it a minute; this page moves on by itself.");
+    if (t.failed) throw new UserError("That transaction failed on-chain, so nothing was sent.");
+    if (t.units === 0n) throw new UserError(`That transaction didn't send ${NETWORKS[rec.network].token} on ${NETWORKS[rec.network].label} to the address on this page.`);
+    if (t.units < priceUnits()) throw new UserError(`That transaction sent ${fromUnits(t.units)} USDC. The server is ${fromUnits(priceUnits())} USDC.`);
+    if (t.at != null && t.at < rec.createdAt - TX_SLACK_MS) throw new UserError("That transaction is from before this order was made.");
+    if (t.units !== BigInt(rec.units)) {
+      // Another open order's exact amount belongs to that order.
+      const held = await deps.store.get(amountKey(rec.network, t.units));
+      if (held && held.id !== rec.id && held.until > now()) throw new UserError("That transaction matches a different order.");
+    }
+    if (!(await markPaid(rec, t))) throw new UserError("That transaction was already used for another order.");
+    return view(rec);
+  }
+
+  /** One transaction pays for one order, ever. */
+  async function markPaid(rec, t) {
+    const key = `tx-${rec.network}-${t.tx.toLowerCase()}`;
+    const used = await deps.store.get(key);
+    if (used && used.id !== rec.id) return false;
+    await deps.store.set(key, { id: rec.id, at: now() });
+    rec.stage = "paid";
+    rec.paidTx = t.tx;
+    rec.paidUnits = t.units.toString();
+    rec.paidAt = now();
+    rec.progress = "Payment confirmed. Ordering your server…";
+    await deps.store.set(amountKey(rec.network, BigInt(rec.units)), { id: rec.id, until: 0 });
+    await save(rec);
+    return true;
+  }
+
+  /** After payment: order the server once, wait for it to boot, then install. */
+  async function provision(rec) {
+    if (rec.stage === "paid") {
+      if (rec.orderingAt && now() - rec.orderingAt < 60_000) return;
+      rec.orderingAt = now();
+      await save(rec);
+      try {
+        const hostname = hostnameFor(rec);
+        let serviceId = await deps.reseller.findByHostname(hostname);
+        if (!serviceId) {
+          const clientId = await deps.reseller.client(rec.email);
+          const osId = await deps.reseller.osId(OS_NAME).catch(() => null);
+          serviceId = await deps.reseller.order({ clientId, planId: cfg.planId, osId, hostname });
+        }
+        rec.serviceId = serviceId;
+        rec.stage = "provisioning";
+        rec.provisionStartedAt = now();
+        rec.progress = "Payment confirmed. Starting your server…";
+        // The buyer paid for one month; Fren's balance shouldn't renew it silently.
+        await deps.reseller.setAutorenew(serviceId, false).catch((e) => console.error("autorenew", e.message));
+      } catch (err) {
+        console.error("order", err.message);
+        rec.orderingAt = null;
+        rec.orderErrors = (rec.orderErrors ?? 0) + 1;
+        if (rec.orderErrors >= ORDER_TRIES) {
+          rec.stage = "failed";
+          rec.retryable = false;
+          rec.error = "We got your payment, but the server host didn't accept the order." + supportLine();
+          rec.detail = err.message;
+        }
+        await save(rec);
+        return;
+      }
+      await save(rec);
+      return;
+    }
+
+    // provisioning
+    const svc = await deps.reseller.service(rec.serviceId);
+    if ((svc.status === "active" || svc.status === "running") && svc.host) {
+      const password = svc.password ?? (await deps.reseller.resetPassword(rec.serviceId));
+      if (!password) throw new Error("EQVPS didn't give a root password for the new server.");
+      rec.host = svc.host;
+      rec.port = svc.port || 22;
+      rec.password = password;
+      rec.stage = "installing";
+      rec.progress = "Server is up. Installing Fren…";
+      rec.installStartedAt = now();
+      await save(rec);
+      await deps.triggerInstall(rec.id);
+      return;
+    }
+    if (now() - rec.provisionStartedAt > SERVER_BOOT_TIMEOUT_MS) {
+      rec.stage = "failed";
+      rec.retryable = false;
+      rec.error = "Your payment arrived, but the server is taking far longer than usual to start." + supportLine();
+      rec.detail = `server ${rec.serviceId} status: ${svc.status || "unknown"}`;
+    }
+    await save(rec);
+  }
+
+  function supportLine() {
+    return contact ? ` Write to ${contact} and include this page's link; we'll sort it out.` : " Keep this page's link: it shows your order and payment.";
+  }
+
+  /**
+   * An install went wrong. The server is paid for: retry once on our own, then
+   * offer a button. Never a second order.
    */
   async function fail(rec, why, detail) {
     rec.attempts = rec.attempts ?? 0;
-    if (rec.attempts < AUTO_RETRIES && rec.privateKey && rec.host) return restart(rec);
+    if (rec.attempts < AUTO_RETRIES && rec.password && rec.host) return restart(rec);
     rec.stage = "failed";
-    rec.retryable = Boolean(rec.privateKey && rec.host);
+    rec.retryable = Boolean(rec.password && rec.host);
     rec.error = rec.retryable
-      ? `${why} Your server is paid for and nothing is lost. Press "Try again".` +
-        (CONTACT ? ` If it keeps failing, write to ${CONTACT} and include this page's link.` : "")
-      : `${why} Your server is paid for.` +
-        (CONTACT ? ` Write to ${CONTACT} and include this page's link; we'll finish it.` : " Keep this page's link: it shows your order.");
+      ? `${why} Your server is paid for and nothing is lost. Press "Try again".` + (contact ? ` If it keeps failing, write to ${contact} and include this page's link.` : "")
+      : `${why} Your server is paid for.` + supportLine();
     rec.detail = detail;
     await save(rec);
   }
 
-  /** Run the install again on the same server. */
   async function restart(rec) {
     rec.attempts = (rec.attempts ?? 0) + 1;
     rec.stage = "installing";
@@ -168,7 +259,6 @@ export function createWizard(deps) {
     return rec;
   }
 
-  /** The "Try the install again" button. */
   async function retry(id) {
     const rec = await load(id);
     if (rec.stage !== "failed" || !rec.retryable) throw new UserError("There's nothing to retry for this setup.");
@@ -176,19 +266,13 @@ export function createWizard(deps) {
     return view(rec);
   }
 
-  async function findService(rec) {
-    const list = await deps.eqvps.services(rec.eqvpsToken);
-    if (rec.serviceId) return list.find((s) => s.id === rec.serviceId) ?? { id: rec.serviceId };
-    const fresh = list.filter((s) => !rec.knownServiceIds?.includes(s.id));
-    return fresh.sort((a, b) => b.id - a.id)[0] ?? null;
-  }
-
   /**
    * The background function's job: SSH in, run the installer, keep the newest
-   * progress line, and finish with the setup link. `ssh` runs one command.
-   * @param {(o: { host: string, port: number, privateKey: string, command: string, onLine(l: string): void }) => Promise<{ code: number, output: string }>} ssh
+   * progress line, and finish with the setup link.
+   * @param {(o: { host: string, port: number, password: string, command: string, onLine(l: string): void }) => Promise<{ code: number, output: string }>} ssh
+   * @param {string} command  the install command to run on the server
    */
-  async function install(id, ssh, installUrl) {
+  async function install(id, ssh, command) {
     const rec = await load(id);
     if (rec.stage !== "installing" || rec.installClaimed) return;
     rec.installClaimed = true;
@@ -203,13 +287,7 @@ export function createWizard(deps) {
       }
     };
     try {
-      const r = await ssh({
-        host: rec.host,
-        port: rec.port,
-        privateKey: rec.privateKey,
-        command: `curl -fsSL ${installUrl} | bash -s -- --server --web --drop-key ${KEY_TAG}`,
-        onLine,
-      });
+      const r = await ssh({ host: rec.host, port: rec.port, password: rec.password, command, onLine });
       const url = r.output.match(/FREN_SETUP_URL=(https:\/\/\S+)/)?.[1];
       if (r.code === 0 && url) {
         rec.stage = "ready";
@@ -223,19 +301,13 @@ export function createWizard(deps) {
       await fail(rec, "We couldn't reach your server.", err.message);
       return;
     }
-    forget(rec); // only after success: until then a retry needs both
+    delete rec.password; // the installer locked root's password; we never need it again
     await save(rec);
   }
 
-  /** Secrets we only needed to get here. */
-  function forget(rec) {
-    delete rec.privateKey;
-    delete rec.eqvpsToken;
-  }
-
   async function load(id) {
-    const rec = typeof id === "string" && id.length >= 20 ? await deps.store.get(id) : null;
-    if (!rec) throw new UserError("We couldn't find that setup. Start again from the VPS page.");
+    const rec = typeof id === "string" && id.length >= 20 && /^[\w-]+$/.test(id) ? await deps.store.get(id) : null;
+    if (!rec) throw new UserError("We couldn't find that setup. Start again from the VPS page.", 404);
     return rec;
   }
 
@@ -244,16 +316,37 @@ export function createWizard(deps) {
     await deps.store.set(rec.id, rec);
   }
 
-  return { plans, start, code, status, install, retry };
+  /** What the page sees: never passwords. */
+  function view(rec) {
+    const v = { id: rec.id, stage: rec.stage, now: now() };
+    if (rec.network) {
+      v.network = rec.network;
+      v.networkLabel = NETWORKS[rec.network].label;
+      v.token = NETWORKS[rec.network].token;
+    }
+    if (rec.units && (rec.stage === "awaiting_payment" || rec.stage === "expired")) {
+      v.amount = fromUnits(rec.units);
+      v.address = rec.address;
+      v.walletUri = walletUri(rec.network, rec.address, rec.units);
+      v.expiresAt = rec.expiresAt;
+    }
+    if (rec.paidTx) {
+      v.paidTx = rec.paidTx;
+      v.paidTxUrl = NETWORKS[rec.network].explorer(rec.paidTx);
+      v.paidAmount = fromUnits(rec.paidUnits);
+    }
+    for (const k of ["progress", "setupUrl", "error", "detail", "retryable"]) if (rec[k] !== undefined) v[k] = rec[k];
+    if (rec.stage === "failed" && contact) v.contact = contact;
+    return v;
+  }
+
+  return { plans, start, status, submitTx, install, retry, view };
 }
 
-/** What the page sees: never tokens or keys. */
-export function view(rec) {
-  const v = { id: rec.id, stage: rec.stage, plan: rec.plan };
-  for (const k of ["checkoutUrl", "amountUsd", "progress", "setupUrl", "error", "detail", "retryable"]) if (rec[k] !== undefined) v[k] = rec[k];
-  if (rec.stage === "failed" && CONTACT) v.contact = CONTACT;
-  return v;
-}
+const amountKey = (network, units) => `amt-${network}-${units}`;
+
+/** A hostname EQVPS accepts, unique per order. */
+export const hostnameFor = (rec) => "fren-" + rec.id.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12);
 
 function friendly(step) {
   if (/basics/i.test(step)) return "Preparing the server…";

@@ -1,5 +1,6 @@
 import { handle, wizard } from "./lib/runtime.mjs";
 
-export default async () => handle(async () => ({ plans: await wizard().plans() }));
+// Price and payment networks, and whether the wizard is open (all settings present).
+export default async () => handle(() => wizard().plans());
 
 export const config = { path: "/api/vps/plans" };
