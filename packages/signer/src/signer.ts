@@ -1,7 +1,7 @@
 import { Connection, Keypair, VersionedTransaction } from "@solana/web3.js";
 import { privateKeyToAccount } from "viem/accounts";
 import { signL1Action, signUserSignedAction, type Signature } from "@nktkas/hyperliquid/signing";
-import { ApproveAgentTypes, Withdraw3Types } from "@nktkas/hyperliquid/api/exchange";
+import { ApproveAgentTypes, SendAssetTypes, Withdraw3Types } from "@nktkas/hyperliquid/api/exchange";
 import { depositToHyperliquid } from "./arbitrum.js";
 import { sendEvmTransaction, type EvmTxRequest } from "./evm.js";
 import {
@@ -61,6 +61,12 @@ export interface SignerApi {
    * only chooses the amount. Returns the signed action for the engine to post.
    */
   hlWithdrawToSelf(req: { amountUsd: number; isTestnet: boolean }): Promise<HlApproveAgentResult>;
+  /**
+   * Move USDC inside the wallet's own Hyperliquid account, from the main perp
+   * dex to a builder (HIP-3) dex such as "xyz". Sender and receiver are both
+   * the wallet; the engine only picks the dex and the amount.
+   */
+  hlMoveToDex(req: { dex: string; amountUsd: number; isTestnet: boolean }): Promise<HlApproveAgentResult>;
   /** Send an EVM transaction to an allow-listed contract (Relay swaps and their approvals). Carries ETH only into a Relay swap selling ETH, keeping the gas reserve. */
   evmSendTransaction(req: EvmTxRequest): Promise<{ txHash: `0x${string}` }>;
   /** Sign a Derive option order with the session key. The signer builds the action; it can only be a trade. */
@@ -95,6 +101,9 @@ export const HL_AGENT_NAME = "fren";
 
 /** Hyperliquid charges 1 USDC per withdrawal; anything at or under it would arrive as nothing. */
 export const HL_WITHDRAW_FEE_USD = 1;
+/** USDC's token id on Hyperliquid, as sendAsset names it. */
+export const HL_USDC_MAINNET = "USDC:0x6d1e7cde53ba9467b783cb7c530ce054";
+export const HL_USDC_TESTNET = "USDC:0xeb62eee3685fc4c43992febcd9e75443";
 
 /** Arbitrum One and Arbitrum Sepolia chain ids, matching the daemon's `evmRpcsById`. */
 const ARBITRUM_CHAIN_ID = { mainnet: 42161, testnet: 421614 } as const;
@@ -178,6 +187,27 @@ export function createSigner(keys: KeyMaterial, options: SignerOptions = {}): Si
         time: nonce,
       };
       const signature = await signUserSignedAction({ wallet: master, action, types: Withdraw3Types });
+      return { action, signature, nonce };
+    },
+
+    async hlMoveToDex({ dex, amountUsd, isTestnet }) {
+      if (!/^[a-z0-9]{1,16}$/.test(dex)) throw new SignerRuleError(`"${dex}" is not a Hyperliquid builder dex name.`);
+      if (!(Number.isFinite(amountUsd) && amountUsd > 0 && amountUsd <= 1_000_000)) throw new SignerRuleError("Bad amount to move on Hyperliquid.");
+      const nonce = Date.now();
+      // The wallet sends to itself: the destination is not a parameter.
+      const action = {
+        type: "sendAsset",
+        signatureChainId: (isTestnet ? "0x66eee" : "0xa4b1") as `0x${string}`,
+        hyperliquidChain: isTestnet ? "Testnet" : "Mainnet",
+        destination: master.address.toLowerCase(),
+        sourceDex: "",
+        destinationDex: dex,
+        token: isTestnet ? HL_USDC_TESTNET : HL_USDC_MAINNET,
+        amount: String(Math.floor(amountUsd * 1e6) / 1e6),
+        fromSubAccount: "",
+        nonce,
+      };
+      const signature = await signUserSignedAction({ wallet: master, action, types: SendAssetTypes });
       return { action, signature, nonce };
     },
 

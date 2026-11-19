@@ -100,7 +100,33 @@ export interface HyperliquidVenueOptions {
   signer: SignerApi | null;
   /** Which builder dexes to load, cache lifetimes, 429 backoff. */
   markets?: HyperliquidMarketsOptions;
+  /** USDC on the wallet's own Arbitrum address, the source for automatic deposits. */
+  arbitrumUsdc?: () => Promise<number>;
+  /** USDC on the wallet's Solana address, named when Hyperliquid can't be funded from Arbitrum. */
+  solanaUsdc?: () => Promise<number>;
+  sleep?: (ms: number) => Promise<void>;
+  /** How long to wait for a deposit to show up on Hyperliquid. Default 5 minutes. */
+  depositWaitMs?: number;
 }
+
+/** Hyperliquid's smallest deposit from Arbitrum; less is lost. */
+export const HL_MIN_DEPOSIT = 5;
+
+/** How a live perp's margin gets onto the right Hyperliquid dex before the order. */
+export interface PerpFunding {
+  /** Margin plus a little for fees. */
+  needUsd: number;
+  /** Already free on the market's dex. */
+  freeUsd: number;
+  /** Moved from the main dex to a builder dex (HIP-3 markets such as xyz:ANT). */
+  fromMainUsd: number;
+  /** Deposited from the Arbitrum wallet. */
+  depositUsd: number;
+  /** Still missing after both; non-zero means the trade can't be paid for. */
+  shortUsd: number;
+}
+
+const roundUpCents = (n: number) => Math.ceil(n * 100 - 1e-9) / 100;
 
 export class HyperliquidVenue implements VenueAdapter {
   readonly venue = "hyperliquid" as const;
@@ -133,7 +159,7 @@ export class HyperliquidVenue implements VenueAdapter {
       return { index, step: canonical, symbol: m.name, spendUsd: 0, notionalUsd: 0 };
     }
     const margin = leg.sizing.type === "margin" ? leg.sizing.usd : leg.sizing.usd / leg.leverage;
-    return {
+    const base: ResolvedStep = {
       index,
       step: canonical,
       symbol: m.name,
@@ -141,6 +167,85 @@ export class HyperliquidVenue implements VenueAdapter {
       notionalUsd: margin * leg.leverage,
       venueMaxLeverage: m.maxLeverage,
     };
+    if (this.o.store.getLimits().mode !== "live" || !this.o.signer) return base;
+    if (step.when.length) {
+      return { ...base, notes: ["When it triggers, Fren first moves the USDC it needs into Hyperliquid from your Arbitrum wallet."], mustConfirm: true };
+    }
+    const f = await this.fundingPlan(m, margin, leg.leverage);
+    if (f.shortUsd > 0) throw new VenueError(await this.shortMessage(m, f));
+    const notes = this.fundingNotes(m, f);
+    return notes.length ? { ...base, notes, movesUsd: f.depositUsd + f.fromMainUsd, mustConfirm: true } : base;
+  }
+
+  /** Work out where this trade's margin comes from, without moving anything. */
+  async fundingPlan(m: PerpMarket, margin: number, leverage: number): Promise<PerpFunding> {
+    // Margin, the taker fee both ways and a small cushion so the order isn't refused by cents.
+    const needUsd = roundUpCents(margin + margin * leverage * 0.001 + 0.25);
+    const freeUsd = Number((await this.clearinghouse(m.dex)).withdrawable) || 0;
+    let short = Math.max(0, needUsd - freeUsd);
+    let fromMainUsd = 0;
+    if (short > 0 && m.dex) {
+      const main = Number((await this.clearinghouse("")).withdrawable) || 0;
+      fromMainUsd = roundUpCents(Math.min(short, Math.max(0, main)));
+      short = Math.max(0, short - fromMainUsd);
+    }
+    let depositUsd = 0;
+    if (short > 0) {
+      const arb = this.o.arbitrumUsdc ? await this.o.arbitrumUsdc().catch(() => 0) : 0;
+      const want = Math.max(HL_MIN_DEPOSIT, roundUpCents(short));
+      if (want <= arb + 1e-9) {
+        depositUsd = want;
+        short = 0;
+        if (m.dex) fromMainUsd = roundUpCents(fromMainUsd + Math.min(want, needUsd - freeUsd - fromMainUsd));
+      }
+    }
+    return { needUsd, freeUsd, fromMainUsd, depositUsd, shortUsd: roundUpCents(short) };
+  }
+
+  private fundingNotes(m: PerpMarket, f: PerpFunding): string[] {
+    const notes: string[] = [];
+    if (f.depositUsd > 0) notes.push(`To pay for it, Fren first moves ${fmtUsd(f.depositUsd)} USDC from your Arbitrum wallet into your Hyperliquid account (it takes about a minute).`);
+    if (f.fromMainUsd > 0) notes.push(`${m.name} trades on Hyperliquid's ${m.dex} market, so Fren moves ${fmtUsd(f.fromMainUsd)} USDC there inside your Hyperliquid account.`);
+    return notes;
+  }
+
+  private async shortMessage(m: PerpMarket, f: PerpFunding): Promise<string> {
+    const arb = this.o.arbitrumUsdc ? await this.o.arbitrumUsdc().catch(() => 0) : 0;
+    const sol = this.o.solanaUsdc ? await this.o.solanaUsdc().catch(() => 0) : 0;
+    const where = [`${fmtUsd(f.freeUsd)} free for ${m.name} on Hyperliquid`, `${fmtUsd(arb)} USDC on Arbitrum`, ...(sol > 0 ? [`${fmtUsd(sol)} USDC on Solana`] : [])];
+    return `This needs about ${fmtUsd(f.needUsd)} of USDC on Hyperliquid and there isn't enough to move there: you have ${where.join(", ")}. Fren deposits from Arbitrum, at least ${fmtUsd(HL_MIN_DEPOSIT)} at a time.`;
+  }
+
+  /** Move the margin into place, then wait until Hyperliquid shows it. */
+  private async fund(m: PerpMarket, margin: number, leverage: number): Promise<string[]> {
+    const f = await this.fundingPlan(m, margin, leverage);
+    if (f.shortUsd > 0) throw new VenueError(await this.shortMessage(m, f));
+    const done: string[] = [];
+    if (f.depositUsd > 0) {
+      const before = Number((await this.clearinghouse("")).withdrawable) || 0;
+      const { txHash } = await this.signer().hlDepositFromArbitrum({ amountUsd: f.depositUsd, isTestnet: this.o.isTestnet });
+      const link = `${this.o.isTestnet ? "https://sepolia.arbiscan.io/tx/" : "https://arbiscan.io/tx/"}${txHash}`;
+      const sleep = this.o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+      const deadline = Date.now() + (this.o.depositWaitMs ?? 5 * 60_000);
+      for (;;) {
+        const now = Number((await this.clearinghouse("").catch(() => ({ withdrawable: "0" }) as ClearinghouseState)).withdrawable) || 0;
+        if (now >= before + f.depositUsd - 0.01) break;
+        if (Date.now() > deadline) {
+          throw new VenueError(`Sent ${fmtUsd(f.depositUsd)} USDC to Hyperliquid (${link}), but it hasn't arrived yet, so nothing was opened. Try the trade again in a few minutes.`);
+        }
+        await sleep(5_000);
+      }
+      done.push(`✅ Moved ${fmtUsd(f.depositUsd)} USDC from Arbitrum into Hyperliquid · ${link}`);
+    }
+    if (f.fromMainUsd > 0) {
+      const { action, signature, nonce } = await this.signer().hlMoveToDex({ dex: m.dex, amountUsd: f.fromMainUsd, isTestnet: this.o.isTestnet });
+      const res = await postJson<OrderResponse>(this.o.fetchFn, `${this.o.apiUrl}/exchange`, { action, nonce, signature });
+      if (res.status !== "ok") {
+        throw new VenueError(`Hyperliquid refused to move USDC to its ${m.dex} market: ${typeof res.response === "string" ? res.response : JSON.stringify(res.response)}. Nothing was opened.`);
+      }
+      done.push(`✅ Moved ${fmtUsd(f.fromMainUsd)} USDC to Hyperliquid's ${m.dex} market`);
+    }
+    return done;
   }
 
   async execute(r: ResolvedStep, ctx: ExecContext): Promise<ExecResult> {
@@ -258,8 +363,10 @@ export class HyperliquidVenue implements VenueAdapter {
   }
 
   private async liveOpen(leg: PerpOpenLeg, ctx: ExecContext): Promise<ExecResult> {
-    await this.ensureAgent();
     const m = await this.market(leg.market);
+    const margin = leg.sizing.type === "margin" ? leg.sizing.usd : leg.sizing.usd / leg.leverage;
+    const moved = await this.fund(m, margin, leg.leverage);
+    await this.ensureAgent();
     await this.send(
       canonicalize(UpdateLeverageRequest.entries.action, {
         type: "updateLeverage",
@@ -286,7 +393,7 @@ export class HyperliquidVenue implements VenueAdapter {
       mode: "live",
       ref: String(fill.oid),
     });
-    return { text: `✅ ${describeFill(leg.side, m.name, size, px, plan)}` };
+    return { text: [...moved, `✅ ${describeFill(leg.side, m.name, size, px, plan)}`].join("\n") };
   }
 
   private async clearinghouse(dex: string): Promise<ClearinghouseState> {

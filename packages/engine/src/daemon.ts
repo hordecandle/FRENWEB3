@@ -41,7 +41,17 @@ export function ownerLines(config: FrenConfig, fetchFn: Fetch, exec?: Exec): Own
 
 export function buildFren({ config, store, signer, fetchFn = fetch, exec }: BuildOptions): Fren {
   const isTestnet = config.network === "testnet";
-  const hyperliquid = new HyperliquidVenue({ fetchFn, apiUrl: hyperliquidApiUrl(config), isTestnet, store, signer, markets: { dexes: config.hyperliquidDexes } });
+  const hyperliquid = new HyperliquidVenue({
+    fetchFn,
+    apiUrl: hyperliquidApiUrl(config),
+    isTestnet,
+    store,
+    signer,
+    markets: { dexes: config.hyperliquidDexes },
+    // Read lazily: relay and jupiter are built just below.
+    arbitrumUsdc: async () => (await relay.usdcBalances()).arbitrum ?? 0,
+    solanaUsdc: async () => (await jupiter.usdcBalance()) ?? 0,
+  });
   const jupiter = new JupiterVenue({
     fetchFn,
     apiUrl: jupiterApiUrl(config),

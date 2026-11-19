@@ -20,6 +20,7 @@ export const SIGNER_METHODS: readonly SignerMethod[] = [
   "solSignTransaction",
   "hlDepositFromArbitrum",
   "hlWithdrawToSelf",
+  "hlMoveToDex",
   "evmSendTransaction",
   "deriveSignOrder",
   "deriveAuthHeaders",

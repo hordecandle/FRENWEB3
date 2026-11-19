@@ -31,6 +31,8 @@ export interface ResolvedStep {
   venueMaxLeverage?: number;
   /** False when a token could not be matched to a verified list. */
   verifiedToken?: boolean;
+  /** The venue moves the owner's money between their own accounts first: always ask for the code. */
+  mustConfirm?: boolean;
   /** Facts the venue wants the owner to see before approving (e.g. a coin is 3 minutes old). Shown as warnings. */
   notes?: string[];
 }
@@ -133,6 +135,7 @@ export function evaluatePolicy(
     if (limits.autoApproveUsd <= 0) needsConfirm = true;
     if (r.spendUsd > limits.autoApproveUsd) needsConfirm = true;
     if ((r.movesUsd ?? 0) > limits.autoApproveUsd) needsConfirm = true;
+    if (r.mustConfirm) needsConfirm = true;
     if (leg.kind === "swap" && leg.side === "sell" && ((r.sellUsd === undefined && limits.mode === "live") || (r.sellUsd ?? 0) > limits.autoApproveUsd)) needsConfirm = true;
 
     const verdict: Verdict = reasons.length > 0 ? "reject" : needsConfirm ? "confirm" : "execute";
