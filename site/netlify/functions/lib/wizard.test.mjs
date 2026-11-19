@@ -69,9 +69,16 @@ function fakeReseller() {
       const svc = s.services.find((x) => x.id === Number(sv[1]));
       if (!svc) return json(404, { message: "no such service" });
       if (sv[2] === "/autorenew") return (svc.autorenew = body.enabled), json(200, {});
-      if (sv[2] === "/password") return json(200, { password: "reset-pw" });
+      if (sv[2] === "/password") {
+        if (s.resetBusy > 0) return s.resetBusy--, json(429, { error: "too often", retry_after_s: 30 });
+        return (svc.pw = "reset-pw"), (svc.hidden = false), json(200, { data: { status: "queued" } });
+      }
       if (sv[2] === "/reinstall") return (svc.reinstalledWith = body.os_id), json(200, { data: { status: "reinstalling" } });
-      return json(200, { data: svc.status === "active" ? { status: "active", ip: "1.2.3.4", hostname: svc.hostname, password: "root-pw" } : { status: svc.status } });
+      // EQVPS shows the root password once ("password_revealed"), then hides it.
+      if (svc.status !== "active") return json(200, { data: { status: svc.status } });
+      const password = svc.hidden ? undefined : (svc.pw ?? "root-pw");
+      if (s.revealOnce) svc.hidden = true;
+      return json(200, { data: { status: "active", hostname: svc.hostname, access: { host: "1.2.3.4", port: 22, ...(password ? { password } : {}) } } });
     }
     return json(404, { message: "nope" });
   };
@@ -342,7 +349,7 @@ describe("VPS wizard", () => {
     expect(await wizard.status(id)).toMatchObject({ stage: "failed", retryable: true });
   });
 
-  it("reinstalls the same server on request, waits for it, and installs with a fresh password", async () => {
+  it("reinstalls the same server on request, waits for it, then installs again", async () => {
     const { wizard, db, rs, triggered, tick, id } = await installing();
     await expect(wizard.reinstall(id)).rejects.toThrow(/no finished server/);
     await wizard.install(id, OK("old"), "u");
@@ -355,11 +362,30 @@ describe("VPS wizard", () => {
     expect(triggered).toEqual([id]);
     tick(4 * 60_000);
     expect((await wizard.status(id)).stage).toBe("installing");
-    expect(db.get(id).password).toBe("reset-pw");
     expect(triggered).toEqual([id, id]);
     await wizard.install(id, OK("new"), "u");
     expect(await wizard.status(id)).toMatchObject({ stage: "ready", setupUrl: expect.stringContaining("t=new") });
     expect(rs.calls.filter((c) => c === "POST /orders")).toHaveLength(1);
+  });
+
+  it("when EQVPS already showed the password once, resets it without hammering, and waits out a busy answer", async () => {
+    const { wizard, db, rs, tick, id } = await installing();
+    await wizard.install(id, OK("old"), "u");
+    await wizard.reinstall(id);
+    rs.revealOnce = true;
+    rs.services[0].hidden = true;
+    rs.resetBusy = 1;
+    tick(4 * 60_000);
+    expect((await wizard.status(id)).stage).toBe("provisioning"); // reset refused (429): no error, keep waiting
+    tick(10_000);
+    expect((await wizard.status(id)).stage).toBe("provisioning"); // too soon to ask again
+    expect(rs.calls.filter((c) => c.endsWith("/password"))).toHaveLength(1);
+    tick(90_000);
+    expect((await wizard.status(id)).stage).toBe("provisioning"); // reset accepted, password shows on the next read
+    tick(10_000);
+    expect((await wizard.status(id)).stage).toBe("installing");
+    expect(db.get(id).password).toBe("reset-pw");
+    expect(rs.calls.filter((c) => c.endsWith("/password"))).toHaveLength(2);
   });
 
   it("rejects bad input and unknown ids", async () => {

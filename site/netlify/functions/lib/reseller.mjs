@@ -93,7 +93,7 @@ export function resellerClient({ token, base = "https://b2b.eqvps.com/api/resell
     /** A fresh root password, for when the first one was already revealed. */
     async resetPassword(id) {
       const j = await call("POST", `/services/${id}/password`);
-      return j.password ?? j.root_password ?? null;
+      return j.password ?? j.root_password ?? j.new_password ?? j.access?.password ?? null;
     },
 
     /** Wipes the server and installs this OS. { password } when EQVPS returns the new one. */

@@ -207,9 +207,25 @@ export function createWizard(deps) {
     if (rec.bootAfter && now() < rec.bootAfter) return;
     const svc = await deps.reseller.service(rec.serviceId);
     if ((svc.status === "active" || svc.status === "running") && svc.host) {
-      // After a reinstall the stored password may be the old one, so ask for a fresh one.
-      const password = rec.password ?? (rec.bootAfter ? null : svc.password) ?? (await deps.reseller.resetPassword(rec.serviceId));
-      if (!password) throw new Error("EQVPS didn't give a root password for the new server.");
+      // EQVPS shows the root password only once. If it's gone, ask for a new
+      // one, at most every 90 s (EQVPS refuses resets closer together), and
+      // read it on a later poll if the reset's answer didn't include it.
+      let password = rec.password ?? svc.password;
+      if (!password) {
+        if (!rec.resetAt || now() - rec.resetAt > 90_000) {
+          rec.resetAt = now();
+          await save(rec);
+          password = await deps.reseller.resetPassword(rec.serviceId).catch((e) => (console.error("reset password", e.message), null));
+        }
+        if (!password && now() - rec.provisionStartedAt <= SERVER_BOOT_TIMEOUT_MS) return save(rec);
+        if (!password) {
+          rec.stage = "failed";
+          rec.retryable = false;
+          rec.error = "Your server is up, but its host never gave us the login to install Fren." + supportLine();
+          rec.detail = `server ${rec.serviceId}: no root password from EQVPS`;
+          return save(rec);
+        }
+      }
       rec.host = svc.host;
       rec.port = svc.port || 22;
       rec.password = password;
