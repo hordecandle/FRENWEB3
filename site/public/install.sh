@@ -26,6 +26,11 @@
 #                  server's first root password, then nobody can).
 #   --bot-broker URL  With --web: Fren's bot broker, so the setup page can make
 #                  the owner's Telegram bot in one tap. Env: FREN_BOT_BROKER
+#   --update-src URL  With --server: where this server downloads newer Fren
+#                  versions when the owner sends /fren_update (kept root-only).
+#   --update       With --server: update the code of an installed Fren in place.
+#                  Wallets, settings and chat stay. The new version is built
+#                  beside the old one, and the old one comes back if it won't start.
 set -euo pipefail
 
 # Everything lives in main() so bash reads the whole script before running any
@@ -41,6 +46,8 @@ WEB=0
 DROP_KEY=""
 LOCK_ROOT=0
 BOT_BROKER="${FREN_BOT_BROKER:-}"
+UPDATE=0
+UPDATE_SRC=""
 NODE_MIN="24.16.0"
 OPENCLAW_MIN="2026.10.5"
 SERVICE_USER="fren"
@@ -58,6 +65,8 @@ while [[ $# -gt 0 ]]; do
     --drop-key) DROP_KEY="${2:?--drop-key needs a value}"; shift ;;
     --lock-root) LOCK_ROOT=1 ;;
     --bot-broker) BOT_BROKER="${2:?--bot-broker needs a value}"; shift ;;
+    --update) UPDATE=1; SETUP=0 ;;
+    --update-src) UPDATE_SRC="${2:?--update-src needs a value}"; shift ;;
     --ref) FREN_REF="${2:?--ref needs a value}"; shift ;;
     --repo) FREN_REPO="${2:?--repo needs a value}"; shift ;;
     --dir) FREN_APP_DIR="${2:?--dir needs a value}"; shift ;;
@@ -99,6 +108,8 @@ bold ""
 [[ $WEB -eq 1 && $SERVER -eq 0 ]] && die "--web goes with --server."
 [[ $LOCK_ROOT -eq 1 && $SERVER -eq 0 ]] && die "--lock-root goes with --server."
 [[ -n "$BOT_BROKER" && ! "$BOT_BROKER" =~ ^https://[A-Za-z0-9./:_-]+$ ]] && die "--bot-broker needs an https:// URL."
+[[ $UPDATE -eq 1 && $SERVER -eq 0 ]] && die "--update goes with --server."
+[[ -n "$UPDATE_SRC" && ! "$UPDATE_SRC" =~ ^https://[A-Za-z0-9./:_?=\&%-]+$ ]] && die "--update-src needs a plain https:// URL."
 if [[ $SERVER -eq 1 ]]; then
   [[ $OS == linux ]] || die "--server is for a Linux VPS."
   [[ $EUID -eq 0 ]] || die "--server needs root (run it as root on the VPS)."
@@ -286,6 +297,15 @@ if [[ -z "$FREN_APP_DIR" ]]; then
   if [[ $SERVER -eq 1 ]]; then FREN_APP_DIR="$SERVICE_HOME/.fren-app"; else FREN_APP_DIR="$HOME/.fren-app"; fi
 fi
 
+# --update builds the new version beside the running one; the swap comes after.
+FREN_APP_FINAL="$FREN_APP_DIR"
+if [[ $UPDATE -eq 1 ]]; then
+  [[ -n "$FREN_TARBALL" ]] || die "--update needs --tarball."
+  [[ -f "$FREN_APP_FINAL/packages/engine/dist/cli.js" ]] || die "Fren isn't installed in $FREN_APP_FINAL, so there's nothing to update."
+  FREN_APP_DIR="$FREN_APP_FINAL.new"
+  rm -rf "$FREN_APP_DIR"
+fi
+
 if [[ -z "$FREN_TARBALL" ]] && ! git_ok; then
   [[ "$FREN_REPO" =~ ^https://github\.com/([^/]+/[^/.]+)(\.git)?$ ]] \
     || die "No git here and $FREN_REPO isn't on GitHub. Install git (on a Mac: xcode-select --install) and run this again."
@@ -323,6 +343,15 @@ step "Building Fren (a couple of minutes)"
   as_fren npm run --silent build
 ) || die "The build failed. Scroll up for the error, or ask for help with it."
 echo "✓ Built"
+
+if [[ $UPDATE -eq 1 ]]; then
+  step "Switching to the new version"
+  systemctl stop fren-openclaw.service fren.service 2>/dev/null || true
+  rm -rf "$FREN_APP_FINAL.old"
+  mv "$FREN_APP_FINAL" "$FREN_APP_FINAL.old"
+  mv "$FREN_APP_DIR" "$FREN_APP_FINAL"
+  FREN_APP_DIR="$FREN_APP_FINAL"
+fi
 
 FREN_CLI="$FREN_APP_DIR/packages/engine/dist/cli.js"
 NODE_BIN="$(command -v node)"
@@ -550,10 +579,91 @@ lock_root() {
   echo "✓ Locked root's password and turned off SSH password logins"
 }
 
+# /fren_update: the engine drops a request file in its own folder; this root
+# path unit sees it and runs the update with the URL kept in /etc/fren/update.env.
+install_updater() {
+  local engine_dir=/var/lib/fren-engine/.fren
+  if [[ -n "$UPDATE_SRC" ]]; then
+    install -d -m 755 /etc/fren
+    umask 077
+    printf 'FREN_UPDATE_SRC=%s\nFREN_INSTALL_URL=%s\n' "'$UPDATE_SRC'" "'${UPDATE_SRC%%/api/*}/install.sh'" >/etc/fren/update.env
+    umask 022
+  fi
+  [[ -f /etc/fren/update.env ]] || return 0
+  cat >/usr/local/sbin/fren-update <<'SCRIPT'
+#!/bin/sh
+# Run by fren-update.service (root) when the owner sends /fren_update.
+dir=/var/lib/fren-engine/.fren
+rm -f "$dir/update-request"
+. /etc/fren/update.env
+log=/var/log/fren-update.log
+if curl -fsSL --max-time 120 "$FREN_INSTALL_URL" | bash -s -- --server --update --tarball "$FREN_UPDATE_SRC" >"$log" 2>&1; then
+  status=ok
+  detail=""
+else
+  status=failed
+  detail="$(grep -E '^(x|!) ' "$log" | tail -1 | cut -c3-200)"
+fi
+printf '%s\n%s\n' "$status" "$detail" >"$dir/update-result"
+chown fren-engine:fren-engine "$dir/update-result" 2>/dev/null
+chmod 600 "$dir/update-result"
+SCRIPT
+  chmod 755 /usr/local/sbin/fren-update
+  cat >/etc/systemd/system/fren-update.path <<UNIT
+[Unit]
+Description=Watch for /fren_update requests
+
+[Path]
+PathExists=$engine_dir/update-request
+Unit=fren-update.service
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  cat >/etc/systemd/system/fren-update.service <<UNIT
+[Unit]
+Description=Update Fren in place (wallets and settings stay)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/fren-update
+TimeoutStartSec=30min
+UNIT
+  systemctl daemon-reload
+  systemctl enable --now fren-update.path >/dev/null 2>&1 || true
+  touch /etc/fren/update.enabled
+  chmod 644 /etc/fren/update.enabled
+}
+
+# --update: start the new version; if it won't run, put the old one back.
+finish_update() {
+  write_server_units
+  install_updater
+  # The agent's instructions come with the code: refresh them too (safe to repeat).
+  "$FREN_BIN" persona >/dev/null 2>&1 || warn "Couldn't refresh Fren's chat instructions; the old ones stay."
+  systemctl restart fren.service fren-openclaw.service
+  sleep 15
+  if systemctl is-active --quiet fren.service && systemctl is-active --quiet fren-openclaw.service; then
+    rm -rf "$FREN_APP_FINAL.old"
+    bold "✓ Fren is updated. Wallets and settings are as they were."
+    exit 0
+  fi
+  warn "The new version didn't start. Putting the old one back."
+  systemctl stop fren-openclaw.service fren.service 2>/dev/null || true
+  rm -rf "$FREN_APP_FINAL.failed"
+  mv "$FREN_APP_FINAL" "$FREN_APP_FINAL.failed"
+  mv "$FREN_APP_FINAL.old" "$FREN_APP_FINAL"
+  systemctl restart fren.service fren-openclaw.service
+  die "The new version didn't start, so Fren is back on the version it had."
+}
+
 # --- Guided setup ------------------------------------------------------------
+
+[[ $UPDATE -eq 1 ]] && finish_update
 
 if [[ $SETUP -eq 0 ]]; then
   [[ $SERVER -eq 1 ]] && write_server_units
+  [[ $SERVER -eq 1 ]] && install_updater
   drop_installer_key
   lock_root
   bold ""
@@ -563,6 +673,7 @@ fi
 
 if [[ $WEB -eq 1 ]]; then
   web_setup
+  install_updater
   drop_installer_key
   lock_root
   exit 0
@@ -581,6 +692,7 @@ if [[ $SERVER -eq 1 ]]; then
   write_server_units
   # The engine and its keys move to their own user; the AI agent can't read them.
   "$NODE_BIN" "$FREN_CLI" isolate --agent-user "$SERVICE_USER" --service || die "Couldn't lock Fren's keys away from the AI agent. Fren wasn't started."
+  install_updater
   systemctl enable fren-openclaw.service >/dev/null 2>&1
   systemctl restart fren-openclaw.service
   sleep 3

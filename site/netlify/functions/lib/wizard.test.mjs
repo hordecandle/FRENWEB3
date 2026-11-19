@@ -323,6 +323,17 @@ describe("VPS wizard", () => {
     await expect(other.wizard.mayDownload("x".repeat(32))).rejects.toThrow(/couldn't find/);
   });
 
+  it("after the install, hands out newer code only with that server's update key", async () => {
+    const { wizard, db, id } = await installing();
+    const key = "k".repeat(32);
+    await wizard.install(id, OK(), "u", key);
+    expect(db.get(id).updateKeyHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(db.get(id))).not.toContain(key);
+    expect(await wizard.mayDownload(id, key)).toBe(true);
+    expect(await wizard.mayDownload(id, "x".repeat(32))).toBe(false);
+    expect(await wizard.mayDownload(id)).toBe(false);
+  });
+
   it("a broken install retries once by itself, then offers a button, on the same server", async () => {
     const { wizard, db, rs, triggered, id } = await installing();
     await wizard.install(id, BAD, "u");

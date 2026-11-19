@@ -1,6 +1,6 @@
-// Fren's source code for a new server, while its install runs. The repo is
-// private, so the Netlify build packs it (see netlify.toml) and this hands it
-// out only for an order whose install is in progress.
+// Fren's source code for a server: while its install runs, and later for
+// /fren_update with the update key that server got at install. The repo is
+// private, so the Netlify build packs it (see netlify.toml).
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { json, wizard } from "./lib/runtime.mjs";
@@ -17,9 +17,9 @@ async function tarball() {
 }
 
 export default async (req) => {
-  const id = new URL(req.url).searchParams.get("id");
+  const q = new URL(req.url).searchParams;
   const ok = await wizard()
-    .mayDownload(id)
+    .mayDownload(q.get("id"), q.get("key") ?? undefined)
     .catch(() => false);
   if (!ok) return json(404, { error: "not found" });
   const body = await tarball();

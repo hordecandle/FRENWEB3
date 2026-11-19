@@ -284,6 +284,14 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
   }
 
   api.registerCommand({
+    name: "fren_update",
+    description: "Update Fren to the latest version. Wallets and settings stay; Fren is offline for a few minutes.",
+    requireAuth: true,
+    exposeSenderIsOwner: true,
+    handler: (ctx) => guard(isOwner(ctx), async () => (await client.call<{ text: string }>("POST", "/update")).text),
+  });
+
+  api.registerCommand({
     name: "close_all",
     description: "Close every leveraged position at market (live: needs the code Fren sends you). Also works while paused.",
     requireAuth: true,
