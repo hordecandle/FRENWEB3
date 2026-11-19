@@ -113,6 +113,14 @@ export class Dashboard {
     };
   }
 
+  /** When the OpenClaw gateway last said it started (via the Fren plugin). */
+  private chatUpAt: number | null = null;
+
+  /** The gateway is up and has loaded Fren, so the bot answers. */
+  chatUp(): void {
+    this.chatUpAt = Date.now();
+  }
+
   server(): Server {
     return createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -126,6 +134,9 @@ export class Dashboard {
       };
 
       try {
+        // Public on purpose: the setup page polls it after "Start Fren" to say
+        // "live" only once the bot can answer. It reveals one boolean.
+        if (req.method === "GET" && url.pathname === "/ready") return json(200, { ready: this.chatUpAt !== null });
         if (req.method === "GET" && url.pathname === "/login") {
           const t = url.searchParams.get("t") ?? "";
           if (!this.takeLink(t)) return html(403, LOGIN_PAGE("That link has expired or was already used. Send /fren_dashboard to your bot for a new one."));

@@ -40,6 +40,11 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     "POST /deposit/hyperliquid": async (b) => ({ text: await fren.depositToHyperliquid(Number(b.amountUsd)) }),
     "POST /bets/quote": async (b) => fren.quoteBet(betQuery(b), String(b.request ?? "")),
     /** /fren_dashboard: a one-time login link, sent to the owner privately when there's a line. */
+    /** The Fren plugin calls this when the OpenClaw gateway starts: the chat line is up. */
+    "POST /gateway/up": async () => {
+      opts.dashboard?.chatUp();
+      return { ok: true };
+    },
     "POST /dashboard/link": async () =>
       opts.dashboard ? opts.dashboard.sendLink() : { text: "The dashboard isn't set up on this machine. It comes with the VPS install (install.sh --server --web)." },
     "POST /fund": async (b) => {

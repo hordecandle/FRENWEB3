@@ -42,6 +42,15 @@ describe("owner dashboard", () => {
     expect(r.link).toMatch(/^https:\/\/1-2-3-4\.sslip\.io\/login\?t=/);
   });
 
+  it("says ready, without a session, only once the chat gateway has started", async () => {
+    const { dash, get } = await start();
+    expect(await (await get("/ready")).json()).toEqual({ ready: false });
+    dash.chatUp();
+    const r = await get("/ready");
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ ready: true });
+  });
+
   it("shows nothing without a session", async () => {
     const { get } = await start();
     const page = await get("/");
