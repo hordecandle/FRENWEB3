@@ -45,7 +45,7 @@ describe("OpenClaw plugin against a real engine", () => {
 
   it("registers every declared tool and the owner commands", () => {
     expect([...reg.tools.keys()].sort()).toEqual([...TOOL_NAMES].sort());
-    expect([...reg.commands.keys()].sort()).toEqual(["close_all", "fren_code", "fren_stop", "limits", "ok", "positions", "resume", "stop", "wallet"]);
+    expect([...reg.commands.keys()].sort()).toEqual(["close_all", "fren_code", "fren_dashboard", "fren_stop", "limits", "ok", "positions", "resume", "stop", "wallet"]);
   });
 
   it("hides trading tools from people who aren't the owner", () => {

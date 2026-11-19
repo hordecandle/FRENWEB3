@@ -314,6 +314,18 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
   });
 
   api.registerCommand({
+    name: "fren_dashboard",
+    description: "Get a private one-time login link to your Fren web dashboard.",
+    requireAuth: true,
+    exposeSenderIsOwner: true,
+    handler: (ctx) =>
+      guard(isOwner(ctx), async () => {
+        const r = await client.call<{ text: string; link?: string }>("POST", "/dashboard/link");
+        return r.link ? `${r.text}\n${r.link}` : r.text;
+      }),
+  });
+
+  api.registerCommand({
     name: "positions",
     description: "Fren positions and watched conditions.",
     requireAuth: true,

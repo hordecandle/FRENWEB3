@@ -430,6 +430,10 @@ web_setup() {
   fi
   install -d -m 700 /etc/fren
   printf '{\n\tadmin off\n}\n%s {\n\treverse_proxy 127.0.0.1:7421\n}\n' "$host" >/etc/fren/Caddyfile
+  # After setup the same address serves the owner's dashboard (login link from /fren_dashboard).
+  printf '{\n\tadmin off\n}\n%s {\n\treverse_proxy 127.0.0.1:7422\n}\n' "$host" >/etc/fren/Caddyfile.dashboard
+  printf 'https://%s\n' "$host" >/etc/fren-dashboard.url
+  chmod 644 /etc/fren-dashboard.url
   printf 'FREN_SETUP_TOKEN=%s\n' "$token" >/etc/fren/setup.env
   [[ -n "$BOT_BROKER" ]] && printf 'FREN_BOT_BROKER=%s\n' "$BOT_BROKER" >>/etc/fren/setup.env
   chmod 600 /etc/fren/setup.env
@@ -437,7 +441,7 @@ web_setup() {
 
   cat >/etc/systemd/system/fren-setup-caddy.service <<UNIT
 [Unit]
-Description=HTTPS for the Fren setup page
+Description=HTTPS for the Fren setup page, then the dashboard
 After=network-online.target
 Wants=network-online.target
 
@@ -484,7 +488,7 @@ Description=Start Fren and close the setup page
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'sleep 3; systemctl disable --now fren-setup.service fren-setup-caddy.service fren-setup-done.path; rm -f /etc/fren/setup.env; $NODE_BIN $FREN_CLI isolate --agent-user $SERVICE_USER --service || exit 1; systemctl enable fren-openclaw.service; systemctl restart fren-openclaw.service'
+ExecStart=/bin/sh -c 'sleep 3; systemctl disable --now fren-setup.service fren-setup-done.path; rm -f /etc/fren/setup.env; cp /etc/fren/Caddyfile.dashboard /etc/fren/Caddyfile; systemctl restart fren-setup-caddy.service; $NODE_BIN $FREN_CLI isolate --agent-user $SERVICE_USER --service || exit 1; systemctl enable fren-openclaw.service; systemctl restart fren-openclaw.service'
 UNIT
   write_server_units
   systemctl enable --now fren-setup-done.path fren-setup.service fren-setup-caddy.service >/dev/null 2>&1

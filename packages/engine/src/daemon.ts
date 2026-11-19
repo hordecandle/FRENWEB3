@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { isolatedMarker } from "./setup.js";
 import { SignerProcess, type SignerApi } from "@fren/signer";
 import { createApi } from "./api.js";
+import { Dashboard } from "./dashboard.js";
 import { Connection } from "@solana/web3.js";
 import { deriveApiUrl, hyperliquidApiUrl, jupiterApiUrl, jupiterLendApiUrl, frenPaths, loadConfig, relayApiUrl, type FrenConfig, type FrenPaths } from "./config.js";
 import { Fren } from "./engine.js";
@@ -127,7 +128,16 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
       return config.agentGuard;
     }
   });
-  const server = createApi(fren, token, budget);
+  // The web dashboard runs where the installer put an HTTPS address in front of it (VPS).
+  const dashUrl = dashboardUrl();
+  const dashboard = dashUrl ? new Dashboard(fren, { publicUrl: dashUrl }) : null;
+  const dashServer = dashboard?.server() ?? null;
+  if (dashServer) {
+    const port = Number(process.env.FREN_DASHBOARD_PORT ?? 7422);
+    await new Promise<void>((res) => dashServer.listen(port, "127.0.0.1", res));
+    console.log(`dashboard on http://127.0.0.1:${port}, public at ${dashUrl}`);
+  }
+  const server = createApi(fren, token, budget, { dashboard });
   await new Promise<void>((res) => server.listen(config.api.port, config.api.host, res));
 
   const timer = setInterval(() => {
@@ -146,6 +156,7 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
     clearInterval(timer);
     clearInterval(snipeTimer);
     server.close();
+    dashServer?.close();
     signer?.close();
     store.close();
     process.exit(0);
@@ -153,6 +164,12 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
   return { fren, server, stop: shutdown };
+}
+
+/** FREN_DASHBOARD_URL, or the address install.sh wrote for this server. Null = no dashboard. */
+export function dashboardUrl(file = "/etc/fren-dashboard.url"): string | null {
+  const v = (process.env.FREN_DASHBOARD_URL ?? (existsSync(file) ? readFileSync(file, "utf8") : "")).trim();
+  return /^https:\/\/[\w.-]+(:\d+)?\/?$/.test(v) ? v : null;
 }
 
 /** Config ETH amounts to wei, without float drift past 9 decimals. */
