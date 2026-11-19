@@ -366,6 +366,26 @@ export function registerLoopGuard(api: Pick<OpenClawPluginApi, "on">, guard: Loo
   api.on("agent_end", async (_event, ctx) => guard.endRun(ctx));
 }
 
+/**
+ * Tells the engine the gateway is up, so the setup page says "live" only when
+ * the bot can answer. The engine may still be starting, so try for a minute.
+ */
+export function registerReadySignal(api: Pick<OpenClawPluginApi, "on">, client: Pick<EngineClient, "call">, waitMs = 5000, tries = 12) {
+  if (typeof api.on !== "function") return;
+  api.on("gateway_start", async () => {
+    void (async () => {
+      for (let i = 0; i < tries; i++) {
+        try {
+          await client.call("POST", "/gateway/up");
+          return;
+        } catch {
+          await new Promise((r) => setTimeout(r, waitMs));
+        }
+      }
+    })();
+  });
+}
+
 export default definePluginEntry({
   id: "fren",
   name: "Fren",
@@ -381,6 +401,7 @@ export default definePluginEntry({
     if (mode !== "cli-metadata" && mode !== "setup-only" && mode !== "tool-discovery") {
       registerCommands(api, client);
       registerLoopGuard(api, new LoopGuard(client));
+      registerReadySignal(api, client);
     }
   },
 });

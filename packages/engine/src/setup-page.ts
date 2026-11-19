@@ -343,11 +343,12 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
 </main>
 
 <section class="final hidden" id="final">
-  <h1>Your Fren is <span class="plq">live.</span></h1>
+  <h1 id="final-h">Starting your Fren<span class="plq">…</span></h1>
+  <p class="lead" id="final-wait">Your bot comes online in a minute or two. This page switches to the Telegram button as soon as it can answer you.</p>
   <p class="lead hidden" id="final-text"></p>
   <div class="handle" id="final-handle"><span class="av"><svg viewBox="0 0 116 80"><use href="#mark"/></svg></span><b id="final-bot">@your_bot</b></div>
   <div class="actions"><a class="btn btn--xl" id="final-open" target="_blank" rel="noopener"><svg class="ic"><use href="#i-tg"/></svg><span id="final-open-text">Open in Telegram</span></a></div>
-  <div class="say">
+  <div class="say" id="final-say">
     <h3>Say gm. Then try:</h3>
     <div class="tries"><span>what's my wallet</span><span>long BTC 5x with $20</span><span>stop everything</span></div>
   </div>
@@ -590,6 +591,30 @@ function showFinal() {
   }
   $("final").classList.remove("hidden");
   scrollTo(0, 0);
+  waitUntilLive();
+}
+// After "Start Fren" this page's server shuts down and the dashboard takes the
+// address. Its /ready turns true once the chat gateway has started with Fren.
+const READY_GIVE_UP_MS = 8 * 60_000;
+async function waitUntilLive() {
+  const parts = ["final-handle", "final-open", "final-say", "final-text"].map($).filter((el) => el && !el.classList.contains("hidden"));
+  parts.forEach((el) => el.classList.add("hidden"));
+  const started = Date.now();
+  for (;;) {
+    let ready = false;
+    try {
+      const r = await fetch("/ready", { cache: "no-store" });
+      ready = r.ok && (await r.json()).ready === true;
+    } catch {}
+    if (ready || Date.now() - started > READY_GIVE_UP_MS) {
+      $("final-h").innerHTML = 'Your Fren is <span class="plq">live.</span>';
+      $("final-wait").textContent = ready ? "" : "It's taking longer than usual to come online. Say gm in a few minutes; if it stays quiet, use the link to your order page to get help.";
+      $("final-wait").classList.toggle("hidden", ready);
+      parts.forEach((el) => el.classList.remove("hidden"));
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
 }
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
 load().catch((e) => { screen("model"); modelErr(e.message); });
