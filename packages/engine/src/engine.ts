@@ -722,25 +722,33 @@ It shows up as pUSD in your Polymarket wallet ${to}.`;
     const signer = this.d.signer;
     if (!signer) return { text: "No wallets yet. Run `fren init` on the machine Fren runs on.", addresses: null };
     const a = await signer.addresses();
-    const [usdc, hl, evm] = await Promise.all([
+    const [usdc, sol, hl, evm, eth] = await Promise.all([
       this.d.jupiter.usdcBalance().catch(() => null),
+      this.d.jupiter.solBalance().catch(() => null),
       this.d.hyperliquid.accountValueUsd().catch(() => null),
       this.d.relay.usdcBalances().catch(() => ({}) as Record<string, number>),
+      this.d.relay.ethBalances().catch(() => ({}) as Record<string, number>),
     ]);
     const evmUsdc = Object.entries(evm)
       .map(([c, v]) => `${fmtUsd(v)} on ${chainName[c] ?? c}`)
       .join(", ");
+    // Native coins too: someone who sent SOL or ETH must see it, not "$0".
+    const ethHeld = Object.entries(eth)
+      .filter(([, v]) => v > 0)
+      .map(([c, v]) => `${fmtCoin(v)} ETH on ${chainName[c] ?? c}`)
+      .join(", ");
+    const solLine = sol !== null ? ` SOL: ${fmtCoin(sol)}.` : "";
     const net = this.d.isTestnet ? " (testnet)" : "";
     const text = [
       "Your Fren wallets. Only this machine holds the keys.",
       "",
       `Solana: ${a.solana}`,
-      `  Send USDC (SPL) here for spot trades, plus about 0.05 SOL for fees.${usdc !== null ? ` Balance: ${fmtUsd(usdc)} USDC.` : ""}`,
+      `  Send USDC (SPL) here for spot trades, plus about 0.05 SOL for fees.${usdc !== null ? ` Balance: ${fmtUsd(usdc)} USDC.` : ""}${solLine}`,
       "",
       `EVM / Hyperliquid${net}: ${a.evm}`,
       `  Send USDC on Arbitrum here plus a little ETH for gas, then say "deposit $X to Hyperliquid". Or send USDC straight to this address on Hyperliquid.${hl !== null ? ` Hyperliquid account value: ${fmtUsd(hl)}.` : ""}`,
       "",
-      `  The same address holds tokens on Base and Robinhood Chain. Buys there are paid from USDC on Arbitrum or Base, so keep about $1 of ETH for gas on whichever you fund.${evmUsdc ? ` USDC: ${evmUsdc}.` : ""}`,
+      `  The same address holds tokens on Base and Robinhood Chain. Buys there are paid from USDC on Arbitrum or Base, so keep about $1 of ETH for gas on whichever you fund.${evmUsdc ? ` USDC: ${evmUsdc}.` : ""}${ethHeld ? ` ETH: ${ethHeld}.` : ""}`,
       "",
       `Trading key on Hyperliquid: ${a.hlAgent} (can trade, cannot withdraw).`,
       "",
@@ -841,4 +849,10 @@ function changedFields(from: Limits, to: Limits): Partial<Limits> {
     if (JSON.stringify(from[k]) !== JSON.stringify(to[k])) out[k] = to[k];
   }
   return out as Partial<Limits>;
+}
+
+/** A coin amount: up to 4 decimals for normal sizes, more for dust. */
+function fmtCoin(v: number): string {
+  if (v === 0) return "0";
+  return String(Number(v >= 0.01 ? v.toFixed(4) : v.toPrecision(2)));
 }
