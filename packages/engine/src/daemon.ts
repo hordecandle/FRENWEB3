@@ -11,9 +11,9 @@ import { GatewayLine, OwnerNotifier, TelegramLine, type Exec, type OwnerLine } f
 import { Store } from "./store.js";
 import { AgentBudget } from "./guard.js";
 import { HyperliquidVenue } from "./venues/hyperliquid.js";
-import { JupiterVenue } from "./venues/jupiter.js";
+import { JupiterVenue, USDC_MINT } from "./venues/jupiter.js";
 import { OnlinePumpFun } from "./venues/pumpfun.js";
-import { RelayVenue } from "./venues/relay.js";
+import { RELAY_SOLANA_CHAIN_ID, RelayVenue } from "./venues/relay.js";
 import { SolanaToArbitrum } from "./venues/cctp.js";
 import { DeriveVenue } from "./venues/derive.js";
 import { PolymarketVenue } from "./venues/polymarket.js";
@@ -42,6 +42,20 @@ export function ownerLines(config: FrenConfig, fetchFn: Fetch, exec?: Exec): Own
 
 export function buildFren({ config, store, signer, fetchFn = fetch, exec }: BuildOptions): Fren {
   const isTestnet = config.network === "testnet";
+  // Money moves between the wallet's own Solana and EVM addresses. Circle's
+  // bridge (Solana to Arbitrum) and Relay to Solana run on mainnet only.
+  // The venues are read lazily: they are built just below.
+  const bridges = signer && !isTestnet;
+  const solanaBridge: SolanaToArbitrum | null = bridges
+    ? new SolanaToArbitrum({
+        fetchFn,
+        kv: store,
+        sendSolana: (ixs, extra, maxSol) => jupiter.sendWithSigners(ixs, extra, maxSol),
+        solanaOwner: () => jupiter.walletKey(),
+        evmOwner: async () => (await signer.addresses()).evm,
+        sendArbitrum: (to, data) => relay.sendTx("arbitrum", to, data),
+      })
+    : null;
   const hyperliquid = new HyperliquidVenue({
     fetchFn,
     apiUrl: hyperliquidApiUrl(config),
@@ -52,21 +66,9 @@ export function buildFren({ config, store, signer, fetchFn = fetch, exec }: Buil
     // Read lazily: relay and jupiter are built just below.
     arbitrumUsdc: async () => (await relay.usdcBalances()).arbitrum ?? 0,
     solanaUsdc: async () => (await jupiter.usdcBalance()) ?? 0,
-    // Circle's bridge runs on mainnet only.
-    ...(signer && !isTestnet
-      ? {
-          solanaBridge: new SolanaToArbitrum({
-            fetchFn,
-            kv: store,
-            sendSolana: (ixs, extra, maxSol) => jupiter.sendWithSigners(ixs, extra, maxSol),
-            solanaOwner: () => jupiter.walletKey(),
-            evmOwner: async () => (await signer.addresses()).evm,
-            sendArbitrum: (to, data) => relay.sendTx("arbitrum", to, data),
-          }),
-        }
-      : {}),
+    ...(solanaBridge ? { solanaBridge } : {}),
   });
-  const jupiter = new JupiterVenue({
+  const jupiter: JupiterVenue = new JupiterVenue({
     fetchFn,
     apiUrl: jupiterApiUrl(config),
     ...(config.jupiterApiKey ? { apiKey: config.jupiterApiKey } : {}),
@@ -75,8 +77,15 @@ export function buildFren({ config, store, signer, fetchFn = fetch, exec }: Buil
     signer,
     pumpFun: new OnlinePumpFun(new Connection(config.solanaRpcUrl, { commitment: "confirmed", fetch: fetchFn })),
     snipeTipLamports: config.snipeTipLamports,
+    evmUsdc: () => relay.usdcBalances(),
+    ...(bridges
+      ? {
+          bridgeIn: async (usd: number) =>
+            relay.bridgeUsdc({ toChainId: RELAY_SOLANA_CHAIN_ID, toCurrency: USDC_MINT, recipient: (await signer.addresses()).solana, usd, where: "your Solana wallet" }),
+        }
+      : {}),
   });
-  const relay = new RelayVenue({
+  const relay: RelayVenue = new RelayVenue({
     fetchFn,
     apiUrl: relayApiUrl(config),
     ...(config.relayApiKey ? { apiKey: config.relayApiKey } : {}),
@@ -85,6 +94,8 @@ export function buildFren({ config, store, signer, fetchFn = fetch, exec }: Buil
     signer,
     rpcUrls: config.evmRpcUrls,
     gasReserveWei: ethToWei(config.evmGasReserveEth),
+    solanaUsdc: async () => (await jupiter.usdcBalance()) ?? 0,
+    ...(solanaBridge ? { solanaBridge } : {}),
   });
   const lending: YieldProtocolAdapter[] = [
     new JupiterLendUsdc({ fetchFn, apiUrl: jupiterLendApiUrl(config), ...(config.jupiterApiKey ? { apiKey: config.jupiterApiKey } : {}), solana: jupiter }),

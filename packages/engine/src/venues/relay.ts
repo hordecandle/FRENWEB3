@@ -48,6 +48,9 @@ const FUNDING_CHAINS: EvmChain[] = ["arbitrum", "base"];
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
+/** Relay's chain id for Solana, for bridging USDC to the wallet's Solana address. */
+export const RELAY_SOLANA_CHAIN_ID = 792703809;
+
 /** Native ETH as Relay names it. */
 export const NATIVE_ETH = "0x0000000000000000000000000000000000000000" as const;
 /** What a plan may call native ETH: the ticker, Relay's zero address, or the common 0xEeee… placeholder. */
@@ -121,7 +124,24 @@ export interface RelayVenueOptions {
   fillTimeoutMs?: number;
   /** Injected for tests; defaults to an eth_call through viem. */
   evmRead?: (chain: EvmChain, call: { address: `0x${string}`; data: `0x${string}` }) => Promise<`0x${string}`>;
+  /** The wallet's USDC on Solana, so a buy can be paid from there when the EVM wallets are short. */
+  solanaUsdc?: () => Promise<number>;
+  /** Circle's bridge from the wallet's own Solana address to its own Arbitrum address. */
+  solanaBridge?: { bridge(usd: number): Promise<string[]>; finishPending(): Promise<string[]> };
 }
+
+/** How a buy is paid: which chain and coin the Relay quote starts from. */
+interface EvmPayment {
+  origin: EvmChain;
+  currency: `0x${string}`;
+  amountRaw: bigint;
+  /** ETH (wei) the transactions may send: the ETH paid, or nothing. */
+  valueWei: bigint;
+  /** What Fren did or chose to pay for it, for the owner. */
+  lines: string[];
+}
+
+const roundUpCents = (n: number) => Math.ceil(n * 100 - 1e-9) / 100;
 
 /** A paper holding key that can't collide with a Solana mint. */
 const paperKey = (chain: EvmChain, address: string) => `evm:${chain}:${address.toLowerCase()}`;
@@ -505,6 +525,58 @@ export class RelayVenue implements SpotVenueAdapter {
     throw new VenueError(`Not enough USDC: this needs ${fmtUsd(Number(need) / 1e6)} on one chain and you have ${balances.join(", ")}.`);
   }
 
+  /**
+   * Pay for a buy from wherever the money is: USDC on the token's chain,
+   * Arbitrum or Base; else the wallet's ETH on Arbitrum or Base (keeping the gas
+   * reserve); else Circle's bridge brings the missing USDC over from Solana.
+   * Every move stays between the owner's own addresses.
+   */
+  private async payFor(owner: `0x${string}`, target: EvmChain, buying: `0x${string}`, need: bigint): Promise<EvmPayment> {
+    const usd = Number(need) / 1e6;
+    const usdcChains = [target, ...FUNDING_CHAINS.filter((c) => c !== target)].filter((c) => this.chain(c).usdc);
+    const usdc = new Map<EvmChain, bigint>();
+    for (const c of usdcChains) {
+      const bal = await this.balanceOf(c, this.chain(c).usdc!, owner).catch(() => 0n);
+      usdc.set(c, bal);
+      if (bal >= need) return { origin: c, currency: this.chain(c).usdc!, amountRaw: need, valueWei: 0n, lines: [] };
+    }
+
+    const keep = (this.o.gasReserveWei ?? DEFAULT_GAS_RESERVE_WEI) + NATIVE_SELL_GAS_ALLOWANCE_WEI;
+    // Buying ETH itself can't be paid in ETH.
+    const ethChains = buying === NATIVE_ETH ? [] : [target, ...NATIVE_SELL_CHAINS.filter((c) => c !== target)].filter((c) => NATIVE_SELL_CHAINS.includes(c));
+    let ethUsd = 0;
+    for (const c of ethChains) {
+      const bal = await this.balanceOf(c, NATIVE_ETH, owner).catch(() => 0n);
+      if (bal <= keep) continue;
+      const px = await this.price({ chain: c, address: NATIVE_ETH, symbol: "ETH", name: "Ether", decimals: 18, verified: true });
+      if (!px) continue;
+      ethUsd += (Number(bal - keep) / 1e18) * px;
+      const wei = BigInt(Math.ceil((usd / px) * 1e9)) * 1_000_000_000n;
+      if (bal - keep >= wei) {
+        return { origin: c, currency: NATIVE_ETH, amountRaw: wei, valueWei: wei, lines: [`↪ Paid with ${fmtEth(wei)} ETH on ${chainName[c]}, since your USDC was short.`] };
+      }
+    }
+
+    const arb = usdc.get("arbitrum") ?? 0n;
+    const gap = roundUpCents(Number(need - arb) / 1e6);
+    const sol = this.o.solanaUsdc ? await this.o.solanaUsdc().catch(() => 0) : 0;
+    if (this.o.solanaBridge && this.chain("arbitrum").usdc && sol >= gap) {
+      const lines = [...(await this.o.solanaBridge.finishPending().catch(() => [] as string[]))];
+      const now = await this.balanceOf("arbitrum", this.chain("arbitrum").usdc!, owner).catch(() => arb);
+      if (now < need) lines.push(...(await this.o.solanaBridge.bridge(roundUpCents(Number(need - now) / 1e6))));
+      const after = await this.balanceOf("arbitrum", this.chain("arbitrum").usdc!, owner).catch(() => 0n);
+      if (after < need) {
+        throw new VenueError(`${lines.join("\n")}\nThe USDC from Solana hasn't reached Arbitrum yet, so nothing was bought. Ask again in a minute.`);
+      }
+      return { origin: "arbitrum", currency: this.chain("arbitrum").usdc!, amountRaw: need, valueWei: 0n, lines };
+    }
+
+    const parts = [...usdc].map(([c, b]) => `${fmtUsd(Number(b) / 1e6)} USDC on ${chainName[c]}`);
+    if (ethUsd > 0) parts.push(`about ${fmtUsd(ethUsd)} of spare ETH`);
+    if (this.o.solanaUsdc) parts.push(`${fmtUsd(sol)} USDC on Solana`);
+    throw new VenueError(`This buy needs ${fmtUsd(usd)}, and no wallet has enough: ${parts.join(", ")}.`);
+  }
+
   private async liveSwap(leg: SwapLeg, t: EvmToken, ctx: ExecContext): Promise<ExecResult> {
     const owner = await this.owner();
     const where = chainName[t.chain];
@@ -512,26 +584,33 @@ export class RelayVenue implements SpotVenueAdapter {
     let origin: EvmChain;
     let qty: number;
     let usd: number;
-    /** Wei this trade may send: the ETH sold, or nothing. */
+    /** Wei this trade may send: the ETH sold or paid, or nothing. */
     let nativeSale = 0n;
+    let paid: string[] = [];
 
     if (leg.side === "buy") {
       if (leg.amount.type === "tokens") throw new VenueError('Say how much USDC to spend on a buy: amount {type:"usd"}.');
-      const need =
-        leg.amount.type === "usd"
-          ? BigInt(Math.floor(leg.amount.usd * 1e6))
-          : (((await this.balanceOf("arbitrum", this.chain("arbitrum").usdc!, owner)) * BigInt(Math.floor(leg.amount.fraction * 1e6))) / 1_000_000n);
-      origin = await this.fundingChain(owner, t.chain, need);
+      let pay: EvmPayment;
+      if (leg.amount.type === "usd") {
+        pay = await this.payFor(owner, t.chain, t.address, BigInt(Math.floor(leg.amount.usd * 1e6)));
+      } else {
+        const need = ((await this.balanceOf("arbitrum", this.chain("arbitrum").usdc!, owner)) * BigInt(Math.floor(leg.amount.fraction * 1e6))) / 1_000_000n;
+        const c = await this.fundingChain(owner, t.chain, need);
+        pay = { origin: c, currency: this.chain(c).usdc!, amountRaw: need, valueWei: 0n, lines: [] };
+      }
+      origin = pay.origin;
+      nativeSale = pay.valueWei;
+      paid = pay.lines;
       quote = await this.quote({
         user: owner,
-        from: { chain: origin, currency: this.chain(origin).usdc! },
+        from: { chain: origin, currency: pay.currency },
         to: { chain: t.chain, currency: t.address },
-        amountRaw: need,
+        amountRaw: pay.amountRaw,
         slippageBps: leg.maxSlippageBps,
         // No USDC on Robinhood Chain to swap for gas later, so bring some ETH along.
         topupGas: !this.chain(t.chain).usdc,
       });
-      usd = Number(need) / 1e6;
+      usd = leg.amount.type === "usd" ? leg.amount.usd : Number(pay.amountRaw) / 1e6;
       qty = Number(quote.details?.currencyOut?.amount ?? "0") / 10 ** t.decimals;
     } else {
       const native = t.address === NATIVE_ETH;
@@ -601,7 +680,7 @@ export class RelayVenue implements SpotVenueAdapter {
     const verb = leg.side === "buy" ? "Bought" : "Sold";
     const link = lastHash ? ` · ${this.chain(origin).explorer}${lastHash}` : "";
     const px = qty > 0 ? ` at ${fmtPrice(usd / qty)}` : "";
-    return { text: `✅ ${verb} ${fmtQty(qty)} ${t.symbol} on ${where} for ${fmtUsd(usd)}${px}${link}` };
+    return { text: [...paid, `✅ ${verb} ${fmtQty(qty)} ${t.symbol} on ${where} for ${fmtUsd(usd)}${px}${link}`].join("\n") };
   }
 
   /**
@@ -622,14 +701,14 @@ export class RelayVenue implements SpotVenueAdapter {
         if (!d.to || !d.data || !d.chainId) throw new VenueError("Relay returned a transaction without a target.");
         if (d.from && d.from.toLowerCase() !== owner.toLowerCase()) throw new VenueError("Relay returned a transaction for a different wallet.");
         if (d.chainId !== this.chain(origin).id) throw new VenueError("Relay returned a transaction for an unexpected chain.");
-        // ETH only leaves on an ETH sale, and never more than the amount sold (summed over every step).
+        // ETH only leaves when this trade sells or pays with ETH, and never more than that amount (summed over every step).
         const value = weiValue(d.value);
         valueSent += value;
         if (valueSent > maxValueWei) {
           throw new VenueError(
             maxValueWei === 0n
-              ? "Relay asked to send ETH with a trade that doesn't sell ETH. Nothing was sent."
-              : `Relay asked to send ${fmtEth(valueSent)} ETH for a sale of ${fmtEth(maxValueWei)} ETH. Nothing more was sent.`,
+              ? "Relay asked to send ETH with a trade that doesn't use ETH. Nothing was sent."
+              : `Relay asked to send ${fmtEth(valueSent)} ETH for a trade of ${fmtEth(maxValueWei)} ETH. Nothing more was sent.`,
           );
         }
         const { txHash } = await this.signer().evmSendTransaction({
@@ -654,7 +733,7 @@ export class RelayVenue implements SpotVenueAdapter {
         (err: unknown) => (err instanceof HttpError && err.status === 404 ? { status: "waiting" } : { status: "unknown" }),
       );
       if (s.status === "success") return;
-      if (s.status === "refund") throw new VenueError("Relay couldn't fill it and refunded the USDC.");
+      if (s.status === "refund") throw new VenueError("Relay couldn't fill it and refunded the money to your wallet.");
       if (s.status === "failure") throw new VenueError(`Relay reported the swap failed (request ${requestId}).`);
       if (Date.now() > deadline) throw new VenueError(`Relay hasn't confirmed the fill yet (request ${requestId}). Check /positions in a minute.`);
       await new Promise((r) => setTimeout(r, 2_000));

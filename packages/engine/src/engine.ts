@@ -769,14 +769,15 @@ It shows up as pUSD in your Polymarket wallet ${to}.`;
     const net = this.d.isTestnet ? " (testnet)" : "";
     const text = [
       "Your Fren wallets. Only this machine holds the keys.",
+      "Fund either one: any trade is paid from whichever wallet has the money, and Fren moves it between your own wallets itself.",
       "",
       `Solana: ${a.solana}`,
-      `  Send USDC (SPL) here for spot trades, plus about 0.05 SOL for fees.${usdc !== null ? ` Balance: ${fmtUsd(usdc)} USDC.` : ""}${solLine}`,
+      `  USDC or SOL, plus about 0.05 SOL for fees.${usdc !== null ? ` Balance: ${fmtUsd(usdc)} USDC.` : ""}${solLine}`,
       "",
       `EVM / Hyperliquid${net}: ${a.evm}`,
-      `  Send USDC on Arbitrum here plus a little ETH for gas, then say "deposit $X to Hyperliquid". Or send USDC straight to this address on Hyperliquid.${hl !== null ? ` Hyperliquid account value: ${fmtUsd(hl)}.` : ""}`,
+      `  USDC or ETH on Arbitrum or Base, plus about $1 of ETH for gas. A long or short moves the USDC into Hyperliquid by itself.${hl !== null ? ` Hyperliquid account value: ${fmtUsd(hl)}.` : ""}`,
       "",
-      `  The same address holds tokens on Base and Robinhood Chain. Buys there are paid from USDC on Arbitrum or Base, so keep about $1 of ETH for gas on whichever you fund.${evmUsdc ? ` USDC: ${evmUsdc}.` : ""}${ethHeld ? ` ETH: ${ethHeld}.` : ""}`,
+      `  The same address holds tokens on Base and Robinhood Chain.${evmUsdc ? ` USDC: ${evmUsdc}.` : ""}${ethHeld ? ` ETH: ${ethHeld}.` : ""}`,
       "",
       `Trading key on Hyperliquid: ${a.hlAgent} (can trade, cannot withdraw).`,
       "",
