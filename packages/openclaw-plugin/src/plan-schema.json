@@ -176,7 +176,7 @@
                   },
                   "chain": {
                     "default": "solana",
-                    "description": "Chain the token lives on. \"solana\" with jupiter; \"base\", \"robinhood\" or \"arbitrum\" with relay.",
+                    "description": "Chain the token lives on. \"solana\" with jupiter; \"base\", \"robinhood\" or \"arbitrum\" with relay. Leave it out for a 0x address when the owner did not name the chain: Fren finds it.",
                     "type": "string",
                     "enum": [
                       "solana",

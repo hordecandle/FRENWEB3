@@ -34,10 +34,10 @@ describe("tokens on Base and Robinhood Chain", () => {
   it("buys and sells a Base token by contract address in paper mode", async () => {
     const t = buildTestFren();
     const res = await t.fren.submit(swap({ venue: "relay", chain: "base", token: BASE_DOG }));
-    // Unverified CA: the owner confirms first.
-    expect(res.verdict).toBe("needs_code");
-    expect(res.text).toMatch(/Buy \$50.00 of DOG on Base/);
-    const out = await t.fren.approve(codeFrom(t.notifier.sent));
+    // Unverified CA at $50, the auto-approve level: a warning, no code.
+    expect(res.verdict).toBe("executed");
+    expect(res.text).toMatch(/not on a verified token list/);
+    const out = res.text;
     expect(out).toMatch(/Paper: Bought 5,000 DOG on Base for \$50.00/);
 
     const status = await t.fren.status();
@@ -59,11 +59,41 @@ describe("tokens on Base and Robinhood Chain", () => {
     expect(dog.text).toMatch(/unverified tokens on Base use the ticker DOG. Send me the contract address/);
   });
 
-  it("refuses a plan that sends a Base token to Jupiter", async () => {
+  it("still refuses a Base ticker sent to Jupiter", async () => {
     const t = buildTestFren();
-    const res = await t.fren.submit(swap({ venue: "jupiter", chain: "base", token: BASE_DOG }));
+    const res = await t.fren.submit(swap({ venue: "jupiter", chain: "base", token: "DOG" }));
     expect(res.verdict).toBe("invalid");
     expect(res.text).toMatch(/jupiter only trades Solana tokens/);
+  });
+
+  it("a 0x contract sent to Jupiter trades on its own chain instead", async () => {
+    const t = buildTestFren();
+    const res = await t.fren.submit(swap({ venue: "jupiter", chain: "base", token: BASE_DOG }));
+    expect(res.text).toMatch(/Paper: Bought 5,000 DOG on Base for \$50.00/);
+  });
+
+  it("a 0x contract with no chain: Fren finds the chain itself", async () => {
+    const t = buildTestFren();
+    const frog = await t.fren.submit(swap({ venue: "relay", token: RH_FROG }));
+    expect(frog.verdict).toBe("executed");
+    expect(frog.text).toMatch(/Bought .* FROG on Robinhood Chain/);
+    const dog = await t.fren.submit(swap({ venue: "jupiter", token: BASE_DOG }));
+    expect(dog.text).toMatch(/Bought 5,000 DOG on Base/);
+  });
+
+  it("a 0x contract that isn't listed anywhere yet: says so and asks for the chain only then", async () => {
+    const t = buildTestFren();
+    const res = await t.fren.submit(swap({ venue: "relay", token: "0x4444444444444444444444444444444444444444" }));
+    expect(res.verdict).toBe("rejected");
+    expect(res.text).toMatch(/couldn't find 0x4444.* on Base, Arbitrum or Robinhood Chain yet/);
+  });
+
+  it("a Solana mint sent to Relay goes to Jupiter", async () => {
+    const t = buildTestFren();
+    const res = await t.fren.submit(swap({ venue: "relay", chain: "base", token: "PumpCoin1111111111111111111111111111111pump" }));
+    expect(res.verdict).toBe("executed");
+    expect(res.text).toMatch(/Paper: Bought .* SHIT for \$50.00/);
+    expect(res.text).not.toMatch(/on Base/);
   });
 
   it("live: pays from Arbitrum USDC, tops up gas on Robinhood Chain, and shrinks the approval to the exact amount", async () => {
@@ -90,8 +120,7 @@ describe("tokens on Base and Robinhood Chain", () => {
     t.fake.relaySteps = (body) => [
       { id: "deposit", kind: "transaction", items: [{ status: "incomplete", data: { from: body.user, to: "0x9999999999999999999999999999999999999999", data: "0xa9059cbb", value: "0", chainId: body.originChainId } }] },
     ];
-    await t.fren.submit(swap({ venue: "relay", chain: "base", token: BASE_DOG }));
-    const out = await t.fren.approve(codeFrom(t.notifier.sent));
+    const out = (await t.fren.submit(swap({ venue: "relay", chain: "base", token: BASE_DOG }))).text;
     expect(out).toMatch(/❌ .*not on the signer's allow list/);
     expect(sent).toHaveLength(0);
   });
@@ -108,10 +137,11 @@ describe("pump.fun and launch snipes", () => {
   it("snipes a Solana coin the moment it starts trading", async () => {
     const t = buildTestFren();
     const res = await t.fren.submit(swap({ venue: "jupiter", token: NEW_COIN }, [{ type: "tradable", venue: "jupiter", token: NEW_COIN }]));
-    expect(res.verdict).toBe("needs_code");
+    // Armed at once: the owner can say "snipe this" and walk away.
+    expect(res.verdict).toBe("executed");
     expect(res.text).toMatch(/Launch snipe/);
     expect(res.text).toMatch(/NewCoi…pump starts trading/);
-    const armed = await t.fren.approve(codeFrom(t.notifier.sent));
+    const armed = res.text;
     expect(armed).toMatch(/Watching: Buy \$50.00 of NewCoi…pump/);
 
     await t.fren.snipeTick();

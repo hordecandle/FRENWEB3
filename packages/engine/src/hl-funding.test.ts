@@ -40,22 +40,34 @@ function fresh(arbitrumUsdc: number, opts: { landsAfter?: number; solanaUsdc?: n
 }
 
 describe("a perp pays for itself", () => {
-  it("shows the move, waits for the code, deposits from Arbitrum, moves it to the xyz market and opens", async () => {
+  it("within auto-approve: deposits from Arbitrum, moves it to the xyz market and opens, no code", async () => {
     const { t, deposits } = fresh(70);
     const res = await t.fren.submit(long("xyz:GOLD", 50, 10));
-    expect(res.verdict).toBe("needs_code");
-    expect(res.text).toMatch(/moves \$50\.75 USDC from your Arbitrum wallet into your Hyperliquid account/);
-    expect(res.text).toMatch(/moves \$50\.75 USDC there inside your Hyperliquid account/);
-    expect(deposits).toHaveLength(0);
-    expect(t.fake.exchange).toHaveLength(0);
-
-    const out = await t.fren.approve(codeFrom(t.notifier.sent));
+    expect(res.verdict).toBe("executed");
+    expect(t.notifier.sent).toHaveLength(0);
     expect(deposits).toEqual([50.75]);
     const types = t.fake.exchange.map((b) => (b.action as { type: string }).type);
     expect(types).toEqual(["sendAsset", "approveAgent", "updateLeverage", "order"]);
     expect(t.fake.exchange[0]!.action).toMatchObject({ sourceDex: "", destinationDex: "xyz", amount: "50.75", token: expect.stringMatching(/^USDC:0x/) });
-    expect(out).toMatch(/Moved \$50\.75 USDC from Arbitrum into Hyperliquid · https:\/\/sepolia\.arbiscan\.io\/tx\//);
-    expect(out).toMatch(/Moved \$50\.75 USDC to Hyperliquid's xyz market/);
+    expect(res.text).toMatch(/Moved \$50\.75 USDC from Arbitrum into Hyperliquid · https:\/\/sepolia\.arbiscan\.io\/tx\//);
+    expect(res.text).toMatch(/Moved \$50\.75 USDC to Hyperliquid's xyz market/);
+    expect(res.text).toMatch(/✅ Longed/);
+    // What it was going to do is not repeated after it's done.
+    expect(res.text).not.toMatch(/Fren first moves/);
+  });
+
+  it("over auto-approve: shows the move, asks once, then funds and opens", async () => {
+    const { t, deposits } = fresh(150);
+    const res = await t.fren.submit(long("xyz:GOLD", 100, 5));
+    expect(res.verdict).toBe("needs_code");
+    expect(res.text).toMatch(/moves \$101 USDC from your Arbitrum wallet into your Hyperliquid account/);
+    expect(res.text).toMatch(/moves \$101 USDC there inside your Hyperliquid account/);
+    expect(deposits).toHaveLength(0);
+    expect(t.fake.exchange).toHaveLength(0);
+
+    const out = await t.fren.approve(codeFrom(t.notifier.sent));
+    expect(deposits).toEqual([100.75]);
+    expect(out).toMatch(/Moved \$101 USDC from Arbitrum into Hyperliquid/);
     expect(out).toMatch(/✅ Longed/);
   });
 
@@ -63,8 +75,8 @@ describe("a perp pays for itself", () => {
     const { t, deposits } = fresh(20);
     t.fake.hlFree[""] = 1;
     const res = await t.fren.submit(long("BTC", 2, 2));
-    expect(res.text).toMatch(/moves \$5\.00 USDC from your Arbitrum wallet/);
-    await t.fren.approve(codeFrom(t.notifier.sent));
+    expect(res.verdict).toBe("executed");
+    expect(res.text).toMatch(/Moved \$5\.00 USDC from Arbitrum into Hyperliquid/);
     expect(deposits).toEqual([5]);
     expect(t.fake.exchange.map((b) => (b.action as { type: string }).type)).not.toContain("sendAsset");
   });
@@ -74,17 +86,16 @@ describe("a perp pays for itself", () => {
     t.fake.hlFree[""] = 100;
     const res = await t.fren.submit(long("xyz:GOLD", 50, 10));
     expect(res.text).not.toMatch(/Arbitrum/);
-    await t.fren.approve(codeFrom(t.notifier.sent));
     expect(deposits).toHaveLength(0);
     expect(t.fake.exchange[0]!.action).toMatchObject({ type: "sendAsset", amount: "50.75" });
   });
 
-  it("already funded: no move, no extra code", async () => {
+  it("already funded: no move, nothing extra to say", async () => {
     const { t, deposits } = fresh(0);
     t.fake.hlFree.xyz = 500;
-    await t.fren.changeLimits("autoApproveUsd=100");
     const res = await t.fren.submit(long("xyz:GOLD", 50, 10));
     expect(res.verdict).toBe("executed");
+    expect(res.text).not.toMatch(/Moved/);
     expect(deposits).toHaveLength(0);
   });
 
@@ -98,10 +109,16 @@ describe("a perp pays for itself", () => {
 
   it("a deposit that doesn't arrive in time opens nothing and links the transfer", async () => {
     const { t } = fresh(70, { landsAfter: 1_000_000 });
-    await t.fren.submit(long("xyz:GOLD", 50, 10));
-    const out = await t.fren.approve(codeFrom(t.notifier.sent));
-    expect(out).toMatch(/hasn't arrived yet, so nothing was opened/);
+    const res = await t.fren.submit(long("xyz:GOLD", 50, 10));
+    expect(res.text).toMatch(/hasn't arrived yet, so nothing was opened/);
     expect(t.fake.exchange.map((b) => (b.action as { type: string }).type)).toEqual([]);
+  });
+
+  it("a waiting long says it will fund itself when it triggers", async () => {
+    const { t } = fresh(70);
+    const res = await t.fren.submit({ ...long("xyz:GOLD", 50, 10), steps: [{ ...long("xyz:GOLD", 50, 10).steps[0]!, when: [{ type: "price", venue: "hyperliquid", market: "xyz:GOLD", op: "<", value: 1 }] }] });
+    expect(res.verdict).toBe("executed");
+    expect(res.text).toMatch(/👀 Watching[\s\S]*moves the USDC it needs into Hyperliquid itself/);
   });
 });
 
@@ -143,8 +160,18 @@ describe("topping Arbitrum up from Solana", () => {
     return { t, bridged, deposits };
   }
 
-  it("bridges only the gap from Solana, then deposits and trades, all after one code", async () => {
+  it("bridges only the gap from Solana, then deposits and trades, with no code within auto-approve", async () => {
     const { t, bridged, deposits } = withBridge(20, 110);
+    const res = await t.fren.submit(long("xyz:GOLD", 50, 10));
+    expect(res.verdict).toBe("executed");
+    expect(bridged).toEqual([30.75]);
+    expect(deposits).toEqual([50.75]);
+    expect(res.text).toMatch(/Sent 30\.75 USDC from Solana[\s\S]*Moved \$50\.75 USDC from Arbitrum[\s\S]*✅ Longed/);
+  });
+
+  it("over auto-approve, the code is asked once and covers the bridge, the deposit and the trade", async () => {
+    const { t, bridged, deposits } = withBridge(20, 110);
+    await t.fren.changeLimits("autoApproveUsd=25");
     const res = await t.fren.submit(long("xyz:GOLD", 50, 10));
     expect(res.verdict).toBe("needs_code");
     expect(res.text).toMatch(/moves \$30\.75 USDC from your Solana wallet to it with Circle's bridge/);
@@ -153,7 +180,7 @@ describe("topping Arbitrum up from Solana", () => {
     const out = await t.fren.approve(codeFrom(t.notifier.sent));
     expect(bridged).toEqual([30.75]);
     expect(deposits).toEqual([50.75]);
-    expect(out).toMatch(/Sent 30\.75 USDC from Solana[\s\S]*Moved \$50\.75 USDC from Arbitrum[\s\S]*✅ Longed/);
+    expect(out).toMatch(/✅ Longed/);
   });
 
   it("still refuses when Solana and Arbitrum together are short", async () => {

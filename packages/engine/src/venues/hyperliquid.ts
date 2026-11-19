@@ -172,13 +172,15 @@ export class HyperliquidVenue implements VenueAdapter {
       venueMaxLeverage: m.maxLeverage,
     };
     if (this.o.store.getLimits().mode !== "live" || !this.o.signer) return base;
+    // Moving the owner's own USDC into place is part of this trade, not a second spend:
+    // the trade's own size decides whether the owner is asked.
     if (step.when.length) {
-      return { ...base, notes: ["When it triggers, Fren first moves the USDC it needs into Hyperliquid from your Arbitrum wallet."], mustConfirm: true };
+      return { ...base, prepares: ["When it triggers, Fren moves the USDC it needs into Hyperliquid itself."] };
     }
     const f = await this.fundingPlan(m, margin, leg.leverage);
     if (f.shortUsd > 0) throw new VenueError(await this.shortMessage(m, f));
-    const notes = this.fundingNotes(m, f);
-    return notes.length ? { ...base, notes, movesUsd: f.depositUsd + f.fromMainUsd + f.bridgeUsd, mustConfirm: true } : base;
+    const prepares = this.fundingNotes(m, f);
+    return prepares.length ? { ...base, prepares } : base;
   }
 
   /** Work out where this trade's margin comes from, without moving anything. */

@@ -274,10 +274,34 @@ export class JupiterVenue implements SpotVenueAdapter {
       symbol: t.symbol,
       spendUsd: spend,
       notionalUsd: spend,
-      ...(leg.side === "sell" && leg.amount.type === "usd" ? { sellUsd: leg.amount.usd } : {}),
+      ...(leg.side === "sell" ? await this.saleValue(leg, t) : {}),
       verifiedToken: t.verified,
       ...(notes.length ? { notes } : {}),
     };
+  }
+
+  /**
+   * What a sale is worth in dollars, so the owner's auto-approve level can
+   * decide it. Unknown (no price, no balance) leaves it out, and the sale asks.
+   */
+  private async saleValue(leg: SwapLeg, t: TokenInfo): Promise<{ sellUsd?: number }> {
+    if (leg.amount.type === "usd") return { sellUsd: leg.amount.usd };
+    try {
+      const px = (await this.prices([t.mint])).get(t.mint) ?? t.usdPrice ?? null;
+      if (!px) return {};
+      if (leg.amount.type === "tokens") return { sellUsd: leg.amount.tokens * px };
+      let held: number;
+      if (this.o.store.getLimits().mode === "paper") {
+        held = this.o.store.paperHolding(t.mint)?.amount ?? 0;
+      } else {
+        const owner = await this.owner();
+        const raw = t.mint === SOL_MINT ? BigInt(await this.connection.getBalance(owner)) : await this.rawBalance(owner, t.mint);
+        held = Number(raw) / 10 ** t.decimals;
+      }
+      return { sellUsd: held * leg.amount.fraction * px };
+    } catch {
+      return {};
+    }
   }
 
   async execute(r: ResolvedStep, ctx: ExecContext): Promise<ExecResult> {

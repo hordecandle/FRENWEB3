@@ -67,6 +67,32 @@ describe("Fren's persona in the OpenClaw workspace", () => {
   });
 });
 
+describe("chat model on update", () => {
+  const runner = (current: string) => {
+    const runs: string[] = [];
+    const run: Runner = async (f, a) => {
+      runs.push(`${f} ${a.join(" ")}`);
+      if (a[0] === "config" && a[1] === "get") return { code: 0, stdout: `${current}\n`, stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    return { run, runs };
+  };
+
+  it("moves the old default Haiku to Sonnet", async () => {
+    const { upgradeDefaultModel } = await import("./setup.js");
+    const { run, runs } = runner('"openrouter/anthropic/claude-haiku-4.5"');
+    expect(await upgradeDefaultModel({ run, openclawBin: "openclaw" })).toBe("openrouter/anthropic/claude-sonnet-5.5");
+    expect(runs).toContain('openclaw config set agents.defaults.model.primary "openrouter/anthropic/claude-sonnet-5.5"');
+  });
+
+  it("leaves a model the owner picked", async () => {
+    const { upgradeDefaultModel } = await import("./setup.js");
+    const { run, runs } = runner('"openrouter/openai/gpt-6"');
+    expect(await upgradeDefaultModel({ run, openclawBin: "openclaw" })).toBeNull();
+    expect(runs.some((r) => r.includes("config set"))).toBe(false);
+  });
+});
+
 describe("where the workspace is", () => {
   it("falls back to the config value, then to the default under the user's home", async () => {
     const { workspaceDir } = await import("./persona.js");
