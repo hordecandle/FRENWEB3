@@ -2,6 +2,9 @@
   publish = "public"
   # Pack Fren's source (the repo is private) for new servers: see vps-src.mjs.
   command = "mkdir -p fren-src && git -C .. archive --format=tar.gz --prefix=fren/ -o site/fren-src/fren.tar.gz HEAD"
+  # Always build, even when only code outside site/ changed: the package
+  # above must match main, or new servers get an old Fren.
+  ignore = "exit 1"
 
 [functions]
   directory = "netlify/functions"

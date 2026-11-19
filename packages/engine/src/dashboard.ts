@@ -132,7 +132,7 @@ export class Dashboard {
           const s = this.newSession();
           return html(303, "", {
             location: "/",
-            "set-cookie": `fren_dash=${s}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_TTL_MS / 1000}`,
+            "set-cookie": `fren_dash=${s}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`,
           });
         }
 
@@ -146,7 +146,7 @@ export class Dashboard {
         if (req.method === "GET" && url.pathname === "/api/overview") return json(200, await this.overview());
 
         if (req.method !== "POST") return json(405, { error: "POST only." });
-        // A cross-site form can't set this header, on top of SameSite=Strict.
+        // A cross-site form can't set this header, on top of SameSite=Lax (which already keeps the cookie off cross-site POSTs). Lax, not Strict, because the login link is opened from Telegram, and a Strict cookie would be dropped on the redirect.
         if (req.headers["x-fren"] !== "1") return json(403, { error: "forbidden" });
         const body = await readJson(req);
         const owner = (r: OwnerRequestResult) => ({

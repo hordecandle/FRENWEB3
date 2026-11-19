@@ -55,7 +55,7 @@ describe("owner dashboard", () => {
     const link = new URL(dash.newLink());
     const first = await get(link.pathname + link.search);
     expect(first.status).toBe(303);
-    expect(first.headers.get("set-cookie")).toMatch(/fren_dash=[\w-]+; Path=\/; HttpOnly; Secure; SameSite=Strict/);
+    expect(first.headers.get("set-cookie")).toMatch(/fren_dash=[\w-]+; Path=\/; HttpOnly; Secure; SameSite=Lax/);
     expect((await get(link.pathname + link.search)).status).toBe(403);
     const late = new URL(dash.newLink());
     tick(11 * 60_000);

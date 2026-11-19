@@ -93,7 +93,7 @@ describe("web setup", () => {
     const { base } = await start();
     const res = await fetch(`${base}/setup?t=${SETUP_TOKEN}`, { redirect: "manual" });
     expect(res.status).toBe(303);
-    expect(res.headers.get("set-cookie")).toContain("HttpOnly; Secure; SameSite=Strict");
+    expect(res.headers.get("set-cookie")).toContain("HttpOnly; Secure; SameSite=Lax");
     const page = await fetch(`${base}/setup`, { headers: { cookie: `fren_setup=${SETUP_TOKEN}` } });
     expect(await page.text()).toContain("Set up your Fren");
   });
