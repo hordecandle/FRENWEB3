@@ -35,7 +35,7 @@ import type { DeriveVenue } from "./venues/derive.js";
 import { asLang, pauseMessage, type Lang } from "./pause-text.js";
 import type { PolymarketVenue } from "./venues/polymarket.js";
 import type { CashChain, YieldVenue } from "./venues/yield.js";
-import { VenueError, type PositionView, type SpotVenueAdapter, type VenueAdapter } from "./venues/types.js";
+import { NotTradableYet, VenueError, type PositionView, type SpotVenueAdapter, type VenueAdapter } from "./venues/types.js";
 
 export interface FrenDeps {
   store: Store;
@@ -76,6 +76,10 @@ const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 /** Wrong /ok codes in a row before every waiting code is dropped. */
 export const WRONG_CODE_LIMIT = 5;
 
+/** How long a buy keeps waiting for its token to trade (a launch, or pump.fun's move to its pool). */
+export const BUY_RETRY_WINDOW_MS = 15 * 60_000;
+const retryKey = (planId: string, idx: number) => `buy_retry_since:${planId}:${idx}`;
+
 function newCode(): string {
   const bytes = randomBytes(6);
   return Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
@@ -85,6 +89,7 @@ export class Fren {
   private readonly venues: Record<Venue, VenueAdapter>;
   private ticking = false;
   private sniping = false;
+  private snipeAgain = false;
 
   /** A line to the owner outside the agent's chat (for results the chat may never see). */
   async tellOwner(text: string): Promise<boolean> {
@@ -243,18 +248,64 @@ export class Fren {
   }
 
   private async executeStep(planId: string, r: ResolvedStep, mode: Mode): Promise<string> {
+    return (await this.runStep(planId, r, mode)).text;
+  }
+
+  /**
+   * Execute one step. A buy of a token that can't trade this moment (no pool
+   * yet, or pump.fun moving it to its pool) waits for it instead of failing:
+   * `waiting` is set, and `quiet` when the owner was already told.
+   */
+  private async runStep(planId: string, r: ResolvedStep, mode: Mode): Promise<{ text: string; waiting?: boolean; quiet?: boolean }> {
     try {
       const snipe = r.step.when.some((c) => c.type === "tradable");
-      const topUp = await this.topUpFromYield(r, mode);
+      // A snipe pays from what the wallet holds (SOL first on Solana): pulling lent USDC back first only slows it down.
+      const topUp = snipe ? null : await this.topUpFromYield(r, mode);
       const res = await this.venues[r.step.leg.venue].execute(r, { mode, planId, idx: r.index, ...(snipe ? { snipe } : {}) });
       const text = topUp ? `${topUp}\n${res.text}` : res.text;
       this.d.store.setStep(planId, r.index, "filled", text);
-      return text;
+      if (this.d.store.getKv(retryKey(planId, r.index))) this.d.store.setKv(retryKey(planId, r.index), "");
+      return { text };
     } catch (err) {
+      if (err instanceof NotTradableYet && r.step.leg.kind === "swap" && r.step.leg.side === "buy") return this.waitForTrading(planId, r, err.message);
       const msg = `❌ ${describeStep(r.step, r)}: ${(err as Error).message}`;
       this.d.store.setStep(planId, r.index, "failed", msg);
-      return msg;
+      return { text: msg };
     }
+  }
+
+  /**
+   * Put a buy back to waiting until its token trades, for up to
+   * BUY_RETRY_WINDOW_MS from the first try. A plain buy gains a "tradable"
+   * condition, so it becomes a snipe the fast loop watches.
+   */
+  private waitForTrading(planId: string, r: ResolvedStep, why: string): { text: string; waiting?: boolean; quiet?: boolean } {
+    const leg = r.step.leg;
+    if (leg.kind !== "swap") throw new Error("only swaps wait for trading");
+    const key = retryKey(planId, r.index);
+    const since = Number(this.d.store.getKv(key) || 0);
+    const minutes = Math.round(BUY_RETRY_WINDOW_MS / 60_000);
+    if (since && Date.now() - since > BUY_RETRY_WINDOW_MS) {
+      const msg = `❌ ${describeStep(r.step, r)}: ${why} Gave up after ${minutes} minutes of trying. Nothing was bought.`;
+      this.d.store.setStep(planId, r.index, "failed", msg);
+      this.d.store.setKv(key, "");
+      return { text: msg };
+    }
+    if (!r.step.when.some((c) => c.type === "tradable")) {
+      const rec = this.d.store.getPlan(planId);
+      if (rec) {
+        const when: Condition = { type: "tradable", venue: leg.venue, chain: leg.chain, token: leg.token };
+        const steps = rec.plan.steps.map((s, i) => (i === r.index ? { ...s, when: [...s.when, when] } : s));
+        this.d.store.updatePlan(planId, { ...rec.plan, steps });
+      }
+    }
+    this.d.store.setStep(planId, r.index, "waiting", why);
+    if (since) return { text: "", waiting: true, quiet: true };
+    this.d.store.setKv(key, String(Date.now()));
+    return {
+      text: `⏳ ${describeStep(r.step, r)}: ${why} Fren keeps trying and buys the moment it trades, for up to ${minutes} minutes.`,
+      waiting: true,
+    };
   }
 
   /**
@@ -514,8 +565,12 @@ export class Fren {
     }
   }
 
-  /** Which waiting snipe targets trade right now. Only asks about tokens someone is waiting on. */
-  private async tradableNow(): Promise<Set<string>> {
+  /** Tokens that waiting snipes are watching for, so a live feed can wake the fast loop. */
+  snipeTargets(): { venue: "jupiter" | "relay"; chain: string; token: string }[] {
+    return [...this.snipeTargetMap().values()];
+  }
+
+  private snipeTargetMap(): Map<string, { venue: "jupiter" | "relay"; chain: string; token: string }> {
     const wanted = new Map<string, { venue: "jupiter" | "relay"; chain: string; token: string }>();
     for (const p of this.d.store.plansWithStatus("active")) {
       for (const s of this.d.store.getSteps(p.id)) {
@@ -525,6 +580,12 @@ export class Fren {
         }
       }
     }
+    return wanted;
+  }
+
+  /** Which waiting snipe targets trade right now. Only asks about tokens someone is waiting on. */
+  private async tradableNow(): Promise<Set<string>> {
+    const wanted = this.snipeTargetMap();
     const live = new Set<string>();
     await Promise.all(
       [...wanted].map(async ([key, w]) => {
@@ -545,11 +606,19 @@ export class Fren {
    * steps waiting on a token to start trading. Everything else waits for tick().
    */
   async snipeTick(): Promise<void> {
-    if (this.sniping || this.limits().paused || !this.hasSnipes()) return;
+    // Woken while a pass runs (a live feed saw the token move): run once more right after it.
+    if (this.sniping) {
+      this.snipeAgain = true;
+      return;
+    }
+    if (this.limits().paused || !this.hasSnipes()) return;
     this.sniping = true;
     try {
-      const snap: MarketSnapshot = { now: new Date(), prices: new Map(), funding: new Map(), tradable: await this.tradableNow() };
-      await this.fireReady(snap, true);
+      do {
+        this.snipeAgain = false;
+        const snap: MarketSnapshot = { now: new Date(), prices: new Map(), funding: new Map(), tradable: await this.tradableNow() };
+        await this.fireReady(snap, true);
+      } while (this.snipeAgain && !this.limits().paused && this.hasSnipes());
     } finally {
       this.sniping = false;
     }
@@ -613,8 +682,9 @@ export class Fren {
           await this.d.notifier.alert(`❌ Conditions met but your limits blocked it:\n${describeDecision(decision, [r])}`);
           continue;
         }
-        const text = await this.executeStep(rec.id, r, rec.mode);
-        await this.d.notifier.alert(`⚡ Triggered\n${statuses.map(describeConditionStatus).join("\n")}\n${text}`);
+        const out = await this.runStep(rec.id, r, rec.mode);
+        if (out.quiet) continue;
+        await this.d.notifier.alert(out.waiting ? out.text : `⚡ Triggered\n${statuses.map(describeConditionStatus).join("\n")}\n${out.text}`);
       }
       this.d.store.settlePlan(rec.id);
     }

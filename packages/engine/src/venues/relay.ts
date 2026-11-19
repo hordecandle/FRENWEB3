@@ -14,7 +14,7 @@ import {
 import type { SignerApi } from "@fren/signer";
 import { getJson, HttpError, postJson, type Fetch } from "../http.js";
 import type { Store } from "../store.js";
-import { VenueError, type ExecContext, type ExecResult, type PositionView, type SpotVenueAdapter } from "./types.js";
+import { NotTradableYet, VenueError, type ExecContext, type ExecResult, type PositionView, type SpotVenueAdapter } from "./types.js";
 
 /**
  * Tokens on EVM chains (Base, Robinhood Chain, Arbitrum), bought and sold
@@ -401,7 +401,8 @@ export class RelayVenue implements SpotVenueAdapter {
     try {
       t = await this.token(chain, leg.token);
     } catch (err) {
-      if (!snipe || !isEvmAddress(leg.token)) throw err;
+      // A snipe, or a buy seconds after launch: Relay's list may not have it yet, the address is enough.
+      if (!isEvmAddress(leg.token) || (!snipe && leg.side !== "buy")) throw err;
       t = { chain, address: leg.token.trim() as `0x${string}`, symbol: shortToken(leg.token.trim()), name: "", decimals: 18, verified: false };
     }
     const usdc = this.chain(chain).usdc;
@@ -475,7 +476,9 @@ export class RelayVenue implements SpotVenueAdapter {
 
   private async paperSwap(leg: SwapLeg, t: EvmToken, ctx: ExecContext): Promise<ExecResult> {
     const store = this.o.store;
-    const px = await this.paperPrice(t);
+    const px = await this.paperPrice(t).catch((err: Error) => {
+      throw leg.side === "buy" ? new NotTradableYet(`${t.symbol} on ${chainName[t.chain]} has no pool to buy from yet.`) : err;
+    });
     const key = paperKey(t.chain, t.address);
     const held = store.paperHolding(key) ?? { mint: key, symbol: t.symbol, amount: 0, costUsd: 0 };
     const where = chainName[t.chain];
@@ -609,6 +612,12 @@ export class RelayVenue implements SpotVenueAdapter {
         slippageBps: leg.maxSlippageBps,
         // No USDC on Robinhood Chain to swap for gas later, so bring some ETH along.
         topupGas: !this.chain(t.chain).usdc,
+      }).catch((err: unknown) => {
+        // No route into the token yet: it hasn't launched, or its pool isn't live. Nothing was sent.
+        if (err instanceof HttpError && err.status === 400 && /NO_SWAP_ROUTES|No routes/i.test(err.body + err.message)) {
+          throw new NotTradableYet(`${t.symbol} on ${where} has no pool Relay can reach yet.`);
+        }
+        throw err;
       });
       usd = leg.amount.type === "usd" ? leg.amount.usd : Number(pay.amountRaw) / 1e6;
       qty = Number(quote.details?.currencyOut?.amount ?? "0") / 10 ** t.decimals;

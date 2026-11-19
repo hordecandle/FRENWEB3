@@ -46,3 +46,12 @@ export interface SpotVenueAdapter extends VenueAdapter {
 export class VenueError extends Error {
   override name = "VenueError";
 }
+
+/**
+ * The token can't be bought this moment but likely can soon: no pool yet, or
+ * pump.fun is moving it from its curve to its pool. Nothing was spent. A buy
+ * that hits this waits for the token to trade instead of failing.
+ */
+export class NotTradableYet extends VenueError {
+  override name = "NotTradableYet";
+}

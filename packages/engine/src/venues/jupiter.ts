@@ -5,7 +5,7 @@ import type { SignerApi } from "@fren/signer";
 import { getJson, HttpError, postJson, type Fetch } from "../http.js";
 import type { Store } from "../store.js";
 import { curveUsdPrice, pumpFunNotes, type PumpCurve, type PumpFunApi } from "./pumpfun.js";
-import { VenueError, type ExecContext, type ExecResult, type PositionView, type SpotVenueAdapter } from "./types.js";
+import { NotTradableYet, VenueError, type ExecContext, type ExecResult, type PositionView, type SpotVenueAdapter } from "./types.js";
 
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
@@ -262,13 +262,19 @@ export class JupiterVenue implements SpotVenueAdapter {
 
   /** True once Jupiter can route USDC into the token: it has launched and has a pool or bonding curve. */
   async isTradable(token: string): Promise<boolean> {
+    const mint = token.trim();
+    // A pump.fun coin trades the moment its curve exists, before any aggregator sees it.
+    // One RPC read answers that faster than a Jupiter quote, so launches check it first.
+    const onCurve = async () => {
+      const curve = this.o.pumpFun ? await this.o.pumpFun.curve(mint).catch(() => null) : null;
+      return curve !== null && !curve.complete && curve.quote !== "other";
+    };
+    if (mint.endsWith("pump") && (await onCurve())) return true;
     try {
-      const q = await this.quote(USDC_MINT, token.trim(), 1_000_000n, 5000);
+      const q = await this.quote(USDC_MINT, mint, 1_000_000n, 5000);
       return BigInt(q.outAmount) > 0n;
     } catch {
-      // A pump.fun coin trades the moment its curve exists, before any aggregator sees it.
-      const curve = this.o.pumpFun ? await this.o.pumpFun.curve(token.trim()).catch(() => null) : null;
-      return curve !== null && !curve.complete && curve.quote !== "other";
+      return mint.endsWith("pump") ? false : onCurve();
     }
   }
 
@@ -309,8 +315,9 @@ export class JupiterVenue implements SpotVenueAdapter {
     try {
       t = await this.token(leg.token);
     } catch (err) {
-      // A snipe targets a coin that doesn't exist yet; the address is all there is.
-      if (!snipe || !isMint(leg.token.trim())) throw err;
+      // A snipe targets a coin that doesn't exist yet, and a buy may come seconds after
+      // launch, before Jupiter's list has it: the address is all there is.
+      if (!isMint(leg.token.trim()) || (!snipe && leg.side !== "buy")) throw err;
       t = await this.bareToken(leg.token.trim());
     }
     if (t.mint === USDC_MINT) throw new VenueError("That's USDC already; pick the token to buy or sell.");
@@ -369,7 +376,7 @@ export class JupiterVenue implements SpotVenueAdapter {
   private async paperSwap(leg: SwapLeg, t: TokenInfo, ctx: ExecContext): Promise<ExecResult> {
     const store = this.o.store;
     const px = (await this.prices([t.mint]).catch(() => new Map<string, number>())).get(t.mint) ?? t.usdPrice ?? (await this.quotedPrice(t));
-    if (!px) throw new VenueError(`No price for ${t.symbol} right now.`);
+    if (!px) throw leg.side === "buy" ? new NotTradableYet(`${t.symbol} has no pool or pump.fun curve to buy from yet.`) : new VenueError(`No price for ${t.symbol} right now.`);
     const held = store.paperHolding(t.mint) ?? { mint: t.mint, symbol: t.symbol, amount: 0, costUsd: 0 };
     if (leg.side === "buy") {
       if (leg.amount.type === "tokens") throw new VenueError('Say how much USDC to spend on a buy: amount {type:"usd"}.');
@@ -477,14 +484,30 @@ export class JupiterVenue implements SpotVenueAdapter {
       }
     }
 
+    const paidSolPx = inputMint === SOL_MINT && leg.side === "buy" ? solPx : 0;
+    // A launch snipe on a pump.fun coin buys on its curve straight away: no Jupiter round trip first.
+    if (ctx.snipe && leg.side === "buy" && t.mint.endsWith("pump") && this.o.pumpFun) {
+      const curve = await this.o.pumpFun.curve(t.mint).catch(() => null);
+      if (curve && !curve.complete && curve.quote !== "other") return this.withPaid(paid, await this.curveSwap(leg, t, curve, owner, amount, tip, ctx, paidSolPx));
+    }
     let quote: JupQuote;
     try {
       quote = await this.quote(inputMint, outputMint, amount, leg.maxSlippageBps);
     } catch (err) {
       // Young pump.fun coins trade only on their bonding curve, which Jupiter may not route yet.
       const curve = this.o.pumpFun ? await this.o.pumpFun.curve(t.mint).catch(() => null) : null;
-      if (!curve || curve.complete) throw err;
-      return this.withPaid(paid, await this.curveSwap(leg, t, curve, owner, amount, tip, ctx, inputMint === SOL_MINT && leg.side === "buy" ? solPx : 0));
+      if (!curve || curve.complete) {
+        // No route (400) on a buy: not launched yet, or pump.fun is moving it from the curve to its pool.
+        if (leg.side === "buy" && err instanceof HttpError && err.status === 400) {
+          throw new NotTradableYet(
+            curve?.complete
+              ? `${t.symbol} just finished its pump.fun curve and is moving to its pool, so it can't be traded for a moment.`
+              : `${t.symbol} has no pool or pump.fun curve to buy from yet.`,
+          );
+        }
+        throw err;
+      }
+      return this.withPaid(paid, await this.curveSwap(leg, t, curve, owner, amount, tip, ctx, paidSolPx));
     }
     const signature = await this.jupiterSwap(owner, quote, inputMint, amount, tip);
 
@@ -505,13 +528,15 @@ export class JupiterVenue implements SpotVenueAdapter {
    * USDC brought over from the wallet's EVM side. Returns what to swap from.
    */
   private async payFor(owner: PublicKey, usd: number, usdcRaw: bigint, tip: number, preferSol: boolean, solAllowed: boolean): Promise<{ raw: bigint; solPx?: number; lines: string[] }> {
-    const [lamports, px, evmUsdc] = await Promise.all([
+    const [lamports, px] = await Promise.all([
       // Buying SOL itself can't be paid in SOL.
       solAllowed ? this.connection.getBalance(owner).then(BigInt) : Promise.resolve(0n),
       this.prices([SOL_MINT]).then((m) => m.get(SOL_MINT) ?? null).catch(() => null),
-      this.o.evmUsdc ? this.o.evmUsdc().catch(() => ({})) : Promise.resolve({}),
     ]);
-    const pay = solanaPayment({ usd, usdcRaw, lamports, solPx: px, tipLamports: tip, evmUsdc, canBridge: Boolean(this.o.bridgeIn), preferSol });
+    const args = { usd, usdcRaw, lamports, solPx: px, tipLamports: tip, evmUsdc: {}, canBridge: Boolean(this.o.bridgeIn), preferSol };
+    let pay = solanaPayment(args);
+    // The EVM side is only asked when Solana alone can't pay: a snipe shouldn't wait on it.
+    if (pay.kind === "short" && this.o.evmUsdc) pay = solanaPayment({ ...args, evmUsdc: await this.o.evmUsdc().catch(() => ({})) });
     const needRaw = BigInt(Math.floor(usd * 1e6));
     if (pay.kind === "usdc") return { raw: needRaw, lines: [] };
     if (pay.kind === "sol") {
@@ -611,7 +636,15 @@ export class JupiterVenue implements SpotVenueAdapter {
       const before = await this.rawBalance(owner, t.mint);
       const trade = await pump.buy({ mint: t.mint, user, quoteAmountRaw: quoteRaw, slippagePct });
       const maxSol = 10_000_000 + tip + (curve.quote === "SOL" ? Number(quoteRaw) : 0);
-      const signature = await this.sendInstructions(owner, trade.instructions, maxSol, tip);
+      let signature: string;
+      try {
+        signature = await this.sendInstructions(owner, trade.instructions, maxSol, tip);
+      } catch (err) {
+        // The curve filled up while we were buying: the coin is moving to its pool. Try again there.
+        const now = await pump.curve(t.mint).catch(() => null);
+        if (now?.complete) throw new NotTradableYet(`${t.symbol} finished its pump.fun curve while buying and is moving to its pool.`);
+        throw err;
+      }
       const got = (await this.rawBalance(owner, t.mint).catch(() => before + trade.expectedOutRaw)) - before;
       const qty = Number(got > 0n ? got : trade.expectedOutRaw) / 10 ** t.decimals;
       const usd = paidSolPx ? (Number(amount) / 1e9) * paidSolPx : Number(amount) / 1e6;

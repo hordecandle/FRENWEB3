@@ -155,6 +155,11 @@ export class Store {
     return row ? toPlan(row) : null;
   }
 
+  /** Replace a plan's steps, e.g. a buy that now waits for its token to trade. */
+  updatePlan(id: string, plan: Plan) {
+    this.db.prepare("UPDATE plans SET plan_json = ? WHERE id = ?").run(JSON.stringify(plan), id);
+  }
+
   setPlanStatus(id: string, status: PlanStatus) {
     this.db.prepare("UPDATE plans SET status = ? WHERE id = ?").run(status, id);
   }

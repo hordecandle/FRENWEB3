@@ -113,6 +113,8 @@ export class FakeVenues {
   ];
   /** Every Relay quote request body. */
   relayQuotes: Record<string, unknown>[] = [];
+  /** Quotes Relay can't route yet (a pool that isn't live), as Relay answers them. */
+  relayNoRoute: (body: Record<string, unknown>) => boolean = () => false;
   /** Replace to make Relay hand back other transactions (e.g. a malicious target). */
   relaySteps: (body: Record<string, unknown>) => unknown[] = (body) => [
     {
@@ -376,6 +378,7 @@ export class FakeVenues {
     }
     if (url.pathname === "/quote/v2") {
       this.relayQuotes.push(body);
+      if (this.relayNoRoute(body)) return json({ message: "No routes found", errorCode: "NO_SWAP_ROUTES_FOUND" }, 400);
       const usdcLike = (a: string) => !this.evmTokens.some((t) => t.address.toLowerCase() === a.toLowerCase());
       const inAddr = String(body.originCurrency);
       const outAddr = String(body.destinationCurrency);

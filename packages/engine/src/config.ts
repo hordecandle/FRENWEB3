@@ -62,8 +62,15 @@ export const FrenConfig = z.object({
   /** The OpenClaw CLI, for `notify`. */
   openclawBin: z.string().default("openclaw"),
   watcherIntervalMs: z.number().int().min(2000).default(15_000),
-  /** How often launch snipes check whether their token trades yet. */
+  /** How often launch snipes check whether their token trades yet (the fallback to the live feed). */
   snipeIntervalMs: z.number().int().min(500).default(2_000),
+  /**
+   * Watch Solana snipe targets live over the RPC's websocket and fire the
+   * moment the coin moves. Off: snipes only poll every snipeIntervalMs.
+   */
+  snipeFeed: z.boolean().default(true),
+  /** The Solana RPC's websocket, when it isn't the RPC address with wss://. */
+  solanaWsUrl: z.string().url().optional(),
   /** Starting paper balance in USDC. */
   paperStartingUsd: z.number().positive().default(10_000),
   /**
