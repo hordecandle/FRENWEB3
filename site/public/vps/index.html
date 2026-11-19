@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Fren · Get your Fren</title>
-    <meta name="description" content="Rent your own server with crypto, no ID needed, and set up Fren on it in your browser. The server is $10 a month." />
+    <meta name="description" content="Get your own Fren server for $10 in USDC, no ID needed, and set it up in your browser." />
     <meta property="og:title" content="Get your Fren" />
     <meta property="og:description" content="No ID, pay in crypto, nothing to install. Fren runs 24/7 on your own server." />
     <meta property="og:image" content="https://getfren.netlify.app/assets/og.png" />
@@ -45,42 +45,53 @@
         <form id="s-plan" novalidate>
           <p class="kicker">Server</p>
           <h2>Your own server</h2>
-          <p class="lead">Fren runs 24/7 on a server rented in your name, even when your laptop is closed. You only need an email.</p>
+          <p class="lead">Fren runs 24/7 on its own server, even when your laptop is closed. No ID, no account to make: you pay in USDC and we set it all up.</p>
           <div id="plans"></div>
-          <label class="field"><span>Your email</span><input type="email" id="email" autocomplete="email" required placeholder="you@example.com" /><small>For your server account and receipts. No ID needed.</small></label>
-          <div class="actions"><button class="btn" type="submit" id="go">Continue to payment<svg class="ic"><use href="#i-arrow"/></svg></button></div>
+          <span class="lbl">Pay with</span>
+          <div class="tiles" id="networks" role="radiogroup" aria-label="Pay with">
+            <button class="tile is-on" type="button" role="radio" aria-checked="true" data-network="base"><b>USDC on Base</b><small>Low fees. Coinbase, MetaMask, Rabby, Rainbow.</small></button>
+            <button class="tile" type="button" role="radio" aria-checked="false" data-network="solana"><b>USDC on Solana</b><small>Low fees. Phantom, Solflare, Backpack.</small></button>
+          </div>
+          <label class="field"><span>Your email</span><input type="email" id="email" autocomplete="email" required placeholder="you@example.com" /><small>Only so we can reach you about this server. No ID needed, and you don't sign up anywhere.</small></label>
+          <div class="actions"><button class="btn" type="submit" id="go">Show payment details<svg class="ic"><use href="#i-arrow"/></svg></button></div>
           <p class="err" id="err-plan"></p>
-        </form>
-
-        <form id="s-code" hidden novalidate>
-          <p class="kicker">Server</p>
-          <h2>Check your email</h2>
-          <p class="lead">That email already has a server account. We sent it a 6-digit code to confirm it's you.</p>
-          <label class="field"><span>Code</span><input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required /></label>
-          <div class="actions"><button class="btn" type="submit">Confirm<svg class="ic"><use href="#i-arrow"/></svg></button></div>
-          <p class="err" id="err-code"></p>
         </form>
 
         <div id="s-pay" hidden>
           <p class="kicker">Pay</p>
-          <h2>Pay for your server</h2>
-          <p class="lead">USDC or USDT on most chains, BTC or XMR.</p>
+          <h2>Send exactly <span id="pay-title">10.00 USDC</span></h2>
+          <p class="lead">On <b id="pay-net-lead">Base</b>, to the address below. Your server starts as soon as the payment lands. Usually under a minute.</p>
           <div class="pay">
-            <div>
-              <div class="pay__amount"><span id="amount">$10</span> <small>first month</small></div>
-              <div class="note"><svg class="ic"><use href="#i-tab"/></svg><span>Payment opens on EQVPS, our server partner, in a new tab. Pay there, then <b>come back here</b>: keep this tab open, it moves on by itself.</span></div>
-              <div class="actions"><a class="btn" id="checkout" href="#" target="_blank" rel="noopener">Open checkout<svg class="ic"><use href="#i-ext"/></svg></a></div>
+            <div class="payrows">
+              <div class="payrow"><span>Amount</span><span class="val"><b class="mono" id="pay-amount">10.00</b> <b id="pay-token">USDC</b></span><button class="btn btn--2 btn--sm" type="button" id="copy-amount"><svg class="ic ic--s"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+              <div class="payrow"><span>Network</span><span class="val"><b id="pay-net">Base</b></span></div>
             </div>
-            <div class="qr" id="qr" aria-label="Checkout QR code"></div>
+            <div class="qr" id="qr" aria-label="Scan with your wallet: amount, token and address filled in"></div>
           </div>
-          <div class="wait"><svg viewBox="0 0 116 80"><use href="#mark"/></svg><span>Waiting for your payment…</span></div>
+          <div class="payrows payrows--full">
+            <div class="payrow payrow--addr"><span>To address</span><code class="addr" id="pay-addr">0x</code><button class="btn btn--2 btn--sm" type="button" id="copy-addr"><svg class="ic ic--s"><use href="#i-copy"/></svg><span>Copy</span></button></div>
+          </div>
+          <div class="note"><svg class="ic"><use href="#i-alert"/></svg><span><b>Exact amount, <span id="pay-net-warn">Base</span> only.</b> The odd cents tell us the payment is yours. USDC sent on another network can't be recovered.</span></div>
+          <div class="actions"><a class="btn" id="open-wallet" href="#">Open in my wallet<svg class="ic"><use href="#i-ext"/></svg></a></div>
+          <div class="wait"><svg viewBox="0 0 116 80"><use href="#mark"/></svg><span id="pay-wait">Waiting for your payment…</span></div>
+          <details class="details" id="tx-box">
+            <summary>Already sent it? Paste the transaction ID<svg class="ic"><use href="#i-down"/></svg></summary>
+            <p class="hint">Useful if an exchange changed the amount a little. Find the ID in your wallet or exchange history.</p>
+            <form id="tx-form" novalidate>
+              <label class="field"><span>Transaction ID</span><input id="tx" autocomplete="off" spellcheck="false" placeholder="0x… or the Solana signature" /></label>
+              <div class="actions"><button class="btn btn--2" type="submit" id="tx-go">Check payment</button></div>
+              <p class="err" id="err-tx"></p>
+            </form>
+          </details>
+          <p class="hint" id="pay-restart" hidden>Didn't send anything? <a class="textlink" href="./">Start again</a> for fresh payment details.</p>
         </div>
 
         <div id="s-build" hidden>
           <p class="kicker">Install</p>
           <h2>Setting up your server</h2>
-          <p class="lead">Paid, thanks. This takes a few minutes. You can close this tab: save this page's link and open it again later.</p>
+          <p class="lead">Payment confirmed<span id="paid-line"></span>. This takes a few minutes. You can close this tab: save this page's link and open it again later.</p>
           <ol class="build" id="build">
+            <li class="is-done"><span class="dot"><svg class="ic"><use href="#i-check"/></svg></span>Payment confirmed</li>
             <li data-stage="provisioning"><span class="dot"></span>Starting your server</li>
             <li data-stage="installing"><span class="dot"></span>Installing Fren</li>
             <li data-stage="ready"><span class="dot"></span>Opening your private setup page</li>
@@ -92,7 +103,7 @@
         <div id="s-ready" hidden>
           <p class="kicker">AI brain</p>
           <h2>Server ready. Next: an AI brain</h2>
-          <p class="lead">Your server is up. Two steps left, on the server itself: add an AI key, then connect your chat.</p>
+          <p class="lead">Your server is up. Two steps left, on the server itself: add an AI key, then make your own Telegram bot and connect it. The page walks you through both.</p>
           <div class="note"><svg class="ic"><use href="#i-shield"/></svg><span>The next page runs on <b>your server</b>, so the web address will look unusual: <code id="ready-host">your-ip.sslip.io</code>. That's normal, it's your server's address. Your keys go straight there, not through us.</span></div>
           <div class="actions">
             <a class="btn" id="setup-link" href="#" target="_blank" rel="noopener">Open your Fren setup<svg class="ic"><use href="#i-arrow"/></svg></a>
@@ -120,9 +131,10 @@
       </div>
     </main>
     <section class="below" id="faq">
+      <details><summary>How do I pay?</summary><p>You send USDC on Base or Solana from any wallet or exchange. The page shows the exact amount, the network and the address, with a QR code your wallet can scan. We check the blockchain ourselves, so there's no checkout site, no account and no invoice email. The price covers the first month.</p></details>
       <details><summary>Who holds my keys?</summary><p>You do. The keys are created on your server and never leave it. The AI plans trades but never signs them, and anything over your limits needs a confirm code from you.</p></details>
-      <details><summary>Can you get into my server?</summary><p>Only during install. We use a one-time key to install Fren, then delete it from the server. After that, only you can reach your Fren.</p></details>
-      <details><summary>What happens if I stop paying for the server?</summary><p>The server shuts down and Fren stops trading. Your funds stay in your wallets, and you keep the key backup you downloaded.</p></details>
+      <details><summary>Can you get into my server?</summary><p>Only during install. We log in once with the server's first password to install Fren, then lock that password and turn password logins off. After that, nobody can sign in to the server over the internet, us included; you reach your Fren through your own Telegram bot.</p></details>
+      <details><summary>What happens after the first month?</summary><p>The price covers one month. If the server isn't renewed, it shuts down and Fren stops trading. Your funds stay in your wallets, and you keep the key backup you downloaded.</p></details>
       <details><summary>Does it start with real money?</summary><p>No. Fren is in beta, so every one starts in paper mode: real prices, pretend money. Limits from day one: $500 a trade, 20x max leverage, and a confirm code for anything over $50. Real trading stays off until you switch it on.</p></details>
     </section>
     <footer class="foot">

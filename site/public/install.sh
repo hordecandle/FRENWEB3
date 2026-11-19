@@ -21,6 +21,11 @@
 #                  here, and print its one-time link as FREN_SETUP_URL=...
 #   --drop-key TAG With --server: when done, remove root's SSH keys whose
 #                  comment is TAG (the VPS wizard's one-time key).
+#   --lock-root    With --server: when done, lock root's password and turn off
+#                  SSH password logins (the VPS wizard logs in once with the
+#                  server's first root password, then nobody can).
+#   --bot-broker URL  With --web: Fren's bot broker, so the setup page can make
+#                  the owner's Telegram bot in one tap. Env: FREN_BOT_BROKER
 set -euo pipefail
 
 # Everything lives in main() so bash reads the whole script before running any
@@ -34,6 +39,8 @@ SERVER=0
 SETUP=1
 WEB=0
 DROP_KEY=""
+LOCK_ROOT=0
+BOT_BROKER="${FREN_BOT_BROKER:-}"
 NODE_MIN="24.16.0"
 OPENCLAW_MIN="2026.10.5"
 SERVICE_USER="fren"
@@ -49,11 +56,13 @@ while [[ $# -gt 0 ]]; do
     --no-setup) SETUP=0 ;;
     --web) WEB=1 ;;
     --drop-key) DROP_KEY="${2:?--drop-key needs a value}"; shift ;;
+    --lock-root) LOCK_ROOT=1 ;;
+    --bot-broker) BOT_BROKER="${2:?--bot-broker needs a value}"; shift ;;
     --ref) FREN_REF="${2:?--ref needs a value}"; shift ;;
     --repo) FREN_REPO="${2:?--repo needs a value}"; shift ;;
     --dir) FREN_APP_DIR="${2:?--dir needs a value}"; shift ;;
     --tarball) FREN_TARBALL="${2:?--tarball needs a value}"; shift ;;
-    -h|--help) sed -n '2,20p' "$0" 2>/dev/null || true; exit 0 ;;
+    -h|--help) sed -n '2,30p' "$0" 2>/dev/null || true; exit 0 ;;
     *) die "Unknown option: $1 (try --help)" ;;
   esac
   shift
@@ -88,6 +97,8 @@ bold "  Fren: your on-chain trading agent, on your own machine"
 bold ""
 
 [[ $WEB -eq 1 && $SERVER -eq 0 ]] && die "--web goes with --server."
+[[ $LOCK_ROOT -eq 1 && $SERVER -eq 0 ]] && die "--lock-root goes with --server."
+[[ -n "$BOT_BROKER" && ! "$BOT_BROKER" =~ ^https://[A-Za-z0-9./:_-]+$ ]] && die "--bot-broker needs an https:// URL."
 if [[ $SERVER -eq 1 ]]; then
   [[ $OS == linux ]] || die "--server is for a Linux VPS."
   [[ $EUID -eq 0 ]] || die "--server needs root (run it as root on the VPS)."
@@ -419,13 +430,18 @@ web_setup() {
   fi
   install -d -m 700 /etc/fren
   printf '{\n\tadmin off\n}\n%s {\n\treverse_proxy 127.0.0.1:7421\n}\n' "$host" >/etc/fren/Caddyfile
+  # After setup the same address serves the owner's dashboard (login link from /fren_dashboard).
+  printf '{\n\tadmin off\n}\n%s {\n\treverse_proxy 127.0.0.1:7422\n}\n' "$host" >/etc/fren/Caddyfile.dashboard
+  printf 'https://%s\n' "$host" >/etc/fren-dashboard.url
+  chmod 644 /etc/fren-dashboard.url
   printf 'FREN_SETUP_TOKEN=%s\n' "$token" >/etc/fren/setup.env
+  [[ -n "$BOT_BROKER" ]] && printf 'FREN_BOT_BROKER=%s\n' "$BOT_BROKER" >>/etc/fren/setup.env
   chmod 600 /etc/fren/setup.env
   rm -f "$done_file"
 
   cat >/etc/systemd/system/fren-setup-caddy.service <<UNIT
 [Unit]
-Description=HTTPS for the Fren setup page
+Description=HTTPS for the Fren setup page, then the dashboard
 After=network-online.target
 Wants=network-online.target
 
@@ -472,7 +488,7 @@ Description=Start Fren and close the setup page
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'sleep 3; systemctl disable --now fren-setup.service fren-setup-caddy.service fren-setup-done.path; rm -f /etc/fren/setup.env; $NODE_BIN $FREN_CLI isolate --agent-user $SERVICE_USER --service || exit 1; systemctl enable fren-openclaw.service; systemctl restart fren-openclaw.service'
+ExecStart=/bin/sh -c 'sleep 3; systemctl disable --now fren-setup.service fren-setup-done.path; rm -f /etc/fren/setup.env; cp /etc/fren/Caddyfile.dashboard /etc/fren/Caddyfile; systemctl restart fren-setup-caddy.service; $NODE_BIN $FREN_CLI isolate --agent-user $SERVICE_USER --service || exit 1; systemctl enable fren-openclaw.service; systemctl restart fren-openclaw.service'
 UNIT
   write_server_units
   systemctl enable --now fren-setup-done.path fren-setup.service fren-setup-caddy.service >/dev/null 2>&1
@@ -500,11 +516,24 @@ drop_installer_key() {
   echo "✓ Removed the installer's SSH key"
 }
 
+# The VPS wizard got in with the server's first root password. Lock it and turn
+# password logins off, so that password opens nothing once Fren is installed.
+lock_root() {
+  [[ $LOCK_ROOT -eq 1 ]] || return 0
+  install -d -m 755 /etc/ssh/sshd_config.d
+  # sshd takes the first value it reads, and 00- sorts before cloud-init's file.
+  printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n' >/etc/ssh/sshd_config.d/00-fren.conf
+  passwd -l root >/dev/null
+  systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+  echo "✓ Locked root's password and turned off SSH password logins"
+}
+
 # --- Guided setup ------------------------------------------------------------
 
 if [[ $SETUP -eq 0 ]]; then
   [[ $SERVER -eq 1 ]] && write_server_units
   drop_installer_key
+  lock_root
   bold ""
   bold "Fren is installed. Run \`fren setup\` to connect your AI model, chat app and wallets."
   exit 0
@@ -513,6 +542,7 @@ fi
 if [[ $WEB -eq 1 ]]; then
   web_setup
   drop_installer_key
+  lock_root
   exit 0
 fi
 
@@ -535,6 +565,7 @@ if [[ $SERVER -eq 1 ]]; then
   systemctl is-active --quiet fren.service || warn "The Fren engine didn't start. See: journalctl -u fren -n 50"
   systemctl is-active --quiet fren-openclaw.service || warn "The OpenClaw gateway didn't start. See: journalctl -u fren-openclaw -n 50"
   drop_installer_key
+  lock_root
   bold ""
   bold "✓ Fren and OpenClaw are running on this server and restart on their own."
   echo "  Logs:    journalctl -u fren -f    |    journalctl -u fren-openclaw -f"

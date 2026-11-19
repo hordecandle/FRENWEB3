@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { BetQuery } from "./bets.js";
+import type { Dashboard } from "./dashboard.js";
 import { describeLimits, type Fren, type FundVenue } from "./engine.js";
 import type { AgentBudget } from "./guard.js";
 
@@ -9,7 +10,7 @@ import type { AgentBudget } from "./guard.js";
  * bearer token. It exposes only what the plugin's tools and commands need;
  * there is no route that returns key material.
  */
-export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts: { slowMs?: number } = {}): Server {
+export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts: { slowMs?: number; dashboard?: Dashboard | null } = {}): Server {
   const slowMs = opts.slowMs ?? 90_000;
   const expected = Buffer.from(token);
 
@@ -38,6 +39,9 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     "POST /cancel": async (b) => ({ text: await fren.cancel(String(b.planId ?? "")) }),
     "POST /deposit/hyperliquid": async (b) => ({ text: await fren.depositToHyperliquid(Number(b.amountUsd)) }),
     "POST /bets/quote": async (b) => fren.quoteBet(betQuery(b), String(b.request ?? "")),
+    /** /fren_dashboard: a one-time login link, sent to the owner privately when there's a line. */
+    "POST /dashboard/link": async () =>
+      opts.dashboard ? opts.dashboard.sendLink() : { text: "The dashboard isn't set up on this machine. It comes with the VPS install (install.sh --server --web)." },
     "POST /fund": async (b) => {
       const venue = String(b.venue);
       if (venue !== "derive" && venue !== "polymarket") throw new Error('venue must be "derive" or "polymarket".');
