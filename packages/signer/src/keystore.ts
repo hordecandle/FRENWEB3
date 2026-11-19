@@ -26,7 +26,7 @@ export interface Addresses {
   deriveSession?: `0x${string}`;
 }
 
-interface KeystoreFile {
+export interface KeystoreFile {
   version: 1;
   kdf: { name: "scrypt"; N: number; r: number; p: number; salt: string };
   cipher: { name: "aes-256-gcm"; iv: string; tag: string };
