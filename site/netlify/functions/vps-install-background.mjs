@@ -6,5 +6,5 @@ import { installCommand, sshRun, wizard } from "./lib/runtime.mjs";
 export default async (req) => {
   const { id } = await req.json().catch(() => ({}));
   if (typeof id !== "string") return;
-  await wizard().install(id, sshRun, installCommand());
+  await wizard().install(id, sshRun, installCommand(id));
 };

@@ -48,11 +48,14 @@ export function wizard() {
 }
 
 /** What runs on the new server, as root. */
-export function installCommand() {
+export function installCommand(id) {
   const url = env("FREN_INSTALL_URL") || `${siteUrl()}/install.sh`;
   const broker = env("FREN_BOT_BROKER");
   const q = (s) => `'${s.replace(/'/g, "'\\''")}'`;
-  return `curl -fsSL ${q(url)} | bash -s -- --server --web --lock-root` + (broker ? ` --bot-broker ${q(broker)}` : "");
+  // The repo is private, so the server gets Fren's code from this site instead
+  // of GitHub, only while its own install runs (see vps-src.mjs).
+  const tarball = `${siteUrl()}/api/vps/src?id=${encodeURIComponent(id)}`;
+  return `curl -fsSL ${q(url)} | bash -s -- --server --web --lock-root --tarball ${q(tarball)}` + (broker ? ` --bot-broker ${q(broker)}` : "");
 }
 
 /** Run one command over SSH, retrying the connection while the server boots. */

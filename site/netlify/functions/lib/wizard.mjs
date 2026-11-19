@@ -340,7 +340,13 @@ export function createWizard(deps) {
     return v;
   }
 
-  return { plans, start, status, submitTx, install, retry, view };
+  /** The Fren source is only handed out to a server while its install runs. */
+  async function mayDownload(id) {
+    const rec = await load(id);
+    return rec.stage === "installing";
+  }
+
+  return { plans, start, status, submitTx, install, retry, view, mayDownload };
 }
 
 const amountKey = (network, units) => `amt-${network}-${units}`;
