@@ -1,3 +1,4 @@
+import { toRaw } from "./jupiter.js";
 import { createPublicClient, decodeFunctionData, encodeFunctionData, erc20Abi, http, type Chain as ViemChain, type PublicClient } from "viem";
 import { arbitrum, arbitrumSepolia, base, baseSepolia, robinhood, robinhoodTestnet } from "viem/chains";
 import {
@@ -428,6 +429,7 @@ export class RelayVenue implements SpotVenueAdapter {
     const held = store.paperHolding(key) ?? { mint: key, symbol: t.symbol, amount: 0, costUsd: 0 };
     const where = chainName[t.chain];
     if (leg.side === "buy") {
+      if (leg.amount.type === "tokens") throw new VenueError('Say how much USDC to spend on a buy: amount {type:"usd"}.');
       const usd = leg.amount.type === "usd" ? leg.amount.usd : store.paperUsdc() * leg.amount.fraction;
       if (usd > store.paperUsdc()) throw new VenueError(`Paper balance is ${fmtUsd(store.paperUsdc())}.`);
       const qty = usd / px;
@@ -436,7 +438,11 @@ export class RelayVenue implements SpotVenueAdapter {
       store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "relay", symbol: t.symbol, action: "buy", size: qty, price: px, usd, spendUsd: usd, mode: "paper" });
       return { text: `📝 Paper: Bought ${fmtQty(qty)} ${t.symbol} on ${where} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
     }
-    const qty = leg.amount.type === "fraction" ? held.amount * leg.amount.fraction : Math.min(held.amount, leg.amount.usd / px);
+    if (leg.amount.type === "tokens" && leg.amount.tokens > held.amount + 1e-12) {
+      throw new VenueError(`You hold ${fmtQty(held.amount)} paper ${t.symbol} on ${where}, not ${leg.amount.tokens}.`);
+    }
+    const qty =
+      leg.amount.type === "fraction" ? held.amount * leg.amount.fraction : leg.amount.type === "tokens" ? leg.amount.tokens : Math.min(held.amount, leg.amount.usd / px);
     if (qty <= 0) throw new VenueError(`You hold no paper ${t.symbol} on ${where}.`);
     const usd = qty * px;
     store.setPaperUsdc(store.paperUsdc() + usd);
@@ -479,6 +485,7 @@ export class RelayVenue implements SpotVenueAdapter {
     let nativeSale = 0n;
 
     if (leg.side === "buy") {
+      if (leg.amount.type === "tokens") throw new VenueError('Say how much USDC to spend on a buy: amount {type:"usd"}.');
       const need =
         leg.amount.type === "usd"
           ? BigInt(Math.floor(leg.amount.usd * 1e6))
@@ -513,6 +520,15 @@ export class RelayVenue implements SpotVenueAdapter {
         // "Sell all" of ETH means all but the reserve; a smaller share counts the whole balance but still keeps it.
         const share = ((native ? held : raw) * BigInt(Math.floor(leg.amount.fraction * 1e6))) / 1_000_000n;
         amount = share < raw ? share : raw;
+      } else if (leg.amount.type === "tokens") {
+        amount = toRaw(leg.amount.tokens, t.decimals);
+        if (amount > raw) {
+          throw new VenueError(
+            native
+              ? `You can sell up to ${fmtEth(raw)} ETH on ${where} (Fren keeps ${fmtEth(keep)} for gas), not ${leg.amount.tokens}.`
+              : `You hold ${fmtQty(Number(raw) / 10 ** t.decimals)} ${t.symbol} on ${where}, not ${leg.amount.tokens}.`,
+          );
+        }
       } else {
         const px = await this.price(t);
         if (!px) throw new VenueError(`No price for ${t.symbol} right now.`);

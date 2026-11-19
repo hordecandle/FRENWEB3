@@ -92,6 +92,22 @@ describe("selling native ETH, live", () => {
     expect(out).toMatch(/Sold 0\.01000 ETH on Base for \$20\.00 at .* · https:\/\/basescan\.org\/tx\//);
   });
 
+  it("'sell 0.01 ETH' sells exactly 0.01 ETH, not $0.01 of it, and asks for the code", async () => {
+    const { t, sent } = await live({ "arbitrum:native": HELD });
+    await t.fren.changeLimits("autoApproveUsd=1000");
+    const res = await t.fren.submit(sellEth("arbitrum", { type: "tokens", tokens: 0.01 }));
+    expect(res.verdict).toBe("needs_code");
+    expect(res.text).toMatch(/Sell 0\.01 ETH on Arbitrum/);
+    expect(await t.fren.approve(codeFrom(t.notifier.sent))).toMatch(/✅ Sold 0\.01000 ETH on Arbitrum/);
+    expect(sent[0]!.value).toBe(ETH(0.01).toString());
+  });
+
+  it("asking to sell more ETH than the wallet holds sells nothing and says how much it can", async () => {
+    const { sent, run } = await live({ "arbitrum:native": HELD });
+    expect(await run(sellEth("arbitrum", { type: "tokens", tokens: 1 }))).toMatch(/can sell up to 0\.017558 ETH on Arbitrum .*not 1/);
+    expect(sent).toHaveLength(0);
+  });
+
   it("a dollar amount larger than the wallet sells only what's above the reserve", async () => {
     const { sent, run } = await live({ "arbitrum:native": HELD });
     expect(await run(sellEth("arbitrum", { type: "usd", usd: 1000 }))).toMatch(/✅ Sold/);

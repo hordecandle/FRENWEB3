@@ -100,9 +100,11 @@ export function describeLeg(leg: Leg, resolved?: Pick<ResolvedStep, "symbol" | "
       const token = shortToken(resolved?.symbol ?? leg.token);
       const where = leg.venue === "relay" ? chainName[leg.chain] ?? leg.chain : venueName[leg.venue];
       if (leg.side === "buy") {
-        const amt = leg.amount.type === "usd" ? usd(leg.amount.usd) : `${Math.round(leg.amount.fraction * 100)}% of your USDC`;
+        const amt =
+          leg.amount.type === "usd" ? usd(leg.amount.usd) : leg.amount.type === "tokens" ? `${leg.amount.tokens}` : `${Math.round(leg.amount.fraction * 100)}% of your USDC`;
         return `Buy ${amt} of ${token} on ${where}`;
       }
+      if (leg.amount.type === "tokens") return `Sell ${leg.amount.tokens} ${token} on ${where}`;
       const amt = leg.amount.type === "fraction" ? `${Math.round(leg.amount.fraction * 100)}% of your` : `${usd(leg.amount.usd)} of`;
       return `Sell ${amt} ${token} on ${where}`;
     }

@@ -295,6 +295,7 @@ export class JupiterVenue implements SpotVenueAdapter {
     if (!px) throw new VenueError(`No price for ${t.symbol} right now.`);
     const held = store.paperHolding(t.mint) ?? { mint: t.mint, symbol: t.symbol, amount: 0, costUsd: 0 };
     if (leg.side === "buy") {
+      if (leg.amount.type === "tokens") throw new VenueError('Say how much USDC to spend on a buy: amount {type:"usd"}.');
       const usd = leg.amount.type === "usd" ? leg.amount.usd : store.paperUsdc() * leg.amount.fraction;
       if (usd > store.paperUsdc()) throw new VenueError(`Paper balance is ${fmtUsd(store.paperUsdc())}.`);
       const qty = usd / px;
@@ -303,7 +304,11 @@ export class JupiterVenue implements SpotVenueAdapter {
       store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "jupiter", symbol: t.symbol, action: "buy", size: qty, price: px, usd, spendUsd: usd, mode: "paper" });
       return { text: `📝 Paper: Bought ${fmtQty(qty)} ${t.symbol} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
     }
-    const qty = leg.amount.type === "fraction" ? held.amount * leg.amount.fraction : Math.min(held.amount, leg.amount.usd / px);
+    if (leg.amount.type === "tokens" && leg.amount.tokens > held.amount + 1e-12) {
+      throw new VenueError(`You hold ${fmtQty(held.amount)} paper ${t.symbol}, not ${leg.amount.tokens}.`);
+    }
+    const qty =
+      leg.amount.type === "fraction" ? held.amount * leg.amount.fraction : leg.amount.type === "tokens" ? leg.amount.tokens : Math.min(held.amount, leg.amount.usd / px);
     if (qty <= 0) throw new VenueError(`You hold no paper ${t.symbol}.`);
     const usd = qty * px;
     store.setPaperUsdc(store.paperUsdc() + usd);
@@ -351,6 +356,7 @@ export class JupiterVenue implements SpotVenueAdapter {
     if (leg.side === "buy") {
       inputMint = USDC_MINT;
       outputMint = t.mint;
+      if (leg.amount.type === "tokens") throw new VenueError('Say how much USDC to spend on a buy: amount {type:"usd"}.');
       const usdcRaw = await this.rawBalance(owner, USDC_MINT);
       amount = leg.amount.type === "usd" ? BigInt(Math.floor(leg.amount.usd * 1e6)) : (usdcRaw * BigInt(Math.floor(leg.amount.fraction * 1e6))) / 1_000_000n;
       if (amount > usdcRaw) throw new VenueError(`Your wallet has ${fmtUsd(Number(usdcRaw) / 1e6)} USDC; this needs ${fmtUsd(Number(amount) / 1e6)}.`);
@@ -361,6 +367,14 @@ export class JupiterVenue implements SpotVenueAdapter {
       if (raw <= 0n) throw new VenueError(`You hold no ${t.symbol}.`);
       if (leg.amount.type === "fraction") {
         amount = (raw * BigInt(Math.floor(leg.amount.fraction * 1e6))) / 1_000_000n;
+      } else if (leg.amount.type === "tokens") {
+        amount = toRaw(leg.amount.tokens, t.decimals);
+        if (amount > raw) {
+          const have = Number(raw) / 10 ** t.decimals;
+          throw new VenueError(
+            `You can sell up to ${fmtQty(have)} ${t.symbol}${t.mint === SOL_MINT ? " (Fren keeps 0.01 SOL for fees)" : ""}, not ${leg.amount.tokens}.`,
+          );
+        }
       } else {
         const px = (await this.prices([t.mint])).get(t.mint) ?? (await this.quotedPrice(t));
         if (!px) throw new VenueError(`No price for ${t.symbol} right now.`);
@@ -567,4 +581,10 @@ function fmtQty(q: number): string {
   if (q >= 1000) return q.toLocaleString("en-US", { maximumFractionDigits: 0 });
   if (q >= 1) return q.toLocaleString("en-US", { maximumFractionDigits: 4 });
   return q.toPrecision(4);
+}
+
+/** Whole tokens to base units, without float drift on the decimals. */
+export function toRaw(tokens: number, decimals: number): bigint {
+  const [whole, frac = ""] = tokens.toFixed(Math.min(decimals, 20)).split(".");
+  return BigInt(whole! + frac.padEnd(decimals, "0").slice(0, decimals));
 }
