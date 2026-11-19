@@ -179,6 +179,30 @@ describe("web setup", () => {
     expect((await call("GET", "/api/state")).json.done).toBe(true);
   });
 
+  it("moves wallets to a new server from the backup file, and never over existing keys", async () => {
+    // Server A: make wallets, download the backup.
+    const a = await start();
+    await a.call("POST", "/api/telegram/token", { token: TOKEN });
+    await a.call("POST", "/api/telegram/confirm", { id: "777000123" });
+    const made = (await a.call("POST", "/api/finish", { network: "mainnet" })).json.addresses as { solana: string; evm: string };
+    const backup = (await a.call("GET", "/api/backup")).json;
+    server!.close();
+
+    // Server B: restore instead of making new ones; same addresses.
+    const b = await start();
+    await b.call("POST", "/api/telegram/token", { token: TOKEN });
+    await b.call("POST", "/api/telegram/confirm", { id: "777000123" });
+    expect((await b.call("POST", "/api/restore", { backup: "not json" })).json.error).toMatch(/isn't a Fren wallet backup/);
+    expect((await b.call("POST", "/api/restore", { backup: JSON.stringify({ ...backup, passphrase: "wrong-passphrase-123" }) })).json.error).toMatch(/don't unlock/);
+    expect(existsSync(b.deps.paths.keystore)).toBe(false);
+    const r = await b.call("POST", "/api/restore", { backup: JSON.stringify(backup) });
+    expect(r.status).toBe(200);
+    const fin = (await b.call("POST", "/api/finish", { network: "mainnet" })).json.addresses as { solana: string; evm: string };
+    expect(fin.solana).toBe(made.solana);
+    expect(fin.evm).toBe(made.evm);
+    expect((await b.call("POST", "/api/restore", { backup: JSON.stringify(backup) })).json.error).toMatch(/already has wallets/);
+  });
+
   it("checks the WhatsApp number before starting", async () => {
     const { call } = await start();
     expect((await call("POST", "/api/whatsapp/start", { number: "07700 900123" })).json.error).toMatch(/country code/);

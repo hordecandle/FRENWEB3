@@ -317,6 +317,7 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
       <p class="lead" style="margin-top:18px">Last thing: Fren makes two wallets for you, right here on your server.</p>
       <div id="w-form">
         <div class="actions"><button class="btn" id="w-make">Make my wallets<svg class="ic"><use href="#i-arrow"/></svg></button></div>
+        <p class="hint">Moving from another Fren server? <label class="textlink" for="restore-file" style="cursor:pointer">Use my wallet backup instead</label><input type="file" id="restore-file" accept=".json,application/json" hidden></p>
         <details class="details">
           <summary>Advanced<svg class="ic"><use href="#i-down"/></svg></summary>
           <label class="field"><span>Network</span><select id="network"><option value="mainnet">Mainnet (recommended)</option><option value="testnet">Testnet</option></select><small>Recommended: real prices, pretend money until you switch to live. Testnet is a practice network for developers.</small></label>
@@ -557,6 +558,14 @@ function showConnected() {
   $("conn-sub").textContent = tg ? "Your own bot. Only you can talk to it." : "Only your own number can talk to it.";
   screen("connected");
 }
+$("restore-file").onchange = () => busy($("w-make"), $("w-err0"), async () => {
+  const f = $("restore-file").files[0];
+  $("restore-file").value = "";
+  if (!f) return;
+  if (f.size > 64 * 1024) throw new Error("That isn't a Fren wallet backup file. It's called fren-wallet-backup.json.");
+  await api("POST", "/api/restore", { backup: await f.text() });
+  showWallets(await api("POST", "/api/finish", { network: $("network").value, jupiterApiKey: $("jup").value }));
+});
 $("w-make").onclick = () => busy($("w-make"), $("w-err0"), async () => {
   showWallets(await api("POST", "/api/finish", { network: $("network").value, jupiterApiKey: $("jup").value }));
 });

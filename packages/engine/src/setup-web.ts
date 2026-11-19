@@ -1,9 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { timingSafeEqual } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
-import { readKeystoreAddresses } from "@fren/signer";
+import { decryptKeystore, readKeystoreAddresses, type KeystoreFile } from "@fren/signer";
 import {
   ackTelegram,
   configureModelKey,
@@ -166,6 +167,28 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       return { qr: wa.qr ?? null, linked: wa.linked && !!state.line, error: wa.error ?? null };
     },
 
+    /**
+     * Bring back the wallets from a Fren backup file instead of making new ones
+     * (moving to a new server). Checked by unlocking it; never replaces keys.
+     */
+    "POST /api/restore": async (b) => {
+      if (state.finished || existsSync(deps.paths.keystore)) throw new UserError("This server already has wallets.");
+      const raw = typeof b.backup === "string" ? safeJson(b.backup) : b.backup;
+      const backup = (raw ?? {}) as { keystore?: KeystoreFile; passphrase?: unknown };
+      const ks = backup.keystore;
+      const pass = typeof backup.passphrase === "string" ? backup.passphrase.trim() : "";
+      if (!ks || ks.version !== 1 || !ks.addresses || pass.length < 12) throw new UserError("That isn't a Fren wallet backup file. It's called fren-wallet-backup.json.");
+      try {
+        decryptKeystore(ks, pass);
+      } catch {
+        throw new UserError("That backup file is damaged: its keys don't unlock.");
+      }
+      mkdirSync(dirname(deps.paths.keystore), { recursive: true, mode: 0o700 });
+      writeFileSync(deps.paths.passphrase, pass, { mode: 0o600 });
+      writeFileSync(deps.paths.keystore, JSON.stringify(ks, null, 2), { mode: 0o600, flag: "wx" });
+      return { addresses: ks.addresses };
+    },
+
     "POST /api/finish": async (b) => {
       if (!state.line) throw new UserError("Connect Telegram or WhatsApp first.");
       const network = b.network === "testnet" ? "testnet" : "mainnet";
@@ -303,6 +326,14 @@ function sameOrigin(req: IncomingMessage): boolean {
   if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) return false;
   const origin = req.headers.origin;
   return !origin || origin === `https://${req.headers.host}` || origin === `http://${req.headers.host}`;
+}
+
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
