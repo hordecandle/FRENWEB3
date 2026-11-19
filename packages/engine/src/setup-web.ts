@@ -193,7 +193,9 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/setup")) {
       if (url.searchParams.has("t")) {
         // Trade the token in the URL for a cookie, and drop it from the address bar.
-        res.setHeader("set-cookie", `${COOKIE}=${opts.token}; Path=/; HttpOnly; Secure; SameSite=Strict`);
+        // Lax, not Strict: this link is opened from the wizard on another site, and
+        // a Strict cookie set during that cross-site visit is not sent on the redirect.
+        res.setHeader("set-cookie", `${COOKIE}=${opts.token}; Path=/; HttpOnly; Secure; SameSite=Lax`);
         res.setHeader("location", "/setup");
         return send(res, 303, "text/plain", "");
       }
