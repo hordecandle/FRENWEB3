@@ -114,10 +114,32 @@ fi
 
 # --- System packages ---------------------------------------------------------
 
+# A fresh server runs its own first-boot updates (cloud-init, unattended-upgrades)
+# for a few minutes and holds apt's lock meanwhile. Wait for them, not fail.
+apt_wait() {
+  local waited=0 limit=300
+  if have cloud-init; then $SUDO timeout "$limit" cloud-init status --wait >/dev/null 2>&1 || true; fi
+  while pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null || pgrep -f 'bin/unattended-upgrade( |$)' >/dev/null; do
+    [[ $waited -eq 0 ]] && step "Waiting for the server's own updates to finish"
+    (( waited >= limit )) && break
+    sleep 5; waited=$((waited + 5))
+  done
+}
+
+apt_run() {
+  local try
+  for try in 1 2 3; do
+    $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 "$@" && return 0
+    apt_wait
+  done
+  return 1
+}
+
 pkg_install() {
   if have apt-get; then
-    $SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -qq
-    $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" >/dev/null
+    apt_wait
+    apt_run update -qq
+    apt_run install -y -qq "$@" >/dev/null
   elif have dnf; then
     $SUDO dnf install -y -q "$@" >/dev/null
   elif have yum; then
