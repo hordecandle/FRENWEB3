@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { frenPaths } from "./config.js";
-import { findTelegramOwner, guardExisting, runSetup, systemdUnit, type Prompt, type Runner, type SetupDeps } from "./setup.js";
+import { applyLoopGuard, findTelegramOwner, guardExisting, runSetup, systemdUnit, type Prompt, type Runner, type SetupDeps } from "./setup.js";
 
 const TOKEN = "123456789:AAtesttokentesttokentesttokentest";
 
@@ -261,5 +261,31 @@ describe("fren guard", () => {
     expect(runs.some((r) => r.startsWith("openclaw config set channels.whatsapp"))).toBe(false);
     expect(runs.at(-1)).toBe("openclaw daemon restart");
     expect(said.join("\n")).toMatch(/Loop guard on \(telegram\)/);
+  });
+});
+
+describe("loop guard on newer OpenClaw", () => {
+  const runner = (refuse: string, msg: string) => {
+    const runs: string[] = [];
+    const run = async (_f: string, args: string[]) => {
+      runs.push(args.join(" "));
+      if (args[2] === refuse) return { code: 1, stdout: "", stderr: msg };
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    return { runs, deps: { run, openclawBin: "openclaw" } };
+  };
+
+  it("skips the heartbeat setting when OpenClaw no longer has heartbeats (2026.11.5)", async () => {
+    const { runs, deps } = runner("agents.defaults.heartbeat.every", 'Config validation failed: agents.defaults: Unrecognized key: "heartbeat"');
+    await applyLoopGuard(deps);
+    expect(runs).toContain("config set cron.enabled false");
+    expect(runs).toContain("config set tools.loopDetection.enabled true");
+  });
+
+  it("still fails on any other refused setting", async () => {
+    const { deps } = runner("agents.defaults.heartbeat.every", "permission denied");
+    await expect(applyLoopGuard(deps)).rejects.toThrow(/heartbeat/);
+    const other = runner("tools.loopDetection.enabled", 'Unrecognized key: "loopDetection"');
+    await expect(applyLoopGuard(other.deps)).rejects.toThrow(/loopDetection/);
   });
 });

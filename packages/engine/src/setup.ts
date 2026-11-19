@@ -278,7 +278,9 @@ export const LOOP_GUARD_CHANNEL: Record<"telegram" | "whatsapp", [string, string
 };
 
 export async function applyLoopGuard(deps: Pick<SetupDeps, "run" | "openclawBin">, channels: ("telegram" | "whatsapp")[] = []): Promise<void> {
-  for (const [path, value] of LOOP_GUARD) await setConfig(deps, path, value);
+  for (const [path, value] of LOOP_GUARD) {
+    await (LOOP_GUARD_IF_SUPPORTED.has(path) ? setConfigIfSupported : setConfig)(deps, path, value);
+  }
   for (const ch of channels) for (const [path, value] of LOOP_GUARD_CHANNEL[ch]) await setConfig(deps, path, value);
 }
 
@@ -606,6 +608,20 @@ export function normalizePhone(raw: string): string | null {
 
 async function setConfig(deps: Pick<SetupDeps, "run" | "openclawBin">, path: string, value: string): Promise<void> {
   await mustRun(deps, deps.openclawBin, ["config", "set", path, value], `set ${path}`);
+}
+
+/**
+ * Settings that turn a feature off, where an OpenClaw without the feature is
+ * already where we want it. OpenClaw 2026.11.5 dropped agents.defaults.heartbeat
+ * (and refuses the key), so on it there is no heartbeat to turn off.
+ */
+export const LOOP_GUARD_IF_SUPPORTED = new Set(["agents.defaults.heartbeat.every"]);
+
+async function setConfigIfSupported(deps: Pick<SetupDeps, "run" | "openclawBin">, path: string, value: string): Promise<void> {
+  const r = await deps.run(deps.openclawBin, ["config", "set", path, value], {});
+  if (r.code === 0) return;
+  if (/Unrecognized key/i.test(`${r.stderr}\n${r.stdout}`)) return;
+  throw new Error(`Couldn't set ${path}: ${lastLines(r)}`);
 }
 
 async function mustRun(deps: Pick<SetupDeps, "run">, file: string, args: string[], what: string, interactive = false): Promise<string> {
