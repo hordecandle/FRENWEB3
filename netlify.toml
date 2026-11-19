@@ -1,0 +1,3 @@
+# The site lives in site/ (its own netlify.toml sets publish, functions and headers).
+[build]
+  base = "site"
