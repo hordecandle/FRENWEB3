@@ -186,14 +186,32 @@ export async function checkModelKey(fetchFn: Fetch, provider: ModelProvider, api
 }
 
 /**
- * A fixed fast model instead of the provider's "auto" router: measured on the
- * same ten requests, replies took ~12 s instead of ~24 s (FIXES_1.md § 5).
- * Only providers where the name was checked; others keep OpenClaw's default.
+ * A fixed model instead of the provider's "auto" router (the router doubled
+ * reply times, FIXES_1.md § 5). Sonnet, not Haiku: the small model told the
+ * owner to do steps its tools do themselves. Only providers where the name was
+ * checked (OpenRouter's model list, 2026-11-19); others keep OpenClaw's default.
  */
 export const FAST_MODELS: Partial<Record<ModelProvider, string>> = {
-  openrouter: "openrouter/anthropic/claude-haiku-4.5",
-  anthropic: "anthropic/claude-haiku-4-5",
+  openrouter: "openrouter/anthropic/claude-sonnet-5.5",
+  anthropic: "anthropic/claude-sonnet-5-5",
 };
+
+/** Models earlier setups picked by default. An update moves them to the current default; a model the owner chose stays. */
+export const PREVIOUS_DEFAULT_MODELS: Record<string, string> = {
+  "openrouter/anthropic/claude-haiku-4.5": FAST_MODELS.openrouter!,
+  "anthropic/claude-haiku-4-5": FAST_MODELS.anthropic!,
+};
+
+/** Move an old default model to the current one. Returns the new model, or null when nothing changed. */
+export async function upgradeDefaultModel(deps: Pick<SetupDeps, "run" | "openclawBin">): Promise<string | null> {
+  const r = await deps.run(deps.openclawBin, ["config", "get", "agents.defaults.model.primary"]);
+  if (r.code !== 0) return null;
+  const current = r.stdout.trim().split("\n").pop()?.trim().replace(/^"|"$/g, "") ?? "";
+  const next = PREVIOUS_DEFAULT_MODELS[current];
+  if (!next) return null;
+  await setConfig(deps, "agents.defaults.model.primary", JSON.stringify(next));
+  return next;
+}
 
 export async function configureModelKey(deps: Pick<SetupDeps, "run" | "openclawBin" | "fetchFn">, provider: ModelProvider, apiKey: string): Promise<void> {
   await saveModelKey(deps, provider, apiKey);
@@ -306,6 +324,8 @@ export async function guardExisting(deps: Pick<SetupDeps, "run" | "openclawBin">
 export async function personaExisting(deps: Pick<SetupDeps, "run" | "openclawBin" | "pluginDir"> & { home?: string }, say: (t: string) => void): Promise<void> {
   const r = await writePersona(deps);
   say(`✓ Fren's persona in ${r.dir}${r.written.length ? ` (${r.written.join(", ")})` : " (already up to date)"}${r.removed ? ", first-run ritual removed" : ""}`);
+  const model = await upgradeDefaultModel(deps).catch(() => null);
+  if (model) say(`✓ Chat model switched to ${model}`);
   const restarted = (await deps.run(deps.openclawBin, ["daemon", "restart"])).code === 0;
   say(restarted ? "✓ OpenClaw gateway restarted" : `! Restart the OpenClaw gateway yourself: ${deps.openclawBin} daemon restart`);
 }

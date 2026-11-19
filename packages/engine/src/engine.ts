@@ -125,6 +125,7 @@ export class Fren {
     await Promise.all(
       steps.map(async (step, i) => {
         try {
+          step = await this.routeSwap(step);
           const r = await this.venues[step.leg.venue].resolve(step, i);
           r.step = { ...r.step, when: await this.canonicalConditions(r.step.when) };
           resolved.push(r);
@@ -135,6 +136,31 @@ export class Fren {
     );
     resolved.sort((a, b) => a.index - b.index);
     return { resolved, errors };
+  }
+
+  /**
+   * A swap goes where its token lives, whatever venue the agent picked: a 0x
+   * contract trades on the EVM chain it is listed on (found by looking it up
+   * when no chain was given), a Solana mint through Jupiter.
+   */
+  private async routeSwap(step: PlanStep): Promise<PlanStep> {
+    const leg = step.leg;
+    if (leg.kind !== "swap") return step;
+    const token = leg.token.trim();
+    const isEvm = /^0x[0-9a-fA-F]{40}$/.test(token);
+    if (isEvm && (leg.venue === "jupiter" || leg.chain === "solana")) {
+      const chain = leg.chain !== "solana" ? leg.chain : await this.d.relay.findChain(token, EVM_CHAINS);
+      if (!chain) {
+        throw new VenueError(`I couldn't find ${token} on Base, Arbitrum or Robinhood Chain yet. If it hasn't launched, say which chain to watch.`);
+      }
+      const routed = { ...leg, venue: "relay" as const, chain };
+      return { ...step, leg: routed, when: step.when.map((c) => (c.type === "tradable" && c.token.trim() === token ? { ...c, venue: "relay" as const, chain } : c)) };
+    }
+    if (!isEvm && leg.venue === "relay" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(token)) {
+      const routed = { ...leg, venue: "jupiter" as const, chain: "solana" as const };
+      return { ...step, leg: routed, when: step.when.map((c) => (c.type === "tradable" && c.token.trim() === token ? { ...c, venue: "jupiter" as const, chain: "solana" } : c)) };
+    }
+    return step;
   }
 
   /** Turn condition markets into the same symbols the watcher snapshots use. */
@@ -204,6 +230,8 @@ export class Fren {
       if (r.step.when.length > 0) {
         this.d.store.setStep(planId, r.index, "waiting");
         lines.push(`👀 Watching: ${describeStep(r.step, r)}`);
+        for (const p of r.prepares ?? []) lines.push(`   ↪ ${p}`);
+        for (const w of warn) lines.push(`   ⚠️ ${w}`);
         continue;
       }
       lines.push(await this.executeStep(planId, r, rec.mode));

@@ -216,6 +216,18 @@ export class RelayVenue implements SpotVenueAdapter {
       }));
   }
 
+  /**
+   * Which EVM chain a 0x contract lives on, when the owner didn't say. One
+   * match is the answer; several prefer the verified one, then the first
+   * listed in the order given. None: null.
+   */
+  async findChain(address: string, chains: readonly EvmChain[]): Promise<EvmChain | null> {
+    const found = (await Promise.all(chains.map((c) => this.searchTokens(c, address).catch(() => [] as EvmToken[]))))
+      .flat()
+      .filter((t) => t.address.toLowerCase() === address.trim().toLowerCase());
+    return (found.find((t) => t.verified) ?? found[0])?.chain ?? null;
+  }
+
   /** Same rule as Jupiter: an address resolves to that token; a ticker only to a verified one. */
   async token(chain: EvmChain, query: string): Promise<EvmToken> {
     const q = query.trim();
@@ -390,10 +402,29 @@ export class RelayVenue implements SpotVenueAdapter {
       symbol: t.symbol,
       spendUsd: spend,
       notionalUsd: spend,
-      ...(leg.side === "sell" && leg.amount.type === "usd" ? { sellUsd: leg.amount.usd } : {}),
+      ...(leg.side === "sell" ? await this.saleValue(leg, t) : {}),
       verifiedToken: t.verified,
       ...(notes.length ? { notes } : {}),
     };
+  }
+
+  /** What a sale is worth in dollars, for the auto-approve level. Unknown leaves it out, and the sale asks. */
+  private async saleValue(leg: SwapLeg, t: EvmToken): Promise<{ sellUsd?: number }> {
+    if (leg.amount.type === "usd") return { sellUsd: leg.amount.usd };
+    try {
+      const px = await this.price(t);
+      if (!px) return {};
+      if (leg.amount.type === "tokens") return { sellUsd: leg.amount.tokens * px };
+      let held: number;
+      if (this.o.store.getLimits().mode === "paper") {
+        held = this.o.store.paperHolding(paperKey(t.chain, t.address))?.amount ?? 0;
+      } else {
+        held = Number(await this.balanceOf(t.chain, t.address, await this.owner())) / 10 ** t.decimals;
+      }
+      return { sellUsd: held * leg.amount.fraction * px };
+    } catch {
+      return {};
+    }
   }
 
   async execute(r: ResolvedStep, ctx: ExecContext): Promise<ExecResult> {

@@ -200,7 +200,8 @@ describe("paper trading end to end", () => {
     expect(ambiguous.text).toMatch(/2 unverified tokens use the ticker SHIT/);
 
     const ca = await t.fren.submit(buy("PumpCoin1111111111111111111111111111111pump"));
-    expect(ca.verdict).toBe("needs_code");
+    // Unverified is a warning; at $20, under the $50 auto-approve, it runs.
+    expect(ca.verdict).toBe("executed");
     expect(ca.text).toMatch(/not on a verified token list/);
   });
 });

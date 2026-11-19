@@ -178,6 +178,7 @@ export function describeDecision(decision: PolicyDecision, resolved: ResolvedSte
     const icon = d.verdict === "reject" ? "❌" : d.verdict === "confirm" ? "🟡" : "🟢";
     lines.push(`${icon} ${describeStep(r.step, r)}`);
     for (const reason of d.reasons) lines.push(`   • ${reason}`);
+    for (const p of r.prepares ?? []) lines.push(`   ↪ ${p}`);
     for (const w of d.warnings) lines.push(`   ⚠️ ${w}`);
   }
   for (const reason of decision.reasons) lines.push(`❌ ${reason}`);

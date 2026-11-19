@@ -35,6 +35,12 @@ export interface ResolvedStep {
   mustConfirm?: boolean;
   /** Facts the venue wants the owner to see before approving (e.g. a coin is 3 minutes old). Shown as warnings. */
   notes?: string[];
+  /**
+   * What the venue does first to make the trade possible, such as moving the
+   * owner's own USDC into place. Shown while the trade waits (for a code or a
+   * trigger); once it runs, the result says what was actually done.
+   */
+  prepares?: string[];
 }
 
 export interface PolicyState {
@@ -116,9 +122,9 @@ export function evaluatePolicy(
       newPositions += 1;
     }
 
+    // New coins are rarely on a verified list; that's a warning, and the owner's dollar settings decide whether to ask.
     if (leg.kind === "swap" && leg.side === "buy" && r.verifiedToken === false) {
       warnings.push(`${r.symbol} is not on a verified token list. Check the address.`);
-      needsConfirm = true;
     }
 
     if (leg.kind === "swap" && r.step.when.some((c) => c.type === "tradable")) {

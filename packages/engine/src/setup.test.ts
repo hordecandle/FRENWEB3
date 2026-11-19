@@ -116,7 +116,7 @@ describe("fren setup", () => {
     expect(io.out.some((l) => l.startsWith("OpenRouter (any model) says this key doesn't work."))).toBe(true);
     expect(runs.some((r) => r.startsWith("[tty]"))).toBe(false);
     expect(runs.some((r) => r.includes("onboard --non-interactive") && r.includes("--openrouter-api-key sk-or-v1-good-key-123") && !r.includes("bad"))).toBe(true);
-    expect(runs).toContain(`openclaw config set agents.defaults.model.primary "openrouter/anthropic/claude-haiku-4.5"`);
+    expect(runs).toContain(`openclaw config set agents.defaults.model.primary "openrouter/anthropic/claude-sonnet-5.5"`);
     expect(io.out).toContain("? AI key (hidden while you paste)");
     expect(io.out).toContain("Copy the two files above first, then type y.");
     expect(io.out.some((l) => l.includes("paper mode: real prices, pretend money"))).toBe(true);

@@ -92,14 +92,36 @@ describe("selling native ETH, live", () => {
     expect(out).toMatch(/Sold 0\.01000 ETH on Base for \$20\.00 at .* · https:\/\/basescan\.org\/tx\//);
   });
 
-  it("'sell 0.01 ETH' sells exactly 0.01 ETH, not $0.01 of it, and asks for the code", async () => {
+  it("'sell 0.01 ETH' sells exactly 0.01 ETH, not $0.01 of it", async () => {
     const { t, sent } = await live({ "arbitrum:native": HELD });
-    await t.fren.changeLimits("autoApproveUsd=1000");
     const res = await t.fren.submit(sellEth("arbitrum", { type: "tokens", tokens: 0.01 }));
     expect(res.verdict).toBe("needs_code");
     expect(res.text).toMatch(/Sell 0\.01 ETH on Arbitrum/);
     expect(await t.fren.approve(codeFrom(t.notifier.sent))).toMatch(/✅ Sold 0\.01000 ETH on Arbitrum/);
     expect(sent[0]!.value).toBe(ETH(0.01).toString());
+  });
+
+  it("a sale priced under auto-approve runs at once, whether given in coins or as a share", async () => {
+    const { t, sent } = await live({ "arbitrum:native": HELD });
+    await t.fren.changeLimits("autoApproveUsd=50");
+    await t.fren.approve(codeFrom(t.notifier.sent));
+    // 0.01 ETH at $2,000 is $20.
+    const coins = await t.fren.submit(sellEth("arbitrum", { type: "tokens", tokens: 0.01 }));
+    expect(coins.verdict).toBe("executed");
+    expect(coins.text).toMatch(/✅ Sold 0\.01000 ETH on Arbitrum/);
+    // Half the ETH above the reserve, about $18.
+    const half = await t.fren.submit(sellEth("arbitrum", { type: "fraction", fraction: 0.5 }));
+    expect(half.verdict).toBe("executed");
+    expect(sent).toHaveLength(2);
+  });
+
+  it("a sale worth more than auto-approve still asks", async () => {
+    const { t } = await live({ "arbitrum:native": ETH(1) });
+    await t.fren.changeLimits("autoApproveUsd=50");
+    await t.fren.approve(codeFrom(t.notifier.sent));
+    // 0.1 ETH at $2,000 is $200.
+    const res = await t.fren.submit(sellEth("arbitrum", { type: "tokens", tokens: 0.1 }));
+    expect(res.verdict).toBe("needs_code");
   });
 
   it("asking to sell more ETH than the wallet holds sells nothing and says how much it can", async () => {

@@ -93,6 +93,7 @@ export function toolSpecs(client: EngineClient): ToolSpec[] {
         "One plan can hold several legs; legs with `when` conditions wait for the watcher.",
         'To snipe a launch, add when: [{type:"tradable", venue, chain, token}] with the same contract address.',
         "Never invent token addresses: use one the user gave or one fren_markets returned.",
+        "Fren finds the chain of a 0x contract, moves the user's own USDC where the trade needs it, and asks for a code only above the user's auto-approve amount: just send the trade.",
       ].join(" "),
       parameters: Type.Object({ plan: Type.Unsafe<Record<string, unknown>>(planSchema) }),
       run: async (p, ctx) => deliverOwnerCode(await client.call<OwnerResult>("POST", "/plans", { plan: p.plan }), ctx),
@@ -141,7 +142,7 @@ export function toolSpecs(client: EngineClient): ToolSpec[] {
       name: "fren_deposit_hyperliquid",
       label: "Fund Hyperliquid",
       description:
-        "Move USDC from the user's own Arbitrum address into their own Hyperliquid account (minimum 5 USDC). Not needed before a long or short: fren_trade moves the margin into Hyperliquid by itself (after the owner's code). Use this only when the user asks to deposit.",
+        "Move USDC from the user's own Arbitrum address into their own Hyperliquid account (minimum 5 USDC). Not needed before a long or short: fren_trade moves the margin into Hyperliquid by itself, bridging from Solana when Arbitrum is short. Use this only when the user asks to deposit.",
       parameters: Type.Object({ amountUsd: Type.Number({ minimum: 5 }) }),
       run: async (p) => (await client.call<{ text: string }>("POST", "/deposit/hyperliquid", { amountUsd: p.amountUsd })).text,
     },

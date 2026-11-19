@@ -87,7 +87,7 @@ export const SwapLeg = z.object({
   kind: z.literal("swap"),
   venue: SpotVenue.describe('"jupiter" for Solana tokens (pump.fun included), "relay" for tokens on Base, Robinhood Chain or Arbitrum.'),
   /** Where the token lives. Jupiter is always Solana; Relay needs an EVM chain. */
-  chain: Chain.default("solana").describe('Chain the token lives on. "solana" with jupiter; "base", "robinhood" or "arbitrum" with relay.'),
+  chain: Chain.default("solana").describe('Chain the token lives on. "solana" with jupiter; "base", "robinhood" or "arbitrum" with relay. Leave it out for a 0x address when the owner did not name the chain: Fren finds it.'),
   side: z.enum(["buy", "sell"]),
   /** Token mint or contract address (preferred) or a well-known symbol such as "SOL" or "JUP". */
   token: z.string().min(1).describe("Token mint / contract address (CA) or a ticker. Tickers only resolve to verified tokens."),
@@ -201,6 +201,8 @@ export const PlanStep = z.object({
 });
 export type PlanStep = z.infer<typeof PlanStep>;
 
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
 export const Plan = z.object({
   version: z.literal(PLAN_VERSION).default(PLAN_VERSION),
   /** The user's request, quoted, so the echo and logs show what was asked. */
@@ -208,12 +210,14 @@ export const Plan = z.object({
   steps: z.array(PlanStep).min(1).max(10),
 }).superRefine((plan, ctx) => {
   plan.steps.forEach((step, i) => {
-    const pairs: { venue: SpotVenue; chain: Chain; path: (string | number)[] }[] = [];
-    if (step.leg.kind === "swap") pairs.push({ venue: step.leg.venue, chain: step.leg.chain, path: ["steps", i, "leg", "chain"] });
+    const pairs: { venue: SpotVenue; chain: Chain; token: string; path: (string | number)[] }[] = [];
+    if (step.leg.kind === "swap") pairs.push({ venue: step.leg.venue, chain: step.leg.chain, token: step.leg.token, path: ["steps", i, "leg", "chain"] });
     step.when.forEach((c, j) => {
-      if (c.type === "tradable") pairs.push({ venue: c.venue, chain: c.chain, path: ["steps", i, "when", j, "chain"] });
+      if (c.type === "tradable") pairs.push({ venue: c.venue, chain: c.chain, token: c.token, path: ["steps", i, "when", j, "chain"] });
     });
     for (const p of pairs) {
+      // A 0x contract with no chain given: Fren looks up which EVM chain it is on.
+      if (EVM_ADDRESS.test(p.token.trim())) continue;
       if (p.venue === "jupiter" && p.chain !== "solana") {
         ctx.addIssue({ code: "custom", path: p.path, message: `jupiter only trades Solana tokens; use venue "relay" for ${p.chain}` });
       }

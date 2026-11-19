@@ -137,8 +137,7 @@ describe("live USDC yield", () => {
     const balances: Record<string, bigint> = { [key("arbitrum", ARB.usdc)]: 20_000_000n, [key("arbitrum", ARB.aToken)]: 1_000_000_000n };
     const { signer, sent } = chainSigner(balances);
     const t = buildTestFren({ signer, live: true, evmBalances: balances });
-    await t.fren.submit({ request: "buy", steps: [{ leg: { kind: "swap", venue: "relay", chain: "base", side: "buy", token: BASE_DOG, amount: { type: "usd", usd: 50 } } }] });
-    const out = await t.fren.approve(codeFrom(t.notifier.sent));
+    const out = (await t.fren.submit({ request: "buy", steps: [{ leg: { kind: "swap", venue: "relay", chain: "base", side: "buy", token: BASE_DOG, amount: { type: "usd", usd: 50 } } }] })).text;
     expect(out).toMatch(/↩️ Not enough idle USDC on Arbitrum, so first:\n✅ Took \$30\.07 USDC back from Aave on Arbitrum[\s\S]*✅ Bought 5,000 DOG on Base for \$50/);
     const w = decodeFunctionData({ abi: AAVE_POOL_ABI, data: sent[0]!.data });
     expect(w.functionName).toBe("withdraw");
