@@ -24,6 +24,8 @@ const TX_SLACK_MS = 10 * 60_000;
 const INSTALL_TIMEOUT_MS = 17 * 60_000;
 const SERVER_BOOT_TIMEOUT_MS = 30 * 60_000;
 const AUTO_RETRIES = 1;
+/** After a reinstall the server keeps answering as "active" for a while: wait before trusting it. */
+export const REINSTALL_SETTLE_MS = 3 * 60_000;
 const ORDER_TRIES = 3;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -202,9 +204,11 @@ export function createWizard(deps) {
     }
 
     // provisioning
+    if (rec.bootAfter && now() < rec.bootAfter) return;
     const svc = await deps.reseller.service(rec.serviceId);
     if ((svc.status === "active" || svc.status === "running") && svc.host) {
-      const password = svc.password ?? (await deps.reseller.resetPassword(rec.serviceId));
+      // After a reinstall the stored password may be the old one, so ask for a fresh one.
+      const password = rec.password ?? (rec.bootAfter ? null : svc.password) ?? (await deps.reseller.resetPassword(rec.serviceId));
       if (!password) throw new Error("EQVPS didn't give a root password for the new server.");
       rec.host = svc.host;
       rec.port = svc.port || 22;
@@ -263,6 +267,31 @@ export function createWizard(deps) {
     const rec = await load(id);
     if (rec.stage !== "failed" || !rec.retryable) throw new UserError("There's nothing to retry for this setup.");
     await restart(rec);
+    return view(rec);
+  }
+
+  /**
+   * Operator only (see vps-admin.mjs): wipe this order's server, put a fresh OS
+   * on it and install Fren again. Same order, same server, no new charge.
+   */
+  async function reinstall(id) {
+    const rec = await load(id);
+    if (!rec.serviceId || (rec.stage !== "ready" && rec.stage !== "failed")) {
+      throw new UserError("This setup has no finished server to reinstall.");
+    }
+    const osId = await deps.reseller.osId(OS_NAME);
+    if (!osId) throw new UserError(`EQVPS has no ${OS_NAME} image to reinstall with.`);
+    const r = await deps.reseller.reinstall(rec.serviceId, osId);
+    for (const k of ["setupUrl", "host", "detail", "error", "installClaimed", "installStartedAt", "password"]) delete rec[k];
+    if (r.password) rec.password = r.password;
+    rec.stage = "provisioning";
+    rec.provisionStartedAt = now();
+    rec.bootAfter = now() + REINSTALL_SETTLE_MS;
+    rec.attempts = 0;
+    rec.retryable = false;
+    rec.reinstalls = (rec.reinstalls ?? 0) + 1;
+    rec.progress = "Reinstalling your server with the latest Fren…";
+    await save(rec);
     return view(rec);
   }
 
@@ -346,7 +375,7 @@ export function createWizard(deps) {
     return rec.stage === "installing";
   }
 
-  return { plans, start, status, submitTx, install, retry, view, mayDownload };
+  return { plans, start, status, submitTx, install, retry, reinstall, view, mayDownload };
 }
 
 const amountKey = (network, units) => `amt-${network}-${units}`;
