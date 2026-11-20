@@ -25,6 +25,7 @@ export const TOOL_NAMES = [
   "fren_fund",
   "fren_yield",
   "fren_run_code",
+  "fren_settings",
 ] as const;
 
 type ToolName = (typeof TOOL_NAMES)[number];
@@ -40,11 +41,23 @@ interface ToolSpec {
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }], details: { text: t } });
 
 /**
+ * Fren sends the owner each trade's receipt itself (key numbers, named proof
+ * links, a chart), straight into the chat. The model keeps the facts but
+ * must not post the same thing again.
+ */
+export const RECEIPT_NOTE =
+  "(Fren already sent the owner this result as a receipt in the chat, with the numbers, proof links and a chart when images are on. Don't repeat it or paste any links: reply in one short line, or answer only what they asked.)";
+
+export function withReceiptNote(res: { text: string; receiptSent?: boolean }): string {
+  return res.receiptSent ? `${res.text}\n\n${RECEIPT_NOTE}` : res.text;
+}
+
+/**
  * When the engine has no private line to the owner it hands back the code. Send
  * it straight to the conversation and keep it out of the model's tool result.
  */
 async function deliverOwnerCode(res: OwnerResult, ctx: OpenClawPluginToolContext): Promise<string> {
-  if (!res.ownerCode) return res.text;
+  if (!res.ownerCode) return withReceiptNote(res);
   const send = ctx.delivery?.send;
   if (send) {
     await send({ text: `🔐 Your Fren code: ${res.ownerCode}\nReply /ok ${res.ownerCode} to approve. Never share it.` });
@@ -146,7 +159,7 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string }
       description:
         "Move USDC into the user's own Hyperliquid account: from their Arbitrum address when it has the USDC, otherwise straight from their Solana USDC. Not needed before a long or short: fren_trade moves the margin into Hyperliquid by itself. Use this only when the user asks to deposit, and never tell them to deposit first.",
       parameters: Type.Object({ amountUsd: Type.Number({ minimum: 5 }) }),
-      run: async (p) => (await client.call<{ text: string }>("POST", "/deposit/hyperliquid", { amountUsd: p.amountUsd })).text,
+      run: async (p) => withReceiptNote(await client.call<OwnerResult>("POST", "/deposit/hyperliquid", { amountUsd: p.amountUsd })),
     },
     {
       name: "fren_bet_quote",
@@ -189,6 +202,17 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string }
         amountUsd: Type.Number({ minimum: 10 }),
       }),
       run: async (p, ctx) => deliverOwnerCode(await client.call<OwnerResult>("POST", "/fund", { venue: p.venue, amountUsd: p.amountUsd }), ctx),
+    },
+    {
+      name: "fren_settings",
+      label: "Receipt settings",
+      description:
+        'Read or change how Fren\'s trade receipts look. images: true or false turns the chart snapshot on receipts on or off ("turn off images", "no more snapshots"). Leave it out to read the current setting.',
+      parameters: Type.Object({ images: Type.Optional(Type.Boolean({ description: "Chart snapshots on trade receipts." })) }),
+      run: async (p) =>
+        typeof p.images === "boolean"
+          ? (await client.call<{ text: string }>("POST", "/settings", { images: p.images })).text
+          : (await client.call<{ text: string }>("GET", "/settings")).text,
     },
     {
       name: "fren_run_code",
@@ -302,7 +326,9 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
     handler: (ctx) =>
       guard(isOwner(ctx), async () => {
         const code = (ctx.args ?? "").trim();
-        return (await client.call<{ text: string }>("POST", "/approve", { code })).text;
+        const res = await client.call<OwnerResult>("POST", "/approve", { code });
+        // The receipt with the numbers and links is already in the chat, just above this reply.
+        return res.receiptSent ? "✅ Approved. Your receipt is just above." : res.text;
       }),
   });
 
@@ -355,6 +381,23 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
         return ownerReply(await client.call<OwnerResult>("POST", "/limits", { args }));
       }),
   });
+
+  // /fren_images on|off: chart snapshots on trade receipts. Changing it needs no code: it moves no money.
+  for (const name of ["fren_images", "fren_snapshots"]) {
+    api.registerCommand({
+      name,
+      description: "Chart snapshots on trade receipts: /fren_images on or /fren_images off. No argument shows the setting.",
+      acceptsArgs: true,
+      requireAuth: true,
+      exposeSenderIsOwner: true,
+      handler: (ctx) =>
+        guard(isOwner(ctx), async () => {
+          const arg = (ctx.args ?? "").trim().toLowerCase();
+          if (!arg) return (await client.call<{ text: string }>("GET", "/settings")).text;
+          return (await client.call<{ text: string }>("POST", "/settings", { images: arg })).text;
+        }),
+    });
+  }
 
   api.registerCommand({
     name: "fren_dashboard",

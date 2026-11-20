@@ -213,6 +213,18 @@ export class Store {
     }));
   }
 
+  /** Order refs of live fills Fren made itself on a venue since a time, to tell them from the exchange's own (stops, targets). */
+  liveFillRefs(venue: string, sinceIso: string): Set<string> {
+    const rows = this.db.prepare("SELECT ref FROM fills WHERE venue = ? AND mode = 'live' AND at >= ? AND ref IS NOT NULL").all(venue, sinceIso) as { ref: string }[];
+    return new Set(rows.map((r) => r.ref));
+  }
+
+  /** When Fren last opened a live position on a venue, or null. */
+  lastLiveOpen(venue: string): string | null {
+    const row = this.db.prepare("SELECT MAX(at) AS at FROM fills WHERE venue = ? AND mode = 'live' AND action LIKE 'open_%'").get(venue) as { at: string | null };
+    return row.at ?? null;
+  }
+
   spentTodayUsd(mode: Mode, at = new Date()): number {
     const midnight = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate())).toISOString();
     const row = this.db

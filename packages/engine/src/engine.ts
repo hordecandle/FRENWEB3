@@ -36,6 +36,10 @@ import { asLang, pauseMessage, type Lang } from "./pause-text.js";
 import type { PolymarketVenue } from "./venues/polymarket.js";
 import type { CashChain, YieldVenue } from "./venues/yield.js";
 import { NotTradableYet, VenueError, type PositionView, type SpotVenueAdapter, type VenueAdapter } from "./venues/types.js";
+import { closeReceipt } from "./venues/hyperliquid.js";
+import { receiptFromText, receiptHtml, receiptPlain, rowFromText, type Receipt, type StepReceipt } from "./receipt.js";
+import { tokenChart } from "./links.js";
+import type { SnapshotMaker } from "./snapshot.js";
 
 export interface FrenDeps {
   store: Store;
@@ -49,6 +53,14 @@ export interface FrenDeps {
   signer: SignerApi | null;
   isTestnet: boolean;
   codeTtlMs?: number;
+  /** Draws chart pictures for receipts. None: receipts go without one. */
+  snapshots?: SnapshotMaker | null;
+}
+
+/** Owner settings that aren't trading limits. */
+export interface Settings {
+  /** Chart snapshots on receipts. */
+  images: boolean;
 }
 
 export interface SubmitResult {
@@ -58,6 +70,8 @@ export interface SubmitResult {
   text: string;
   /** True when the code went straight to the owner over a private line. */
   codeSentPrivately?: boolean;
+  /** True when Fren already sent the owner the receipt (numbers, links, chart) on its own line. */
+  receiptSent?: boolean;
   /**
    * Only set when there is no private line. The caller must deliver this to the
    * owner without showing it to the model.
@@ -67,6 +81,7 @@ export interface SubmitResult {
 
 export interface OwnerRequestResult {
   text: string;
+  receiptSent?: boolean;
   codeSentPrivately?: boolean;
   ownerCode?: string;
 }
@@ -221,15 +236,80 @@ export class Fren {
     }
 
     this.d.store.insertPlan({ id, request: plan.request, plan: canonicalPlan, status: "active", mode }, resolved, () => "pending");
-    const text = await this.run(id, resolved, decision);
-    return { planId: id, verdict: "executed", text: `${header}${text}` };
+    const out = await this.run(id, resolved, decision);
+    const receiptSent = out.executed ? await this.deliver({ ...(mode === "paper" ? { header: "📝 Paper mode" } : {}), steps: out.steps }) : false;
+    return { planId: id, verdict: "executed", text: `${header}${out.text}`, ...(receiptSent ? { receiptSent } : {}) };
   }
 
-  /** Run immediate steps now and arm conditional ones. Returns the one-message summary. */
-  private async run(planId: string, resolved: ResolvedStep[], decision: PolicyDecision): Promise<string> {
+  // -- receipts ------------------------------------------------------------
+
+  settings(): Settings {
+    return { images: this.d.store.getKv("receipt_images") !== "off" };
+  }
+
+  setSettings(changes: Partial<Settings>): Settings {
+    if (typeof changes.images === "boolean") this.d.store.setKv("receipt_images", changes.images ? "on" : "off");
+    return this.settings();
+  }
+
+  /**
+   * Send the owner the receipt on their own line: named links, and a chart
+   * picture when images are on and the line shows pictures. Never throws; a
+   * chart that can't be drawn in time is left out.
+   */
+  async deliver(receipt: Receipt, text?: string): Promise<boolean> {
+    if (!this.d.notifier.hasPrivateLine || !receipt.steps.length) return false;
+    let photo: Buffer | null = null;
+    const req = receipt.steps.find((s) => s.chart)?.chart;
+    if (req && this.d.snapshots && this.d.notifier.showsImages && this.settings().images) {
+      photo = await Promise.race([
+        this.d.snapshots.chart(req).catch(() => null),
+        new Promise<null>((r) => setTimeout(() => r(null), 8000).unref?.()),
+      ]);
+    }
+    return this.d.notifier.sendReceipt({ html: receiptHtml(receipt), plain: receiptPlain(receipt), photo, ...(text ? { text } : {}) }).catch(() => false);
+  }
+
+  /** A watcher result: logged for the record, and sent as a receipt (or as text when there's none). */
+  private async alertReceipt(text: string, receipt: Receipt | null): Promise<void> {
+    if (!receipt) return this.d.notifier.alert(text);
+    this.d.store.addEvent(text);
+    if (!(await this.deliver(receipt, text))) await this.d.notifier.sendPrivate(text).catch(() => false);
+  }
+
+  /** The step's receipt from its venue, or one built from its text, with links to follow a token. */
+  private stepReceipt(r: ResolvedStep, text: string, venueReceipt: StepReceipt | undefined, extra: string[] = []): StepReceipt {
+    const base = venueReceipt ?? receiptFromText(text);
+    const rows = [...extra.map((l) => rowFromText(l.startsWith("⚠️") ? l : `↪ ${l.replace(/^(✅|↪)\s*/, "")}`)), ...base.rows];
+    const leg = r.step.leg;
+    const receipt: StepReceipt = { ...base, rows };
+    if (leg.kind === "swap" && !venueReceipt && /^(✅|📝)$/.test(base.icon)) {
+      const chart = tokenChart(leg.chain, leg.token);
+      if (chart && !receipt.links.some((l) => l.url === chart.url)) receipt.links = [...receipt.links, chart];
+      const px = Number(/ at \$([\d.,]+)/.exec(base.title)?.[1]?.replace(/,/g, "") ?? NaN);
+      if ((leg.chain === "solana" || leg.chain === "base" || leg.chain === "arbitrum") && px > 0) {
+        receipt.chart = {
+          source: { kind: "token", network: leg.chain, address: leg.token },
+          title: `${leg.side === "buy" ? "Bought" : "Sold"} ${r.symbol.length > 12 ? "" : r.symbol}`.trim(),
+          subtitle: base.title.replace(/^(Bought|Sold)\s*/, ""),
+          levels: [{ kind: leg.side === "buy" ? "entry" : "exit", price: px, label: leg.side === "buy" ? "BUY" : "SELL" }],
+          marks: [{ t: Date.now(), price: px, side: leg.side }],
+        };
+      }
+    }
+    return receipt;
+  }
+
+  /**
+   * Run immediate steps now and arm conditional ones. Returns the one-message
+   * summary, each step as a receipt, and whether anything was filled.
+   */
+  private async run(planId: string, resolved: ResolvedStep[], decision: PolicyDecision): Promise<{ text: string; steps: StepReceipt[]; executed: boolean }> {
     const rec = this.d.store.getPlan(planId);
     if (!rec) throw new Error(`Unknown plan ${planId}`);
     const lines: string[] = [];
+    const steps: StepReceipt[] = [];
+    let executed = false;
     for (const r of resolved) {
       const warn = decision.steps.find((s) => s.index === r.index)?.warnings ?? [];
       if (r.step.when.length > 0) {
@@ -237,18 +317,20 @@ export class Fren {
         lines.push(`👀 Watching: ${describeStep(r.step, r)}`);
         for (const p of r.prepares ?? []) lines.push(`   ↪ ${p}`);
         for (const w of warn) lines.push(`   ⚠️ ${w}`);
+        steps.push({ icon: "👀", title: `Watching: ${describeStep(r.step, r)}`, rows: [...(r.prepares ?? []).map((p) => ({ text: `↪ ${p}` })), ...warn.map((w) => ({ text: `⚠️ ${w}` }))], links: [] });
         continue;
       }
-      lines.push(await this.executeStep(planId, r, rec.mode));
+      const out = await this.runStep(planId, r, rec.mode);
+      lines.push(out.text);
       for (const w of warn) lines.push(`   ⚠️ ${w}`);
+      if (out.receipt) {
+        steps.push({ ...out.receipt, rows: [...out.receipt.rows, ...warn.map((w) => ({ text: `⚠️ ${w}` }))] });
+        if (out.filled) executed = true;
+      }
     }
     this.d.store.settlePlan(planId);
     if (this.d.store.getPlan(planId)?.status !== "done") this.d.store.setPlanStatus(planId, "active");
-    return lines.join("\n");
-  }
-
-  private async executeStep(planId: string, r: ResolvedStep, mode: Mode): Promise<string> {
-    return (await this.runStep(planId, r, mode)).text;
+    return { text: lines.join("\n"), steps, executed };
   }
 
   /**
@@ -256,7 +338,7 @@ export class Fren {
    * yet, or pump.fun moving it to its pool) waits for it instead of failing:
    * `waiting` is set, and `quiet` when the owner was already told.
    */
-  private async runStep(planId: string, r: ResolvedStep, mode: Mode): Promise<{ text: string; waiting?: boolean; quiet?: boolean }> {
+  private async runStep(planId: string, r: ResolvedStep, mode: Mode): Promise<StepOutcome> {
     try {
       const snipe = r.step.when.some((c) => c.type === "tradable");
       // A snipe pays from what the wallet holds (SOL first on Solana): pulling lent USDC back first only slows it down.
@@ -265,12 +347,12 @@ export class Fren {
       const text = topUp ? `${topUp}\n${res.text}` : res.text;
       this.d.store.setStep(planId, r.index, "filled", text);
       if (this.d.store.getKv(retryKey(planId, r.index))) this.d.store.setKv(retryKey(planId, r.index), "");
-      return { text };
+      return { text, filled: true, receipt: this.stepReceipt(r, res.text, res.receipt, topUp ? topUp.split("\n") : []) };
     } catch (err) {
       if (err instanceof NotTradableYet && r.step.leg.kind === "swap" && r.step.leg.side === "buy") return this.waitForTrading(planId, r, err.message);
       const msg = `❌ ${describeStep(r.step, r)}: ${(err as Error).message}`;
       this.d.store.setStep(planId, r.index, "failed", msg);
-      return { text: msg };
+      return { text: msg, receipt: { icon: "❌", title: describeStep(r.step, r), rows: (err as Error).message.split("\n").map(rowFromText), links: [] } };
     }
   }
 
@@ -279,7 +361,7 @@ export class Fren {
    * BUY_RETRY_WINDOW_MS from the first try. A plain buy gains a "tradable"
    * condition, so it becomes a snipe the fast loop watches.
    */
-  private waitForTrading(planId: string, r: ResolvedStep, why: string): { text: string; waiting?: boolean; quiet?: boolean } {
+  private waitForTrading(planId: string, r: ResolvedStep, why: string): StepOutcome {
     const leg = r.step.leg;
     if (leg.kind !== "swap") throw new Error("only swaps wait for trading");
     const key = retryKey(planId, r.index);
@@ -347,6 +429,16 @@ export class Fren {
    * waiting code is dropped and the owner is told on their private line.
    */
   async approve(code: string): Promise<string> {
+    return (await this.approveWithReceipt(code)).text;
+  }
+
+  /** The /ok command, saying whether the result's receipt already went to the owner (so the reply can stay short). */
+  async approveWithReceipt(code: string): Promise<OwnerRequestResult> {
+    const r = await this.approveInner(code);
+    return typeof r === "string" ? { text: r } : r;
+  }
+
+  private async approveInner(code: string): Promise<string | OwnerRequestResult> {
     let entered = code.trim().toUpperCase();
     if (!entered) {
       // A tap on the /ok link in the bot's message sends no code. Only the owner can send /ok,
@@ -384,7 +476,9 @@ export class Fren {
     if (p.kind === "closeall") return this.closeAllNow();
     if (p.kind === "fund") {
       const { venue, usd, to } = JSON.parse(p.payload) as { venue: FundVenue; usd: number; to: string };
-      return this.runFunding(venue, usd, to).catch((err: Error) => `❌ ${err.message}`);
+      const text = await this.runFunding(venue, usd, to).catch((err: Error) => `❌ ${err.message}`);
+      const receiptSent = text.startsWith("✅") && (await this.deliver({ steps: [receiptFromText(text)] }));
+      return { text, ...(receiptSent ? { receiptSent } : {}) };
     }
     const rec = this.d.store.getPlan(p.payload);
     if (!rec || rec.status !== "pending_confirm") return "That plan is no longer waiting for approval.";
@@ -401,7 +495,9 @@ export class Fren {
       return `Not doing this after all:\n${describeDecision(decision, resolved)}`;
     }
     this.d.store.setPlanStatus(rec.id, "active");
-    return this.run(rec.id, resolved, decision);
+    const out = await this.run(rec.id, resolved, decision);
+    const receiptSent = out.executed && (await this.deliver({ ...(rec.mode === "paper" ? { header: "📝 Paper mode" } : {}), steps: out.steps }));
+    return { text: out.text, ...(receiptSent ? { receiptSent } : {}) };
   }
 
   /** Limits: tightening applies at once; loosening needs the owner's code. */
@@ -632,6 +728,8 @@ export class Fren {
       const limits = this.limits();
       const snap = await this.snapshot();
       await this.paperExits(snap);
+      // Stops and targets fill on the exchange whether or not Fren is paused.
+      await this.checkExchangeExits().catch(() => {});
       // Paused: the watcher keeps running but only exits fire (sales, closes, paper stops);
       // entries, buys, snipes and bets wait for /resume or were cancelled by the pause.
       if (limits.paused) {
@@ -684,7 +782,17 @@ export class Fren {
         }
         const out = await this.runStep(rec.id, r, rec.mode);
         if (out.quiet) continue;
-        await this.d.notifier.alert(out.waiting ? out.text : `⚡ Triggered\n${statuses.map(describeConditionStatus).join("\n")}\n${out.text}`);
+        const text = out.waiting ? out.text : `⚡ Triggered\n${statuses.map(describeConditionStatus).join("\n")}\n${out.text}`;
+        await this.alertReceipt(
+          text,
+          out.waiting || !out.receipt
+            ? null
+            : {
+                header: `⚡ ${rec.mode === "paper" ? "Paper plan" : "Your plan"} fired: ${statuses.map(describeConditionStatus).join("; ")}`,
+                steps: [out.receipt],
+                footer: [`You asked: "${rec.request.slice(0, 200)}"`],
+              },
+        );
       }
       this.d.store.settlePlan(rec.id);
     }
@@ -703,7 +811,9 @@ export class Fren {
       else if (p.takeProfitPrice !== null && (long ? mark >= p.takeProfitPrice : mark <= p.takeProfitPrice)) verb = "Target hit, closed";
       if (!verb) continue;
       const text = this.d.hyperliquid.paperCloseAt(p.symbol, mark, 1, { mode: "paper", planId: null, idx: null }, verb);
-      await this.d.notifier.alert(text);
+      const kind = verb.startsWith("Liquidated") ? "liquidated" : verb.startsWith("Stop") ? "stop hit" : "target hit";
+      const receipt = closeReceipt({ icon: kind === "liquidated" ? "💥" : kind === "stop hit" ? "🛑" : "🎯", verb: kind, side: p.side, coin: p.symbol, size: p.size, px: mark, entry: p.entry, pnl, links: [] });
+      await this.alertReceipt(text, { header: "📝 Paper mode", steps: [receipt] });
     }
   }
 
@@ -861,11 +971,50 @@ It shows up as pUSD in your Polymarket wallet ${to}.`;
     if (!this.d.signer) return "No wallets yet. Run `fren init` first.";
     if (this.limits().paused) return "Fren is stopped. Send /resume first.";
     try {
-      return await this.d.hyperliquid.deposit(amountUsd);
+      const text = await this.d.hyperliquid.deposit(amountUsd);
+      return text;
     } catch (err) {
       if (err instanceof VenueError) return `Didn't deposit: ${err.message}`;
       throw err;
     }
+  }
+
+  /** A deposit, with its receipt sent to the owner. */
+  async depositWithReceipt(amountUsd: number): Promise<OwnerRequestResult> {
+    const text = await this.depositToHyperliquid(amountUsd);
+    const receiptSent = text.startsWith("✅") ? await this.deliver({ steps: [receiptFromText(text)] }) : false;
+    return { text, ...(receiptSent ? { receiptSent } : {}) };
+  }
+
+  // -- stops and targets that fill on the exchange --------------------------------
+
+  private lastExitCheck = 0;
+
+  /**
+   * Hyperliquid runs live stops and targets itself, so Fren wouldn't know
+   * when one fills. About once a minute while there may be a position, look at
+   * the account's fills and send a receipt for each close Fren didn't make.
+   */
+  async checkExchangeExits(nowMs = Date.now()): Promise<void> {
+    if (this.limits().mode !== "live" || !this.d.signer) return;
+    if (nowMs - this.lastExitCheck < 55_000) return;
+    const lastOpen = this.d.store.lastLiveOpen("hyperliquid");
+    // Nothing opened in the last 30 days: no stop can be standing.
+    if (!lastOpen || nowMs - Date.parse(lastOpen) > 30 * 86_400_000) return;
+    this.lastExitCheck = nowMs;
+    const key = "hl_exits_seen_ms";
+    const seen = Number(this.d.store.getKv(key) || 0);
+    // The first look starts at the last open, so a stop that hit before this version still gets its receipt.
+    const since = seen || Date.parse(lastOpen);
+    const ours = this.d.store.liveFillRefs("hyperliquid", new Date(since - 86_400_000).toISOString());
+    const exits = await this.d.hyperliquid.exchangeExits(since, ours).catch(() => null);
+    if (!exits) return;
+    let last = since;
+    for (const e of exits) {
+      await this.alertReceipt(e.text, { steps: [e.receipt] });
+      last = Math.max(last, e.at);
+    }
+    this.d.store.setKv(key, String(exits.length ? last : Math.max(since, nowMs - 60_000)));
   }
 
   async searchMarkets(query: string): Promise<string> {
@@ -958,3 +1107,13 @@ function fmtCoin(v: number): string {
   if (v === 0) return "0";
   return String(Number(v >= 0.01 ? v.toFixed(4) : v.toPrecision(2)));
 }
+
+interface StepOutcome {
+  text: string;
+  /** Something was bought, sold, opened or closed. */
+  filled?: boolean;
+  waiting?: boolean;
+  quiet?: boolean;
+  receipt?: StepReceipt;
+}
+

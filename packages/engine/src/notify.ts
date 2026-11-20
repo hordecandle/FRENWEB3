@@ -1,6 +1,16 @@
 import { execFile } from "node:child_process";
 import type { Fetch } from "./http.js";
 import type { Store } from "./store.js";
+import { visibleLength } from "./receipt.js";
+
+/** A receipt for the owner: Telegram HTML with named links, the same as plain text, and maybe a chart picture. */
+export interface OwnerMessage {
+  html: string;
+  plain: string;
+  photo?: Buffer | null;
+  /** The venue's own one-line wording of the same result, kept for the event log. */
+  text?: string;
+}
 
 /**
  * Messages to the owner that must not pass through the agent: confirmation
@@ -14,13 +24,22 @@ export interface Notifier {
   sendPrivate(text: string): Promise<boolean>;
   /** Watcher alerts. Logged as events for the plugin to relay, and sent to the owner when possible. */
   alert(text: string): Promise<void>;
+  /** A receipt, with links and a picture where the line can show them. False when no line took it. */
+  sendReceipt(msg: OwnerMessage): Promise<boolean>;
+  /** True when a line can show pictures (worth drawing a chart for). */
+  readonly showsImages: boolean;
 }
 
 /** One way to reach the owner. */
 export interface OwnerLine {
   readonly name: string;
   send(text: string): Promise<boolean>;
+  /** Lines that can show links and pictures. Others get the plain text. */
+  sendRich?(msg: OwnerMessage): Promise<boolean>;
 }
+
+/** Telegram's limit for a photo caption, in visible characters. */
+const CAPTION_MAX = 1024;
 
 /**
  * The Telegram Bot API, called directly. Bots don't receive their own
@@ -41,6 +60,34 @@ export class TelegramLine implements OwnerLine {
       body: JSON.stringify({ chat_id: this.cfg.ownerChatId, text, disable_web_page_preview: true }),
     });
     return res.ok;
+  }
+
+  /**
+   * HTML with named links, and the chart as a photo when there is one: one
+   * message with the receipt as its caption when it fits, else the photo and
+   * then the receipt. If Telegram refuses the HTML, the plain text still goes.
+   */
+  async sendRich(msg: OwnerMessage): Promise<boolean> {
+    const api = `https://api.telegram.org/bot${this.cfg.botToken}`;
+    if (msg.photo) {
+      const fits = visibleLength(msg.html) <= CAPTION_MAX;
+      const form = new FormData();
+      form.set("chat_id", this.cfg.ownerChatId);
+      form.set("photo", new Blob([new Uint8Array(msg.photo)], { type: "image/png" }), "fren-trade.png");
+      if (fits) {
+        form.set("caption", msg.html);
+        form.set("parse_mode", "HTML");
+      }
+      const res = await this.fetchFn(`${api}/sendPhoto`, { method: "POST", body: form }).catch(() => null);
+      if (res?.ok && fits) return true;
+    }
+    const res = await this.fetchFn(`${api}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: this.cfg.ownerChatId, text: msg.html, parse_mode: "HTML", disable_web_page_preview: true }),
+    });
+    if (res.ok) return true;
+    return this.send(msg.plain);
   }
 }
 
@@ -92,12 +139,22 @@ export class GatewayLine implements OwnerLine {
 /** Reaches the owner on the first line that works, in the order given. */
 export class OwnerNotifier implements Notifier {
   readonly hasPrivateLine: boolean;
+  readonly showsImages: boolean;
 
   constructor(
     private readonly store: Store,
     private readonly lines: OwnerLine[],
   ) {
     this.hasPrivateLine = lines.length > 0;
+    this.showsImages = Boolean(lines[0]?.sendRich);
+  }
+
+  async sendReceipt(msg: OwnerMessage): Promise<boolean> {
+    for (const line of this.lines) {
+      const ok = await (line.sendRich ? line.sendRich(msg) : line.send(msg.plain)).catch(() => false);
+      if (ok) return true;
+    }
+    return false;
   }
 
   async sendPrivate(text: string): Promise<boolean> {
@@ -116,10 +173,18 @@ export class OwnerNotifier implements Notifier {
 /** For tests and for setups without a line to the owner. */
 export class MemoryNotifier implements Notifier {
   readonly sent: string[] = [];
+  readonly receipts: OwnerMessage[] = [];
   constructor(
     private readonly store: Store,
     readonly hasPrivateLine = true,
+    readonly showsImages = true,
   ) {}
+  async sendReceipt(msg: OwnerMessage) {
+    if (!this.hasPrivateLine) return false;
+    this.receipts.push(msg);
+    this.sent.push(msg.text ?? msg.plain);
+    return true;
+  }
   async sendPrivate(text: string) {
     if (!this.hasPrivateLine) return false;
     this.sent.push(text);

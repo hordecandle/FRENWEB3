@@ -18,7 +18,8 @@
       "fren_bet_quote",
       "fren_fund",
       "fren_yield",
-      "fren_run_code"
+      "fren_run_code",
+      "fren_settings"
     ]
   },
   "activation": {

@@ -32,13 +32,20 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     "GET /agent/guard": async () => (budget ? { guard: budget.limits(), usedToday: budget.usedToday() } : { guard: null }),
     "POST /agent/turn": async () => (budget ? budget.take() : { allow: true, used: 0, limit: 0 }),
     "POST /plans": async (b) => fren.submit(b.plan),
-    "POST /approve": async (b) => ({ text: await fren.approve(String(b.code ?? "")) }),
+    "POST /approve": async (b) => fren.approveWithReceipt(String(b.code ?? "")),
     "POST /limits": async (b) => fren.changeLimits(String(b.args ?? "")),
     "POST /resume": async () => fren.requestResume(),
     "POST /stop": async (b) => ({ text: await fren.stop(b.lang) }),
     "POST /close_all": async () => fren.requestCloseAll(),
     "POST /cancel": async (b) => ({ text: await fren.cancel(String(b.planId ?? "")) }),
-    "POST /deposit/hyperliquid": async (b) => ({ text: await fren.depositToHyperliquid(Number(b.amountUsd)) }),
+    "POST /deposit/hyperliquid": async (b) => fren.depositWithReceipt(Number(b.amountUsd)),
+    "GET /settings": async () => ({ settings: fren.settings(), text: describeSettings(fren.settings()) }),
+    "POST /settings": async (b) => {
+      const changes: { images?: boolean } = {};
+      if (b.images !== undefined) changes.images = parseOnOff(b.images);
+      const settings = fren.setSettings(changes);
+      return { settings, text: describeSettings(settings) };
+    },
     "POST /bets/quote": async (b) => fren.quoteBet(betQuery(b), String(b.request ?? "")),
     /** /fren_dashboard: a one-time login link, sent to the owner privately when there's a line. */
     /** The Fren plugin calls this when the OpenClaw gateway starts: the chat line is up. */
@@ -84,7 +91,8 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
       // A trade that ran long (EVM approve, swap and fill can take minutes) or whose chat
       // reply the agent may no longer be waiting for: tell the owner the outcome directly.
       const text = (result as { text?: string } | null)?.text;
-      if (EXECUTES.has(url.pathname) && text && (res.destroyed || Date.now() - started > slowMs)) {
+      const receiptSent = (result as { receiptSent?: boolean } | null)?.receiptSent === true;
+      if (EXECUTES.has(url.pathname) && text && !receiptSent && (res.destroyed || Date.now() - started > slowMs)) {
         await fren.tellOwner(`${text}`);
       }
       send(200, result);
@@ -102,4 +110,16 @@ function betQuery(b: Record<string, unknown>): BetQuery {
   if (!(q.target > 0)) throw new Error("target must be a price above 0.");
   if (!(q.budgetUsd > 0)) throw new Error("budgetUsd must be above 0.");
   return q;
+}
+
+function parseOnOff(v: unknown): boolean {
+  if (typeof v === "boolean") return v;
+  const t = String(v).trim().toLowerCase();
+  if (["on", "true", "yes", "1"].includes(t)) return true;
+  if (["off", "false", "no", "0"].includes(t)) return false;
+  throw new Error('Say "on" or "off".');
+}
+
+export function describeSettings(s: { images: boolean }): string {
+  return `Chart snapshots on trade receipts: ${s.images ? "on" : "off"}. Turn them ${s.images ? "off with /fren_images off" : "on with /fren_images on"}.`;
 }

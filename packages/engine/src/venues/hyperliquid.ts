@@ -7,6 +7,9 @@ import { postJson, type Fetch } from "../http.js";
 import type { Store } from "../store.js";
 import { HyperliquidMarkets, type HyperliquidMarketsOptions, type PerpMarket } from "./hyperliquid-markets.js";
 import { VenueError, type ExecContext, type ExecResult, type PositionView, type VenueAdapter } from "./types.js";
+import { rowFromText, type Link, type Row, type StepReceipt } from "../receipt.js";
+import { hyperliquidLinks } from "../links.js";
+import type { ChartLevel } from "../chart.js";
 
 type OrderWire = {
   a: number;
@@ -369,14 +372,24 @@ export class HyperliquidVenue implements VenueAdapter {
         spendUsd: margin,
         mode: "paper",
       });
-      return { text: `📝 Paper ${describeFill(leg.side, m.name, size, m.midPx, plan)}` };
+      return {
+        text: `📝 Paper ${describeFill(leg.side, m.name, size, m.midPx, plan)}`,
+        receipt: openReceipt({ icon: "📝", side: leg.side, coin: m.name, size, px: m.midPx, leverage: leg.leverage, plan, margin: perpMarginOf(leg), moved: [], links: [hyperliquidLinks.chart(m.name, this.o.isTestnet)] }),
+      };
     });
   }
 
   private async paperClose(leg: PerpCloseLeg, ctx: ExecContext): Promise<ExecResult> {
     const m = await this.market(leg.market);
+    const pos = this.o.store.paperPosition(m.name);
     const text = this.paperCloseAt(m.name, m.midPx, leg.fraction, ctx, "Closed");
-    return { text };
+    if (!pos) return { text };
+    const size = pos.size * leg.fraction;
+    const pnl = (m.midPx - pos.entry) * size * (pos.side === "long" ? 1 : -1);
+    return {
+      text,
+      receipt: closeReceipt({ icon: "📝", verb: "closed", side: pos.side, coin: m.name, size, px: m.midPx, entry: pos.entry, pnl, partial: leg.fraction < 1, links: [hyperliquidLinks.chart(m.name, this.o.isTestnet)] }),
+    };
   }
 
   /** Close a paper position at a price. Also used by the watcher for paper stops, targets and liquidations. */
@@ -471,7 +484,47 @@ export class HyperliquidVenue implements VenueAdapter {
       mode: "live",
       ref: String(fill.oid),
     });
-    return { text: [...moved, `✅ ${describeFill(leg.side, m.name, size, px, plan)}`].join("\n") };
+    const [hash, liq] = await Promise.all([this.fillHash(fill.oid), this.liquidationPx(m)]);
+    return {
+      text: [...moved, `✅ ${describeFill(leg.side, m.name, size, px, plan)}`].join("\n"),
+      receipt: openReceipt({ icon: "✅", side: leg.side, coin: m.name, size, px, leverage: leg.leverage, plan, margin, moved, liq, links: await this.followLinks(m.name, hash) }),
+    };
+  }
+
+  /** Links to follow a live position: the PnL tracker, the order's proof, the chart. */
+  private async followLinks(coin: string, hash: string | null): Promise<Link[]> {
+    const { evm } = await this.signer().addresses();
+    return [
+      this.o.isTestnet ? hyperliquidLinks.account(evm, true) : hyperliquidLinks.tracker(evm),
+      ...(hash ? [hyperliquidLinks.tx(hash, this.o.isTestnet)] : []),
+      hyperliquidLinks.chart(coin, this.o.isTestnet),
+    ];
+  }
+
+  /**
+   * The exchange's hash for an order's fill, which opens it on Hyperliquid's
+   * explorer. Orders don't get one in the reply, so it is read from the fills.
+   */
+  async fillHash(oid: number): Promise<string | null> {
+    try {
+      const { evm } = await this.signer().addresses();
+      const fills = await this.markets.info<{ oid: number; hash?: string }[]>({ type: "userFillsByTime", user: evm, startTime: Date.now() - 5 * 60_000 });
+      const hash = fills.find((f) => f.oid === oid)?.hash;
+      return hash && !/^0x0+$/.test(hash) ? hash : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async liquidationPx(m: PerpMarket): Promise<number | null> {
+    try {
+      const state = await this.clearinghouse(m.dex);
+      const p = state.assetPositions.find((a) => a.position.coin.toUpperCase() === m.name.toUpperCase());
+      const v = p?.position.liquidationPx ? Number(p.position.liquidationPx) : NaN;
+      return Number.isFinite(v) && v > 0 ? v : null;
+    } catch {
+      return null;
+    }
   }
 
   private async clearinghouse(dex: string): Promise<ClearinghouseState> {
@@ -513,7 +566,65 @@ export class HyperliquidVenue implements VenueAdapter {
       mode: "live",
       ref: String(fill.oid),
     });
-    return { text: `✅ Closed ${closed} ${m.name} at ${fmtPrice(px)}, PnL about ${signedUsd(pnl)}` };
+    const hash = await this.fillHash(fill.oid);
+    return {
+      text: `✅ Closed ${closed} ${m.name} at ${fmtPrice(px)}, PnL about ${signedUsd(pnl)}`,
+      receipt: closeReceipt({
+        icon: "✅",
+        verb: "closed",
+        side: szi > 0 ? "long" : "short",
+        coin: m.name,
+        size: closed,
+        px,
+        entry: Number(pos.position.entryPx),
+        pnl,
+        partial: closed + 1e-12 < Math.abs(szi),
+        links: await this.followLinks(m.name, hash),
+      }),
+    };
+  }
+
+  /**
+   * Closes the exchange made by itself since a time: a stop or target that
+   * triggered, or a liquidation. Fren's own orders (in `ours`) are left out:
+   * the owner already had a receipt for those.
+   */
+  async exchangeExits(sinceMs: number, ours: Set<string>): Promise<{ at: number; text: string; receipt: StepReceipt }[]> {
+    if (!this.o.signer) return [];
+    const { evm } = await this.signer().addresses();
+    type Fill = { coin: string; px: string; sz: string; time: number; dir: string; closedPnl: string; hash: string; oid: number; fee: string; liquidation?: unknown };
+    const fills = await this.markets.info<Fill[]>({ type: "userFillsByTime", user: evm, startTime: sinceMs + 1 });
+    const byOrder = new Map<number, Fill[]>();
+    for (const f of fills) {
+      if (!/^Close (Long|Short)$/.test(f.dir) && !f.liquidation) continue;
+      if (ours.has(String(f.oid))) continue;
+      byOrder.set(f.oid, [...(byOrder.get(f.oid) ?? []), f]);
+    }
+    const out: { at: number; text: string; receipt: StepReceipt }[] = [];
+    for (const [oid, fs] of byOrder) {
+      const size = fs.reduce((a, f) => a + Number(f.sz), 0);
+      if (!(size > 0)) continue;
+      const px = fs.reduce((a, f) => a + Number(f.px) * Number(f.sz), 0) / size;
+      const pnl = fs.reduce((a, f) => a + Number(f.closedPnl), 0);
+      const fees = fs.reduce((a, f) => a + Number(f.fee), 0);
+      const at = Math.max(...fs.map((f) => f.time));
+      const first = fs[0]!;
+      const side = /Short/.test(first.dir) ? "short" : "long";
+      const dir = side === "long" ? 1 : -1;
+      const entry = px - pnl / (size * dir);
+      let type = "";
+      if (!fs.some((f) => f.liquidation)) {
+        type = await this.markets
+          .info<{ order?: { order?: { orderType?: string } } }>({ type: "orderStatus", user: evm, oid })
+          .then((r) => r.order?.order?.orderType ?? "")
+          .catch(() => "");
+      }
+      const kind = fs.some((f) => f.liquidation) ? "liquidated" : /^Stop/i.test(type) ? "stop hit" : /^Take Profit/i.test(type) ? "target hit" : "closed on Hyperliquid";
+      const icon = kind === "liquidated" ? "💥" : kind === "stop hit" ? "🛑" : kind === "target hit" ? "🎯" : "✅";
+      const receipt = closeReceipt({ icon, verb: kind, side, coin: first.coin, size, px, entry, pnl, fees, at, links: await this.followLinks(first.coin, first.hash || null) });
+      out.push({ at, receipt, text: `${icon} ${receipt.title}: ${qty(size)} ${coinName(first.coin)} at ${fmtPrice(px)}, PnL about ${signedUsd(pnl)}` });
+    }
+    return out.sort((a, b) => a.at - b.at);
   }
 
   async positions(mode: "paper" | "live"): Promise<PositionView[]> {
@@ -586,4 +697,111 @@ function describeFill(side: string, symbol: string, size: number, px: number, pl
   if (plan.stopPx !== null) exits.push(`stop ${fmtPrice(plan.stopPx)}`);
   if (plan.takeProfitPx !== null) exits.push(`target ${fmtPrice(plan.takeProfitPx)}`);
   return `${side === "long" ? "Longed" : "Shorted"} ${size} ${symbol} at ${fmtPrice(px)} (${fmtUsd(size * px)})${exits.length ? `, ${exits.join(", ")}` : ""}`;
+}
+
+/** "xyz:ANT" reads as ANT; the dex prefix is plumbing. */
+export function coinName(coin: string): string {
+  return coin.includes(":") ? coin.slice(coin.indexOf(":") + 1) : coin;
+}
+
+const qty = (n: number) => String(Number(n.toPrecision(6)));
+
+/** Lines Fren printed while moving the margin into place, as receipt rows with their proof links. */
+function movedRows(moved: string[]): Row[] {
+  return moved.map((l) => rowFromText(`↪ ${l.replace(/^(✅|↪)\s*/, "")}`));
+}
+
+export function openReceipt(o: {
+  icon: string;
+  side: "long" | "short";
+  coin: string;
+  size: number;
+  px: number;
+  leverage: number;
+  plan: PerpOrderPlan;
+  moved: string[];
+  liq?: number | null;
+  links: Link[];
+  /** The margin the owner asked for; the fill's own works out a few cents off. */
+  margin?: number;
+}): StepReceipt {
+  const name = coinName(o.coin);
+  const dir = o.side === "long" ? 1 : -1;
+  const notional = o.size * o.px;
+  const margin = o.margin ?? notional / o.leverage;
+  const rows: Row[] = [
+    { text: `Size: ${qty(o.size)} ${name}, a ${fmtUsd(notional)} position on ${fmtUsd(margin)} margin at ${o.leverage}x` },
+    { text: `Entry: ${fmtPrice(o.px)}` },
+  ];
+  const levels: ChartLevel[] = [{ kind: "entry", price: o.px, label: "ENTRY" }];
+  if (o.plan.stopPx !== null) {
+    rows.push({ text: `Stop: ${fmtPrice(o.plan.stopPx)} (about ${signedUsd((o.plan.stopPx - o.px) * o.size * dir)})` });
+    levels.push({ kind: "stop", price: o.plan.stopPx, label: "STOP" });
+  }
+  if (o.plan.takeProfitPx !== null) {
+    rows.push({ text: `Target: ${fmtPrice(o.plan.takeProfitPx)} (about ${signedUsd((o.plan.takeProfitPx - o.px) * o.size * dir)})` });
+    levels.push({ kind: "target", price: o.plan.takeProfitPx, label: "TARGET" });
+  }
+  if (o.plan.stopPx === null && o.plan.takeProfitPx === null) rows.push({ text: "No stop or target set." });
+  if (o.liq) {
+    rows.push({ text: `Liquidation: about ${fmtPrice(o.liq)}` });
+    levels.push({ kind: "liq", price: o.liq, label: "LIQ" });
+  }
+  rows.push(...movedRows(o.moved));
+  return {
+    icon: o.icon,
+    title: `${o.side === "long" ? "Long" : "Short"} ${name} opened`,
+    rows,
+    links: o.links,
+    chart: {
+      source: { kind: "hyperliquid", coin: o.coin },
+      title: `${o.side} ${name} ${o.leverage}x`,
+      subtitle: `${qty(o.size)} ${name} · ${fmtUsd(notional)} position · ${fmtUsd(margin)} margin`,
+      levels,
+      marks: [{ t: Date.now(), price: o.px, side: o.side === "long" ? "buy" : "sell" }],
+    },
+  };
+}
+
+export function closeReceipt(o: {
+  icon: string;
+  /** "closed", "stop hit", "target hit", "liquidated". */
+  verb: string;
+  side: "long" | "short";
+  coin: string;
+  size: number;
+  px: number;
+  entry: number;
+  pnl: number;
+  partial?: boolean;
+  fees?: number;
+  links: Link[];
+  at?: number;
+}): StepReceipt {
+  const name = coinName(o.coin);
+  const rows: Row[] = [
+    { text: `${o.partial ? "Closed part" : "Closed"}: ${qty(o.size)} ${name} at ${fmtPrice(o.px)}` },
+    { text: `Entry was ${fmtPrice(o.entry)}` },
+    { text: `PnL: about ${signedUsd(o.pnl)}${o.fees ? ` (fees ${fmtUsd(o.fees)})` : ""}` },
+  ];
+  return {
+    icon: o.icon,
+    title: `${o.side === "long" ? "Long" : "Short"} ${name} ${o.verb}`,
+    rows,
+    links: o.links,
+    chart: {
+      source: { kind: "hyperliquid", coin: o.coin },
+      title: `${name} ${o.side} ${o.verb}`,
+      subtitle: `PnL ${signedUsd(o.pnl)} · entry ${fmtPrice(o.entry)} · exit ${fmtPrice(o.px)}`,
+      levels: [
+        { kind: "entry", price: o.entry, label: "ENTRY" },
+        { kind: "exit", price: o.px, label: "EXIT" },
+      ],
+      marks: [{ t: o.at ?? Date.now(), price: o.px, side: o.side === "long" ? "sell" : "buy" }],
+    },
+  };
+}
+
+function perpMarginOf(leg: PerpOpenLeg): number {
+  return leg.sizing.type === "margin" ? leg.sizing.usd : leg.sizing.usd / leg.leverage;
 }

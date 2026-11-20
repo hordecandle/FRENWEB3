@@ -73,6 +73,8 @@ For snipes, get a free Jupiter API key at portal.jup.ag and put it in `~/.fren/c
 
 For WhatsApp, link it in OpenClaw first (`openclaw channels login --channel whatsapp`). A separate number for OpenClaw works best: chat with it from your own phone, and `--notify` your own number. Fren sends through the running gateway, so keep it up.
 
+Every trade ends with one receipt in the chat, sent by Fren itself (Telegram gets it with formatting): the key numbers, proof links with names instead of pasted URLs (Solscan, Arbiscan, Basescan, Hyperliquid's explorer, Relay), a link to follow the token or position (Hyperdash for Hyperliquid PnL, DexScreener for tokens), and a chart snapshot with the entry, stop, target and liquidation drawn on it. When a stop or target fills on Hyperliquid, Fren sends that receipt too, within about a minute. Turn the chart pictures off with `/fren_images off` (or just ask), and back on with `/fren_images on`.
+
 Then talk to your OpenClaw bot:
 
 - "what's my wallet" shows where to send USDC (Solana for Solana coins, Arbitrum or Base for perps and EVM tokens).
