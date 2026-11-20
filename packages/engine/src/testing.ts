@@ -1,3 +1,4 @@
+import { Snapshots } from "./snapshot.js";
 import type { SignerApi } from "@fren/signer";
 import { encodeAbiParameters } from "viem";
 import { Fren } from "./engine.js";
@@ -159,6 +160,12 @@ export class FakeVenues {
   hlTicks = 0;
   /** Called on each of those waits, e.g. to credit a deposit. */
   onHlWait: (() => void) | null = null;
+  /** The account's fills, as Hyperliquid's userFillsByTime gives them. */
+  hlFills: Record<string, unknown>[] = [];
+  /** Order types by oid, for orderStatus ("Stop Market", "Take Profit Market", ...). */
+  hlOrderTypes: Record<number, string> = {};
+  /** What candleSnapshot returns. */
+  hlCandles: { t: number; o: string; h: string; l: string; c: string }[] = [];
   /** Every POST body sent to /exchange. */
   exchange: Record<string, unknown>[] = [];
   /** What /exchange returns for orders. */
@@ -333,6 +340,12 @@ export class FakeVenues {
         const dex = (body.dex as string | undefined) ?? "";
         return json(this.universe(dex ? (this.builder[dex] ?? []) : this.main));
       }
+      if (body.type === "userFillsByTime") return json(this.hlFills.filter((f) => Number(f.time) >= Number(body.startTime)));
+      if (body.type === "orderStatus") {
+        const type = this.hlOrderTypes[Number(body.oid)];
+        return json(type ? { status: "order", order: { order: { orderType: type } } } : { status: "unknownOid" });
+      }
+      if (body.type === "candleSnapshot") return json(this.hlCandles);
       if (body.type === "clearinghouseState") {
         const dex = (body.dex as string | undefined) ?? "";
         return json({ marginSummary: { accountValue: "0" }, withdrawable: String(this.hlFree[dex] ?? this.hlFreeDefault), assetPositions: [] });
@@ -542,6 +555,8 @@ export interface TestFrenOptions {
    * Hyperliquid account with what Relay quoted.
    */
   solanaDirect?: boolean;
+  /** Draw receipt charts from the fake Hyperliquid candles (real chart code, real PNG). */
+  snapshots?: boolean;
 }
 
 /** The whole engine wired to fakes: Hyperliquid, Jupiter, pump.fun, Relay, Derive and Polymarket. */
@@ -642,6 +657,7 @@ export function buildTestFren(opts: TestFrenOptions = {}) {
     derive,
     polymarket,
     yield: yieldVenue,
+    ...(opts.snapshots ? { snapshots: new Snapshots({ fetchFn: fake.fetch, hyperliquidInfo: (body) => hyperliquid.markets.info(body), now: () => clock.t }) } : {}),
   });
   if (opts.live) store.setLimits({ ...store.getLimits(), mode: "live" });
   return { clock, fake, pump, poly, polyTrader, derive, polymarket, yield: yieldVenue, solanaSent, evmBalances, store, notifier, fren, evmTxs, relay };

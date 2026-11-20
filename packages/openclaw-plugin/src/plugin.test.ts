@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApi } from "@fren/engine";
 import { createSigner, generateKeys } from "@fren/signer";
 import { buildTestFren, optionName } from "../../engine/src/testing.js";
-import plugin, { TOOL_NAMES, isOwner } from "./index.js";
+import plugin, { RECEIPT_NOTE, TOOL_NAMES, isOwner } from "./index.js";
 
 type Registered = { tools: Map<string, (ctx: Record<string, unknown>) => any>; commands: Map<string, any> };
 
@@ -46,7 +46,7 @@ describe("OpenClaw plugin against a real engine", () => {
 
   it("registers every declared tool and the owner commands", () => {
     expect([...reg.tools.keys()].sort()).toEqual([...TOOL_NAMES].sort());
-    expect([...reg.commands.keys()].sort()).toEqual(["close_all", "fren_code", "fren_dashboard", "fren_stop", "fren_update", "limits", "ok", "positions", "resume", "stop", "wallet"]);
+    expect([...reg.commands.keys()].sort()).toEqual(["close_all", "fren_code", "fren_dashboard", "fren_images", "fren_snapshots", "fren_stop", "fren_update", "limits", "ok", "positions", "resume", "stop", "wallet"]);
   });
 
   it("/fren_update is owner-only and says plainly when the machine can't update", async () => {
@@ -165,6 +165,33 @@ describe("Bee's ANT long, from the chat tools down, with only USDC on Solana", (
     expect(out).toMatch(/Moved \$51\.16 USDC from your Solana wallet into Hyperliquid through Relay/);
     expect(out).toMatch(/Moved \$50\.75 USDC to Hyperliquid's xyz market/);
     expect(out).toMatch(/✅ Longed 2\.77 xyz:ANT at \$181\.8 \(\$504\), stop \$171, target \$198/);
+    // The owner got the receipt straight from Fren; the model is told not to post it again.
+    expect(out).toContain(RECEIPT_NOTE);
+    expect(t.notifier.receipts).toHaveLength(1);
+    expect(t.notifier.receipts[0]!.html).toMatch(/^✅ <b>Long ANT opened<\/b>/);
+  });
+
+  it("images on and off: /fren_images from the owner, or fren_settings when they ask in words", async () => {
+    const cmd = reg.commands.get("fren_images");
+    expect((await cmd.handler({ senderIsOwner: false, args: "off" })).text).toMatch(/Only the owner/);
+    expect((await cmd.handler({ senderIsOwner: true, args: "off" })).text).toMatch(/snapshots on trade receipts: off/);
+    expect(t.fren.settings().images).toBe(false);
+    expect((await cmd.handler({ senderIsOwner: true, args: "" })).text).toMatch(/: off\. Turn them on with \/fren_images on/);
+    expect(await run("fren_settings", { images: true })).toMatch(/: on\./);
+    expect(await run("fren_settings", {})).toMatch(/: on\./);
+    expect((await reg.commands.get("fren_snapshots").handler({ senderIsOwner: true, args: "nope" })).text).toMatch(/Fren error: .*on.*off/);
+  });
+
+  it("/ok after a code: the receipt is in the chat already, so the reply is one line", async () => {
+    t.store.setLimits({ ...t.store.getLimits(), autoApproveUsd: 0 });
+    t.fake.hlFreeDefault = 1_000_000;
+    const out = await run("fren_trade", { plan: { request: "short BTC $20 2x", steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "BTC", side: "short", sizing: { type: "margin", usd: 20 }, leverage: 2 } }] } });
+    expect(out).toMatch(/code/);
+    const code = /\/ok ([A-Z0-9]{6})/.exec(t.notifier.sent.at(-1) ?? "")![1];
+    const before = t.notifier.receipts.length;
+    expect((await reg.commands.get("ok").handler({ senderIsOwner: true, args: code })).text).toBe("✅ Approved. Your receipt is just above.");
+    expect(t.notifier.receipts).toHaveLength(before + 1);
+    expect(t.notifier.receipts.at(-1)!.html).toMatch(/Short BTC opened/);
   });
 
   it("\"deposit $20 to Hyperliquid\" comes from Solana when Arbitrum has nothing", async () => {

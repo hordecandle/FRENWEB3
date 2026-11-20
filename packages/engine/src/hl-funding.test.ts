@@ -46,7 +46,9 @@ describe("a perp pays for itself", () => {
     const { t, deposits } = fresh(70);
     const res = await t.fren.submit(long("xyz:GOLD", 50, 10));
     expect(res.verdict).toBe("executed");
-    expect(t.notifier.sent).toHaveLength(0);
+    // No code: the only message to the owner is the receipt.
+    expect(t.notifier.sent.some((m) => m.includes("/ok"))).toBe(false);
+    expect(t.notifier.receipts).toHaveLength(1);
     expect(deposits).toEqual([50.75]);
     const types = t.fake.exchange.map((b) => (b.action as { type: string }).type);
     expect(types).toEqual(["sendAsset", "approveAgent", "updateLeverage", "order"]);
@@ -226,7 +228,19 @@ describe("straight from Solana USDC through Relay", () => {
     const { t, bridged } = solanaOnly(110);
     const res = await t.fren.submit(antLong);
     expect(res.verdict).toBe("executed");
-    expect(t.notifier.sent).toHaveLength(0);
+    expect(t.notifier.sent.some((m) => m.includes("/ok"))).toBe(false);
+    // One receipt, straight to the owner: the numbers, and every proof as a named link, never a pasted URL.
+    expect(res.receiptSent).toBe(true);
+    expect(t.notifier.receipts).toHaveLength(1);
+    const { html } = t.notifier.receipts[0]!;
+    expect(html).toMatch(/^✅ <b>Long ANT opened<\/b>/);
+    expect(html).toMatch(/Size: 2\.77 ANT, a \$504 position on \$50\.00 margin at 10x/);
+    expect(html).toMatch(/Entry: \$181\.8/);
+    expect(html).toMatch(/Stop: \$171 \(about -\$[\d.]+\)/);
+    expect(html).toMatch(/Target: \$198 \(about \+\$[\d.]+\)/);
+    expect(html).toContain('Moved $51.16 USDC from your Solana wallet into Hyperliquid through Relay (about $51.13 after Relay\'s fee) · <a href="https://solscan.io/tx/relaysig1">Solscan tx</a>');
+    expect(html).toContain('<a href="https://app.hyperliquid-testnet.xyz/trade/xyz:ANT">Chart</a>');
+    expect(html.replace(/href="[^"]*"/g, "")).not.toMatch(/https?:\/\//);
     // One Relay deposit from the Solana wallet, signed after the signer's checks, to the wallet's own Hyperliquid account.
     expect(t.fake.relaySolanaTxs).toHaveLength(1);
     const q = t.fake.relayQuotes.at(-1)!;

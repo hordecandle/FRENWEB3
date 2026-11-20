@@ -50,4 +50,6 @@ export interface OwnerResult {
   verdict?: string;
   codeSentPrivately?: boolean;
   ownerCode?: string;
+  /** Fren already sent the owner the receipt (numbers, links, chart) itself. */
+  receiptSent?: boolean;
 }

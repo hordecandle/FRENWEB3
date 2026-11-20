@@ -63,25 +63,29 @@ describe("trade results that outlive the chat", () => {
   const planBody = JSON.stringify({ plan: { request: "long gold 10x with $50", steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "xyz:gold", side: "long", sizing: { type: "margin", usd: 50 }, leverage: 10 } }] } });
   const post = (port: number) => fetch(`http://127.0.0.1:${port}/plans`, { method: "POST", headers: { authorization: "Bearer t", "content-type": "application/json" }, body: planBody });
 
-  it("sends the outcome to the owner when the trade ran longer than slowMs", async () => {
+  it("sends the outcome to the owner once when the trade ran longer than slowMs", async () => {
     const t = buildTestFren();
     const server = createApi(t.fren, "t", undefined, { slowMs: -1 });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     try {
-      const res = (await (await post((server.address() as { port: number }).port)).json()) as { text: string };
-      expect(t.notifier.sent.at(-1)).toBe(res.text);
+      const res = (await (await post((server.address() as { port: number }).port)).json()) as { text: string; receiptSent?: boolean };
+      // The receipt already reached the owner on their own line: it isn't sent a second time.
+      expect(res.receiptSent).toBe(true);
+      expect(t.notifier.sent).toHaveLength(1);
+      expect(t.notifier.receipts[0]!.plain).toContain("Long GOLD opened");
     } finally {
       server.close();
     }
   });
 
-  it("stays quiet when the trade was quick and the chat got the answer", async () => {
+  it("a quick trade sends only its receipt", async () => {
     const t = buildTestFren();
     const server = createApi(t.fren, "t");
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     try {
       await post((server.address() as { port: number }).port);
-      expect(t.notifier.sent).toEqual([]);
+      expect(t.notifier.sent).toHaveLength(1);
+      expect(t.notifier.receipts).toHaveLength(1);
     } finally {
       server.close();
     }

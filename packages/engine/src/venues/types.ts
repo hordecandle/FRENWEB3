@@ -1,5 +1,6 @@
 import type { PlanStep, ResolvedStep, Venue } from "@fren/core";
 import type { Mode } from "../store.js";
+import type { StepReceipt } from "../receipt.js";
 
 export interface ExecContext {
   mode: Mode;
@@ -12,6 +13,11 @@ export interface ExecContext {
 export interface ExecResult {
   /** One line for the chat reply: what happened, where, at what price. */
   text: string;
+  /**
+   * The same result as a receipt, when the venue builds one (key numbers,
+   * proof links, a chart). Without it the engine builds one from `text`.
+   */
+  receipt?: StepReceipt;
 }
 
 export interface PositionView {

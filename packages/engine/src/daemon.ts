@@ -23,6 +23,7 @@ import { JupiterLendUsdc, KaminoUsdc } from "./venues/solana-lend.js";
 import { YieldVenue, type YieldProtocolAdapter } from "./venues/yield.js";
 import { UpdateReporter, Updater } from "./updater.js";
 import { SnipeFeed, solanaMentions } from "./snipe-feed.js";
+import { Snapshots } from "./snapshot.js";
 
 export interface BuildOptions {
   config: FrenConfig;
@@ -110,6 +111,7 @@ export function buildFren({ config, store, signer, fetchFn = fetch, exec }: Buil
     store,
     signer,
     isTestnet,
+    snapshots: new Snapshots({ fetchFn, hyperliquidInfo: (body) => hyperliquid.markets.info(body) }),
     notifier: new OwnerNotifier(store, ownerLines(config, fetchFn, exec)),
     hyperliquid,
     jupiter,
