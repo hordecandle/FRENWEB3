@@ -5,7 +5,9 @@ import { join } from "node:path";
  * /fren_update. The engine has no root and never runs the installer itself: it
  * drops a request file in its own folder, and a root path unit the VPS installer
  * made (fren-update.path) runs the update, which keeps every wallet and setting.
- * The update script writes a result file that the engine reports at next start.
+ * The update script writes a result file last, after the new engine is up (or
+ * while the old one keeps running when the update failed), so the engine
+ * watches for it rather than reading it only at start.
  */
 export const UPDATE_ENABLED_FILE = "/etc/fren/update.enabled";
 const REQUEST = "update-request";
@@ -51,5 +53,37 @@ export class Updater {
     const detail = rest.join("\n").trim();
     if (status === "ok") return `✅ Fren is updated${detail ? ` (${detail})` : ""}. Wallets and settings are as you left them.`;
     return `⚠️ The update didn't finish, so Fren kept running the version it had.${detail ? ` ${detail}` : ""}`;
+  }
+}
+
+/**
+ * Tells the owner how an update went, once: checks for the result file on a
+ * timer and keeps the message until it's sent (the chat line can be restarting).
+ */
+export class UpdateReporter {
+  private pending: string | null = null;
+  private tries = 0;
+  private busy = false;
+
+  constructor(
+    private readonly updater: Updater,
+    private readonly tell: (text: string) => Promise<boolean>,
+    private readonly maxTries = 40,
+  ) {}
+
+  async check(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      if (!this.pending) {
+        this.pending = this.updater.takeResult();
+        this.tries = 0;
+      }
+      if (!this.pending) return;
+      const sent = await this.tell(this.pending).catch(() => false);
+      if (sent || ++this.tries >= this.maxTries) this.pending = null;
+    } finally {
+      this.busy = false;
+    }
   }
 }

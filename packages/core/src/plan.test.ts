@@ -72,3 +72,29 @@ describe("conditions", () => {
     expect(res.allMet).toBe(false);
   });
 });
+
+describe("stops and targets in dollars", () => {
+  const leg = (extra: Record<string, unknown>, sizing: Record<string, unknown> = { type: "margin", usd: 50 }) => ({
+    request: "long ANT $50 10x, lose at most $25, take $50",
+    steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "xyz:ANT", side: "long", sizing, leverage: 10, ...extra } }],
+  });
+  const exits = (r: ReturnType<typeof safeParsePlan>) => {
+    const l = r.data?.steps[0]?.leg;
+    return l?.kind === "perp_open" ? { sl: l.stopLossPct, tp: l.takeProfitPct, slUsd: l.stopLossUsd, tpUsd: l.takeProfitUsd } : null;
+  };
+
+  it("become % of margin: -$25 and +$50 on $50 margin are -50% and +100%", () => {
+    const r = safeParsePlan(leg({ stopLossUsd: 25, takeProfitUsd: 50 }));
+    expect(r.success).toBe(true);
+    expect(exits(r)).toEqual({ sl: 50, tp: 100, slUsd: undefined, tpUsd: undefined });
+  });
+
+  it("measure against the margin when the size is given as the position", () => {
+    expect(exits(safeParsePlan(leg({ stopLossUsd: 10 }, { type: "notional", usd: 1000 })))).toMatchObject({ sl: 10 });
+  });
+
+  it("refuse a stop bigger than the margin, or a stop given twice", () => {
+    expect(safeParsePlan(leg({ stopLossUsd: 60 })).error?.issues[0]?.message).toMatch(/more than the \$50 margin/);
+    expect(safeParsePlan(leg({ stopLossUsd: 25, stopLossPct: 50 })).error?.issues[0]?.message).toMatch(/not both/);
+  });
+});

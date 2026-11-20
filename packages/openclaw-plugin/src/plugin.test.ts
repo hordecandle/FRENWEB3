@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApi } from "@fren/engine";
+import { createSigner, generateKeys } from "@fren/signer";
 import { buildTestFren, optionName } from "../../engine/src/testing.js";
 import plugin, { TOOL_NAMES, isOwner } from "./index.js";
 
@@ -134,5 +135,40 @@ describe("OpenClaw plugin against a real engine", () => {
     const dead = loadPlugin({ apiUrl: "http://127.0.0.1:9", tokenFile });
     const res = await dead.tools.get("fren_status")!({ senderIsOwner: true }).execute("x", {});
     expect(res.content[0].text).toMatch(/Can't reach the Fren engine/);
+  });
+});
+
+describe("Bee's ANT long, from the chat tools down, with only USDC on Solana", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fren-plugin-live-"));
+  const tokenFile = join(dir, "api-token");
+  writeFileSync(tokenFile, "plugin-live-token");
+  const t = buildTestFren({ signer: createSigner(generateKeys()), live: true, solanaDirect: true });
+  t.fake.hlFreeDefault = 0;
+  t.fake.solanaUsdc = 110;
+  const server = createApi(t.fren, "plugin-live-token");
+  let reg: Registered;
+  beforeAll(async () => {
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    reg = loadPlugin({ apiUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, tokenFile });
+  });
+  afterAll(() => server.close());
+  const run = async (name: string, params: Record<string, unknown>) => (await reg.tools.get(name)!({ senderIsOwner: true }).execute("c", params)).content[0].text as string;
+
+  it("finds ANT, then one fren_trade funds it from Solana and opens it with the stop and the target", async () => {
+    expect(await run("fren_markets", { query: "ANT" })).toMatch(/xyz:ANT: .*max 10x/);
+    const out = await run("fren_trade", {
+      plan: {
+        request: "long ANT (anthropic) with $50 on 10x leverage with a stoploss so we don t lose more than 25$ and TP when we have $50 profit",
+        steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "xyz:ANT", side: "long", sizing: { type: "margin", usd: 50 }, leverage: 10, stopLossUsd: 25, takeProfitUsd: 50 } }],
+      },
+    });
+    expect(out).toMatch(/Moved \$51\.16 USDC from your Solana wallet into Hyperliquid through Relay/);
+    expect(out).toMatch(/Moved \$50\.75 USDC to Hyperliquid's xyz market/);
+    expect(out).toMatch(/✅ Longed 2\.77 xyz:ANT at \$181\.8 \(\$504\), stop \$171, target \$198/);
+  });
+
+  it("\"deposit $20 to Hyperliquid\" comes from Solana when Arbitrum has nothing", async () => {
+    const out = await run("fren_deposit_hyperliquid", { amountUsd: 20 });
+    expect(out).toMatch(/Moved \$20\.00 USDC from your Solana wallet into Hyperliquid through Relay/);
   });
 });

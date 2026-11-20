@@ -49,6 +49,9 @@ export const PerpOpenLeg = z.object({
   stopLossPct: pct.optional().describe("Stop loss as % of margin lost (ROE). 'Stop at -15%' means 15."),
   /** Take profit as % gained on margin (ROE). May exceed 100. */
   takeProfitPct: z.number().positive().max(10_000).optional().describe("Take profit as % gained on margin (ROE)."),
+  /** The same exits in dollars of margin ("lose at most $25", "take $50 profit"). Parsing turns them into the percentages. */
+  stopLossUsd: usd.optional().describe("Stop loss as dollars lost, when the owner says it in dollars: 'lose at most $25' means 25. Instead of stopLossPct."),
+  takeProfitUsd: usd.optional().describe("Take profit as dollars gained, when the owner says it in dollars: 'take profit at $50 profit' means 50. Instead of takeProfitPct."),
   /** Absolute stop price. Use instead of stopLossPct when the user names a level. */
   stopPrice: z.number().positive().optional().describe("Absolute stop price, when the user names a level."),
   /** Absolute take-profit price. */
@@ -210,6 +213,22 @@ export const Plan = z.object({
   steps: z.array(PlanStep).min(1).max(10),
 }).superRefine((plan, ctx) => {
   plan.steps.forEach((step, i) => {
+    const leg = step.leg;
+    if (leg.kind === "perp_open") {
+      const margin = perpMargin(leg);
+      if (leg.stopLossUsd !== undefined && leg.stopLossPct !== undefined) {
+        ctx.addIssue({ code: "custom", path: ["steps", i, "leg", "stopLossUsd"], message: "give the stop as stopLossUsd or stopLossPct, not both" });
+      }
+      if (leg.takeProfitUsd !== undefined && leg.takeProfitPct !== undefined) {
+        ctx.addIssue({ code: "custom", path: ["steps", i, "leg", "takeProfitUsd"], message: "give the target as takeProfitUsd or takeProfitPct, not both" });
+      }
+      if (leg.stopLossUsd !== undefined && leg.stopLossUsd > margin) {
+        ctx.addIssue({ code: "custom", path: ["steps", i, "leg", "stopLossUsd"], message: `a $${leg.stopLossUsd} stop is more than the $${margin} margin; liquidation comes first` });
+      }
+      if (leg.takeProfitUsd !== undefined && leg.takeProfitUsd > margin * 100) {
+        ctx.addIssue({ code: "custom", path: ["steps", i, "leg", "takeProfitUsd"], message: "take profit is over 100x the margin" });
+      }
+    }
     const pairs: { venue: SpotVenue; chain: Chain; token: string; path: (string | number)[] }[] = [];
     if (step.leg.kind === "swap") pairs.push({ venue: step.leg.venue, chain: step.leg.chain, token: step.leg.token, path: ["steps", i, "leg", "chain"] });
     step.when.forEach((c, j) => {
@@ -230,10 +249,39 @@ export const Plan = z.object({
 export type Plan = z.infer<typeof Plan>;
 export type PlanInput = z.input<typeof Plan>;
 
+/** A perp's margin: what the owner puts up, and what dollar stops and targets are measured against. */
+export function perpMargin(leg: Pick<PerpOpenLeg, "sizing" | "leverage">): number {
+  return leg.sizing.type === "margin" ? leg.sizing.usd : leg.sizing.usd / leg.leverage;
+}
+
+const pctOf = (usd: number, margin: number) => Math.round((usd / margin) * 100 * 100) / 100;
+
+/** Dollar stops and targets become the percentages the rest of Fren reads. */
+function exitsAsPct(plan: Plan): Plan {
+  return {
+    ...plan,
+    steps: plan.steps.map((step) => {
+      const leg = step.leg;
+      if (leg.kind !== "perp_open" || (leg.stopLossUsd === undefined && leg.takeProfitUsd === undefined)) return step;
+      const { stopLossUsd, takeProfitUsd, ...rest } = leg;
+      const margin = perpMargin(leg);
+      return {
+        ...step,
+        leg: {
+          ...rest,
+          ...(stopLossUsd !== undefined ? { stopLossPct: pctOf(stopLossUsd, margin) } : {}),
+          ...(takeProfitUsd !== undefined ? { takeProfitPct: pctOf(takeProfitUsd, margin) } : {}),
+        },
+      };
+    }),
+  };
+}
+
 export function parsePlan(input: unknown): Plan {
-  return Plan.parse(input);
+  return exitsAsPct(Plan.parse(input));
 }
 
 export function safeParsePlan(input: unknown) {
-  return Plan.safeParse(input);
+  const r = Plan.safeParse(input);
+  return r.success ? { ...r, data: exitsAsPct(r.data) } : r;
 }

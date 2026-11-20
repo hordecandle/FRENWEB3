@@ -144,7 +144,7 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string }
       name: "fren_deposit_hyperliquid",
       label: "Fund Hyperliquid",
       description:
-        "Move USDC from the user's own Arbitrum address into their own Hyperliquid account (minimum 5 USDC). Not needed before a long or short: fren_trade moves the margin into Hyperliquid by itself, bridging from Solana when Arbitrum is short. Use this only when the user asks to deposit.",
+        "Move USDC into the user's own Hyperliquid account: from their Arbitrum address when it has the USDC, otherwise straight from their Solana USDC. Not needed before a long or short: fren_trade moves the margin into Hyperliquid by itself. Use this only when the user asks to deposit, and never tell them to deposit first.",
       parameters: Type.Object({ amountUsd: Type.Number({ minimum: 5 }) }),
       run: async (p) => (await client.call<{ text: string }>("POST", "/deposit/hyperliquid", { amountUsd: p.amountUsd })).text,
     },

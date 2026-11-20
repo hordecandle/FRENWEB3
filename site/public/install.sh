@@ -36,6 +36,9 @@ set -euo pipefail
 # Everything lives in main() so bash reads the whole script before running any
 # of it: nothing below can swallow the rest of a piped `curl | bash`.
 main() {
+# systemd runs /fren_update's service with no HOME; `set -u` would stop at the first "$HOME".
+if [[ -z "${HOME:-}" ]]; then HOME="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6)"; fi
+export HOME="${HOME:-/root}"
 FREN_REPO="${FREN_REPO:-https://github.com/beeonchain/frenweb3.git}"
 FREN_REF="${FREN_REF:-main}"
 FREN_APP_DIR="${FREN_APP_DIR:-}"
@@ -597,6 +600,7 @@ install_updater() {
 dir=/var/lib/fren-engine/.fren
 rm -f "$dir/update-request"
 . /etc/fren/update.env
+export HOME=/root
 log=/var/log/fren-update.log
 if curl -fsSL --max-time 120 "$FREN_INSTALL_URL" | bash -s -- --server --update --tarball "$FREN_UPDATE_SRC" >"$log" 2>&1; then
   status=ok
@@ -604,6 +608,7 @@ if curl -fsSL --max-time 120 "$FREN_INSTALL_URL" | bash -s -- --server --update 
 else
   status=failed
   detail="$(grep -E '^(x|!) ' "$log" | tail -1 | cut -c3-200)"
+  [ -n "$detail" ] || detail="$(grep -v '^[[:space:]]*$' "$log" | tail -1 | cut -c1-200)"
 fi
 printf '%s\n%s\n' "$status" "$detail" >"$dir/update-result"
 chown fren-engine:fren-engine "$dir/update-result" 2>/dev/null
@@ -627,6 +632,7 @@ Description=Update Fren in place (wallets and settings stay)
 
 [Service]
 Type=oneshot
+Environment=HOME=/root
 ExecStart=/usr/local/sbin/fren-update
 TimeoutStartSec=30min
 UNIT

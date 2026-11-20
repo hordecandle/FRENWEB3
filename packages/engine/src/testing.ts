@@ -7,7 +7,8 @@ import { Store } from "./store.js";
 import { HyperliquidVenue } from "./venues/hyperliquid.js";
 import { JupiterVenue } from "./venues/jupiter.js";
 import type { PumpCurve, PumpFunApi, PumpTrade } from "./venues/pumpfun.js";
-import { RelayVenue } from "./venues/relay.js";
+import { RELAY_DEPOSIT_MAX_SOL_LAMPORTS, RELAY_SOLANA_CHAIN_ID, RELAY_SOLANA_DEPOSITORY, RelayVenue } from "./venues/relay.js";
+import { PublicKey, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import { AaveUsdc } from "./venues/aave.js";
 import { JupiterLendUsdc, KAMINO_USDC_RESERVE, KaminoUsdc, type SolanaAccess } from "./venues/solana-lend.js";
 import { USDC_MINT } from "./venues/jupiter.js";
@@ -93,7 +94,10 @@ export class FakeVenues {
     { name: "SOL", mid: 200, maxLeverage: 20, szDecimals: 2, fundingHourly: 0.0001 },
   ];
   builder: Record<string, FakeMarket[]> = {
-    xyz: [{ name: "xyz:GOLD", mid: 4_000, maxLeverage: 20, szDecimals: 3 }],
+    xyz: [
+      { name: "xyz:GOLD", mid: 4_000, maxLeverage: 20, szDecimals: 3 },
+      { name: "xyz:ANT", mid: 180, maxLeverage: 10, szDecimals: 2 },
+    ],
   };
   tokens: FakeToken[] = [
     { id: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", symbol: "JUP", name: "Jupiter", decimals: 6, isVerified: true, usdPrice: 1, liquidity: 1e7 },
@@ -141,6 +145,12 @@ export class FakeVenues {
       items: [{ status: "incomplete", data: { from: body.user, to: RELAY_ROUTER, data: "0xdeadbeef", value: "0", chainId: body.originChainId } }],
     },
   ];
+  /** What Relay keeps of a transfer from Solana to Hyperliquid. */
+  relayFeeUsd = 0.03;
+  /** Signed Solana transactions sent to Relay's depository, and what each credited. */
+  relaySolanaTxs: { txBase64: string; usd: number }[] = [];
+  /** Lets a test tamper with that quote, the way a bad answer from Relay would. */
+  editRelaySolanaQuote: ((q: ReturnType<typeof fakeRelaySolanaToHl>) => void) | null = null;
   /** Free USDC on each Hyperliquid dex ("" is the main one). Plenty by default, so trades need no deposit. */
   hlFree: Record<string, number> = {};
   /** Free USDC on a dex not named in hlFree. */
@@ -376,6 +386,12 @@ export class FakeVenues {
       const t = this.evmTokens.find((x) => x.address.toLowerCase() === url.searchParams.get("address")?.toLowerCase());
       return t ? json({ price: t.price }) : json({ message: "not found" }, 404);
     }
+    if (url.pathname === "/quote/v2" && body.originChainId === RELAY_SOLANA_CHAIN_ID && body.destinationChainId === 1337) {
+      this.relayQuotes.push(body);
+      const q = fakeRelaySolanaToHl(body, this.relayFeeUsd);
+      this.editRelaySolanaQuote?.(q);
+      return json(q);
+    }
     if (url.pathname === "/quote/v2") {
       this.relayQuotes.push(body);
       if (this.relayNoRoute(body)) return json({ message: "No routes found", errorCode: "NO_SWAP_ROUTES_FOUND" }, 400);
@@ -520,6 +536,12 @@ export interface TestFrenOptions {
   hlMarkets?: import("./venues/hyperliquid-markets.js").HyperliquidMarketsOptions;
   /** Solana-to-Arbitrum bridge for Hyperliquid funding and EVM buys. */
   solanaBridge?: import("./venues/hyperliquid.js").HyperliquidVenueOptions["solanaBridge"];
+  /**
+   * Fund Hyperliquid straight from Solana through Relay, as on mainnet: the
+   * real RelayVenue code and the signer's checks, then the fake credits the
+   * Hyperliquid account with what Relay quoted.
+   */
+  solanaDirect?: boolean;
 }
 
 /** The whole engine wired to fakes: Hyperliquid, Jupiter, pump.fun, Relay, Derive and Polymarket. */
@@ -580,6 +602,24 @@ export function buildTestFren(opts: TestFrenOptions = {}) {
       fake.onHlWait?.();
     },
     depositWaitMs: 50,
+    ...(opts.solanaDirect && signer
+      ? {
+          solanaDirect: {
+            send: (usd: number) =>
+              relay.solanaToHyperliquid(usd, async (ixs) => {
+                const owner = new PublicKey((await signer.addresses()).solana);
+                const msg = new TransactionMessage({ payerKey: owner, recentBlockhash: PublicKey.default.toBase58(), instructions: ixs }).compileToV0Message();
+                const { signedTxBase64, report } = await signer.solSignTransaction({ txBase64: Buffer.from(new VersionedTransaction(msg).serialize()).toString("base64"), maxSolSpendLamports: RELAY_DEPOSIT_MAX_SOL_LAMPORTS });
+                const raw = Object.values(report.spends)[0];
+                const sent = Number(raw ?? 0) / 1e6;
+                fake.solanaUsdc -= sent;
+                fake.hlFree[""] = (fake.hlFree[""] ?? 0) + sent - fake.relayFeeUsd;
+                fake.relaySolanaTxs.push({ txBase64: signedTxBase64, usd: sent });
+                return `relaysig${fake.relaySolanaTxs.length}`;
+              }),
+          },
+        }
+      : {}),
     ...(opts.solanaBridge ? { solanaBridge: opts.solanaBridge } : {}),
   });
   const derive = new DeriveVenue({
@@ -604,5 +644,66 @@ export function buildTestFren(opts: TestFrenOptions = {}) {
     yield: yieldVenue,
   });
   if (opts.live) store.setLimits({ ...store.getLimits(), mode: "live" });
-  return { clock, fake, pump, poly, polyTrader, derive, polymarket, yield: yieldVenue, solanaSent, evmBalances, store, notifier, fren, evmTxs };
+  return { clock, fake, pump, poly, polyTrader, derive, polymarket, yield: yieldVenue, solanaSent, evmBalances, store, notifier, fren, evmTxs, relay };
+}
+
+/** Relay's answer for USDC from a Solana wallet to a Hyperliquid account: one deposit into its depository, as the real API gives. */
+function fakeRelaySolanaToHl(body: Record<string, unknown>, feeUsd: number) {
+  const user = new PublicKey(String(body.user));
+  const program = new PublicKey(RELAY_SOLANA_DEPOSITORY);
+  const pda = (seed: string) => PublicKey.findProgramAddressSync([Buffer.from(seed)], program)[0].toBase58();
+  const tokenProgram = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+  const ataProgram = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+  const ata = (owner: PublicKey) =>
+    PublicKey.findProgramAddressSync([owner.toBuffer(), new PublicKey(tokenProgram).toBuffer(), new PublicKey(USDC_MINT).toBuffer()], new PublicKey(ataProgram))[0].toBase58();
+  const amount = BigInt(String(body.amount));
+  const data = Buffer.alloc(48);
+  Buffer.from("0b9c60da27a3b413", "hex").copy(data, 0);
+  data.writeBigUInt64LE(amount, 8);
+  data.fill(7, 16);
+  const vault = pda("vault");
+  const k = (pubkey: string, isSigner = false, isWritable = false) => ({ pubkey, isSigner, isWritable });
+  const out = Math.max(0, Math.round((Number(amount) / 1e6 - feeUsd) * 1e8));
+  return {
+    requestId: "0xsolreq",
+    steps: [
+      {
+        id: "deposit",
+        kind: "transaction",
+        requestId: "0xsolreq",
+        items: [
+          {
+            status: "incomplete",
+            data: {
+              instructions: [
+                {
+                  programId: RELAY_SOLANA_DEPOSITORY,
+                  data: data.toString("hex"),
+                  keys: [
+                    k(pda("relay_depository")),
+                    k(user.toBase58(), true, true),
+                    k(user.toBase58()),
+                    k(vault),
+                    k(USDC_MINT),
+                    k(ata(user), false, true),
+                    k(ata(new PublicKey(vault)), false, true),
+                    k(tokenProgram),
+                    k(ataProgram),
+                    k("11111111111111111111111111111111"),
+                  ],
+                },
+              ],
+              addressLookupTableAddresses: [],
+            },
+          },
+        ],
+      },
+    ],
+    details: {
+      sender: user.toBase58(),
+      recipient: String(body.recipient),
+      currencyIn: { amount: amount.toString(), currency: { chainId: RELAY_SOLANA_CHAIN_ID, address: USDC_MINT, decimals: 6 } },
+      currencyOut: { amount: String(out), currency: { chainId: 1337, address: "0x00000000000000000000000000000000", decimals: 8 } },
+    },
+  };
 }

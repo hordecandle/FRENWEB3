@@ -283,3 +283,48 @@ export function checkCctpIx(ctx: IxContext, evmOwner: string | undefined): IxEff
   if (maxFee * 100n > amount) throw new SignerRuleError("CCTP fee cap is over 1% of the transfer.");
   return { spends: [{ account: from, maxRaw: amount }], mustIncrease: [] };
 }
+
+// ---------------------------------------------------------------------------
+// Relay's Solana depository: USDC into Relay, which pays it out on the quote's
+// destination (Fren's own Hyperliquid account)
+
+/** Relay's depository program on Solana (relay-protocol/relay-depository). */
+export const RELAY_SOLANA_DEPOSITORY = "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2";
+export const RELAY_IX = { depositToken: disc("0b9c60da27a3b413") } as const;
+const relayPda = (seed: string) => PublicKey.findProgramAddressSync([Buffer.from(seed)], new PublicKey(RELAY_SOLANA_DEPOSITORY))[0];
+/** The depository's config and vault accounts: PDAs of the program, so a look-alike can't stand in. */
+export const RELAY_DEPOSITORY_CONFIG = relayPda("relay_depository").toBase58();
+export const RELAY_DEPOSITORY_VAULT = relayPda("vault").toBase58();
+
+/**
+ * deposit_token only, of USDC, from the wallet's own USDC account into Relay's
+ * vault, with the wallet as depositor (refunds come back to it):
+ * accounts 0 relay_depository, 1 sender, 2 depositor, 3 vault, 4 mint,
+ * 5 sender_token_account, 6 vault_token_account, 7 token_program, 8 associated_token_program, 9 system_program.
+ * Data: discriminator, amount u64, request id [32].
+ *
+ * The request id ties the deposit to a Relay quote, and the quote names where
+ * the money goes, which the signer can't see: the engine asks for quotes with
+ * the wallet's own Hyperliquid account as recipient (see docs/SECURITY.md).
+ */
+export function checkRelayDepositIx(ctx: IxContext): IxEffects {
+  const d = ctx.data.subarray(0, 8).toString("hex");
+  if (d !== RELAY_IX.depositToken) throw new SignerRuleError(`Relay instruction ${d} is not one the signer allows (only deposit_token).`);
+  needAccounts(ctx, 10, "Relay deposit_token");
+  if (ctx.data.length !== 8 + 8 + 32) throw new SignerRuleError("Relay deposit_token: unexpected instruction data.");
+  requireEq(ctx, 0, RELAY_DEPOSITORY_CONFIG, "Relay depository config");
+  requireOwner(ctx, 1, "Relay deposit_token sender");
+  requireOwner(ctx, 2, "Relay deposit_token depositor");
+  requireEq(ctx, 3, RELAY_DEPOSITORY_VAULT, "Relay vault");
+  requireEq(ctx, 4, USDC_MINT, "Relay deposit mint");
+  const from = requireOwnerAta(ctx, 5, USDC_MINT, "Relay deposit account");
+  const vaultAta = PublicKey.findProgramAddressSync(
+    [new PublicKey(RELAY_DEPOSITORY_VAULT).toBuffer(), new PublicKey(TOKEN).toBuffer(), new PublicKey(USDC_MINT).toBuffer()],
+    new PublicKey(ASSOCIATED_TOKEN),
+  )[0].toBase58();
+  requireEq(ctx, 6, vaultAta, "Relay vault token account");
+  requireEq(ctx, 7, TOKEN, "Relay deposit token program");
+  const amount = u64At(ctx.data, 8, "Relay deposit_token");
+  if (amount === 0n) throw new SignerRuleError("Relay deposit_token: nothing to deposit.");
+  return { spends: [{ account: from, maxRaw: amount }], mustIncrease: [] };
+}
