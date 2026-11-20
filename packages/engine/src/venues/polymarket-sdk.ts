@@ -1,3 +1,4 @@
+import type { GeoCheck } from "./polymarket.js";
 import { createPublicClient, createSecureClient, OrderSide, type PublicClient, type SecureClient, type Signer } from "@polymarket/client";
 import type { PolyTypedData, SignerApi } from "@fren/signer";
 import type { Fetch } from "../http.js";
@@ -133,12 +134,16 @@ export class SdkPolymarketTrader implements PolymarketTrader {
   }
 }
 
-/** Polymarket's own check of whether this IP may place orders. */
-export function polymarketGeoblock(fetchFn: Fetch): () => Promise<boolean> {
+/** Polymarket's own check of whether this IP may place orders, and where it thinks the IP is. */
+export function polymarketGeoblock(fetchFn: Fetch): () => Promise<GeoCheck> {
   return async () => {
     const res = await fetchFn("https://polymarket.com/api/geoblock", { headers: { accept: "application/json" } });
     if (!res.ok) throw new Error(`geoblock check returned ${res.status}`);
-    const body = (await res.json()) as { blocked?: boolean };
-    return body.blocked === true;
+    const body = (await res.json()) as { blocked?: boolean; country?: string; region?: string };
+    return {
+      blocked: body.blocked === true,
+      ...(typeof body.country === "string" ? { country: body.country } : {}),
+      ...(typeof body.region === "string" ? { region: body.region } : {}),
+    };
   };
 }

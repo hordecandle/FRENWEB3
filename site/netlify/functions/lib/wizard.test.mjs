@@ -86,7 +86,7 @@ function fakeReseller() {
   return { s, fetchFn };
 }
 
-function setup({ addresses = { base: BASE_ADDR, solana: SOL_ADDR }, reseller = true, planId = "77", contact = "" } = {}) {
+function setup({ addresses = { base: BASE_ADDR, solana: SOL_ADDR }, reseller = true, planId = "77", contact = "", location = "fi" } = {}) {
   const base = fakeBase();
   const rs = fakeReseller();
   const chain = chainClient({ baseRpc: "https://base.test", solanaRpc: "https://sol.test", fetchFn: base.fetchFn });
@@ -95,7 +95,7 @@ function setup({ addresses = { base: BASE_ADDR, solana: SOL_ADDR }, reseller = t
   let t = 1_700_000_000_000;
   base.s.blockTime = t;
   const wizard = createWizard({
-    config: { priceUsd: 10, addresses, planId, contact },
+    config: { priceUsd: 10, addresses, planId, contact, location },
     chain,
     reseller: reseller ? resellerClient({ token: "rk_test", base: "https://b2b.test/api/reseller", fetchFn: rs.fetchFn }) : null,
     store: { get: async (id) => (db.has(id) ? structuredClone(db.get(id)) : null), set: async (id, v) => void db.set(id, structuredClone(v)) },
@@ -194,7 +194,7 @@ describe("VPS wizard", () => {
     expect(v).toMatchObject({ stage: "provisioning", paidTx: tx, paidAmount: amount, paidTxUrl: `https://basescan.org/tx/${tx}` });
     expect(v.address).toBeUndefined();
     expect(t.rs.services).toHaveLength(1);
-    expect(t.rs.services[0]).toMatchObject({ hostname: hostnameFor({ id }), autorenew: false, body: { client_id: 500, plan_id: "77", os_id: 4 } });
+    expect(t.rs.services[0]).toMatchObject({ hostname: hostnameFor({ id }), autorenew: false, body: { client_id: 500, plan_id: "77", os_id: 4, location: "fi" } });
     expect(t.rs.clients).toEqual([{ id: 500, email: "bee@example.com" }]);
 
     // Still booting: no install yet, no second order.
@@ -310,6 +310,22 @@ describe("VPS wizard", () => {
     await wizard.install(id, async () => {
       throw new Error("should not run");
     }, "x");
+  });
+
+  it("keeps Polymarket's answer from the new server, and shows it", async () => {
+    // What polymarket.com/api/geoblock answers from Finland, and from Germany.
+    const fi = await installing();
+    await fi.wizard.install(fi.id, async () => ({ code: 0, output: `FREN_SETUP_URL=https://1-2-3-4.sslip.io/setup?t=a\nFREN_POLYMARKET_GEO={"blocked":false,"ip":"1.2.3.4","country":"FI","region":"18"}\n` }), "I");
+    expect(await fi.wizard.status(fi.id)).toMatchObject({ stage: "ready", polymarket: { blocked: false, country: "FI" } });
+    const de = await installing();
+    await de.wizard.install(de.id, async () => ({ code: 0, output: `FREN_SETUP_URL=https://1-2-3-4.sslip.io/setup?t=b\nFREN_POLYMARKET_GEO={"blocked":true,"ip":"1.2.3.4","country":"DE","region":"HE"}\n` }), "I");
+    expect((await de.wizard.status(de.id)).polymarket).toEqual({ blocked: true, country: "DE" });
+    // No answer (Polymarket down): still ready, nothing claimed.
+    const none = await installing();
+    await none.wizard.install(none.id, async () => ({ code: 0, output: "FREN_SETUP_URL=https://1-2-3-4.sslip.io/setup?t=c\nFREN_POLYMARKET_GEO=\n" }), "I");
+    const v = await none.wizard.status(none.id);
+    expect(v.stage).toBe("ready");
+    expect(v.polymarket).toBeUndefined();
   });
 
   it("hands out the Fren code only while that order's install runs", async () => {

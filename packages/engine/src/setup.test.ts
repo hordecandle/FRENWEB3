@@ -102,14 +102,17 @@ describe("fren setup", () => {
     const tg = fakeTelegram([startMessage]);
     const { run, runs } = fakeRunner(false);
     // AI company 1 (OpenRouter), a short key, a refused key, a good key; chat 1 (telegram), token,
-    // "is that you" yes, network 1 (mainnet), no Jupiter key, backup not saved yet, then saved.
-    const io = scriptedIo(["1", "short", "sk-or-v1-bad-key-000", "sk-or-v1-good-key-123", "1", TOKEN, "y", "1", "", "n", "y"]);
+    // "is that you" yes, network 1 (mainnet), no Jupiter key, restricted country (Enter and "maybe" don't count, then no), backup not saved yet, then saved.
+    const io = scriptedIo(["1", "short", "sk-or-v1-bad-key-000", "sk-or-v1-good-key-123", "1", TOKEN, "y", "1", "", "", "maybe", "no", "n", "y"]);
     const d = deps({ io, run, fetchFn: tg.fetchFn });
 
     const res = await runSetup(d, { server: true });
 
     expect(res.channel).toBe("telegram");
     expect(res.network).toBe("mainnet");
+    expect(io.out.filter((l) => l === "Type yes or no.")).toHaveLength(2);
+    expect(io.out.some((l) => l.includes("Restricted countries: United States, United Kingdom, France, Germany"))).toBe(true);
+    expect(JSON.parse(readFileSync(d.paths.config, "utf8")).restrictedRegion).toBe(false);
     expect(res.addresses.solana).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
     // The AI key is asked here like on the setup page, checked, then saved without OpenClaw's prompts.
     expect(io.out).toContain("Paste the whole key.");
@@ -156,16 +159,20 @@ describe("fren setup", () => {
   it("skips OpenClaw's model login when a model is already set up", async () => {
     const tg = fakeTelegram([startMessage]);
     const { run, runs } = fakeRunner(true);
-    const io = scriptedIo(["n", "1", TOKEN, "y", "2", "", "y"]);
-    const res = await runSetup(deps({ io, run, fetchFn: tg.fetchFn }), { server: true });
+    const io = scriptedIo(["n", "1", TOKEN, "y", "2", "", "yes", "y"]);
+    const d = deps({ io, run, fetchFn: tg.fetchFn });
+    const res = await runSetup(d, { server: true });
     expect(res.network).toBe("testnet");
+    // "Yes, I live in a restricted country": saved, and said back in plain words.
+    expect(JSON.parse(readFileSync(d.paths.config, "utf8")).restrictedRegion).toBe(true);
+    expect(io.out.some((l) => l.includes("Polymarket stays close-only for you"))).toBe(true);
     expect(runs.some((r) => r.includes("onboard"))).toBe(false);
   });
 
   it("can still hand the AI login to OpenClaw's own setup", async () => {
     const tg = fakeTelegram([startMessage]);
     const { run, runs } = fakeRunner(false);
-    const io = scriptedIo(["5", "1", TOKEN, "y", "1", "", "y"]);
+    const io = scriptedIo(["5", "1", TOKEN, "y", "1", "", "no", "y"]);
     await runSetup(deps({ io, run, fetchFn: tg.fetchFn }), { server: true });
     expect(runs).toContain("[tty] openclaw onboard --flow quickstart --skip-channels --skip-ui --skip-search --skip-daemon");
   });
@@ -173,7 +180,7 @@ describe("fren setup", () => {
   it("asks for the token again when it's wrong", async () => {
     const tg = fakeTelegram([startMessage]);
     const { run } = fakeRunner(true);
-    const io = scriptedIo(["n", "1", "nope", TOKEN, "y", "1", "", "y"]);
+    const io = scriptedIo(["n", "1", "nope", TOKEN, "y", "1", "", "no", "y"]);
     await runSetup(deps({ io, run, fetchFn: tg.fetchFn }), { server: true });
     expect(io.out).toContain("That token didn't work. Copy it again from BotFather, the whole thing.");
   });
@@ -181,7 +188,7 @@ describe("fren setup", () => {
   it("links WhatsApp with the QR login and sends codes to the owner's own number", async () => {
     const tg = fakeTelegram([]);
     const { run, runs } = fakeRunner(true);
-    const io = scriptedIo(["n", "2", "+44 7700 900123", "1", "", "y"]);
+    const io = scriptedIo(["n", "2", "+44 7700 900123", "1", "", "no", "y"]);
     const d = deps({ io, run, fetchFn: tg.fetchFn });
     const res = await runSetup(d, { server: true });
     expect(res.channel).toBe("whatsapp");
@@ -201,14 +208,14 @@ describe("fren setup", () => {
   it("installs services locally and keeps the same wallets on a second run", async () => {
     const tg = fakeTelegram([startMessage]);
     const { run, runs } = fakeRunner(true);
-    const io = scriptedIo(["n", "1", TOKEN, "y", "1", "", "y"]);
+    const io = scriptedIo(["n", "1", TOKEN, "y", "1", "", "no", "y"]);
     const d = deps({ io, run, fetchFn: tg.fetchFn });
     const first = await runSetup(d, { server: false });
     expect(runs).toContain("openclaw daemon restart");
     // No systemd here: it says how to start the engine instead of claiming it's live.
     expect(io.out.some((l) => l.includes("Your Fren is set up. Start the two commands above"))).toBe(true);
     expect(io.out.some((l) => l.includes("Your Fren is live."))).toBe(false);
-    const again = await runSetup({ ...d, io: scriptedIo(["n", "1", TOKEN, "y", "1", "", "y"]), fetchFn: fakeTelegram([startMessage]).fetchFn }, { server: false });
+    const again = await runSetup({ ...d, io: scriptedIo(["n", "1", TOKEN, "y", "1", "", "no", "y"]), fetchFn: fakeTelegram([startMessage]).fetchFn }, { server: false });
     expect(again.addresses).toEqual(first.addresses);
   });
 

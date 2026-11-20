@@ -315,6 +315,13 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
       <h2 id="conn-title">Your bot is connected</h2>
       <div class="botchip"><span class="av"><svg viewBox="0 0 116 80"><use href="#mark"/></svg></span><div><b id="conn-bot">@your_bot</b><small id="conn-sub">Your own bot. Only you can talk to it.</small></div><svg class="ic ok"><use href="#i-check"/></svg></div>
       <p class="lead" style="margin-top:18px">Last thing: Fren makes two wallets for you, right here on your server.</p>
+      <div class="field" id="region-q" style="margin-top:22px"><span>Do you live in a country where Polymarket is restricted?</span>
+        <small id="region-list">United States, United Kingdom, France, Germany and others.</small>
+        <div class="tiles" id="region-pick" style="margin-top:12px">
+          <button class="tile" data-region="no"><b>No</b><small>I don't live in any of these. Full access.</small></button>
+          <button class="tile" data-region="yes"><b>Yes</b><small>Polymarket stays close-only for me: Fren can close bets there but won't open new ones. Everything else works.</small></button>
+        </div>
+      </div>
       <div id="w-form">
         <div class="actions"><button class="btn" id="w-make">Make my wallets<svg class="ic"><use href="#i-arrow"/></svg></button></div>
         <p class="hint">Moving from another Fren server? <label class="textlink" for="restore-file" style="cursor:pointer">Use my wallet backup instead</label><input type="file" id="restore-file" accept=".json,application/json" hidden></p>
@@ -411,6 +418,7 @@ async function load() {
   oneTap = !!s.oneTapBot;
   bot = s.telegramBot;
   chat = s.channel || null; // a reload keeps the chat that was really connected
+  if (s.restrictedCountries) $("region-list").textContent = "Restricted: " + s.restrictedCountries + ".";
   $("provider").innerHTML = providers.map((p) => '<option value="' + p.id + '">' + esc(p.label.replace(/ [(]any model[)]$/, "")) + (p.id === "openrouter" ? " (recommended)" : "") + "</option>").join("");
   syncKeyLink();
   if (s.done) return showFinal();
@@ -558,16 +566,31 @@ function showConnected() {
   $("conn-sub").textContent = tg ? "Your own bot. Only you can talk to it." : "Only your own number can talk to it.";
   screen("connected");
 }
+// "Do you live in a country where Polymarket is restricted?" No default: one tap, yes or no.
+let restricted = null;
+document.querySelectorAll("#region-pick .tile").forEach((b) => {
+  b.onclick = () => {
+    restricted = b.dataset.region === "yes";
+    document.querySelectorAll("#region-pick .tile").forEach((x) => x.classList.toggle("is-on", x === b));
+    $("w-err0").textContent = "";
+  };
+});
+function needRegion() {
+  if (restricted === null) throw new Error("Answer the question about where you live first.");
+}
+const finishBody = () => ({ network: $("network").value, jupiterApiKey: $("jup").value, restricted });
 $("restore-file").onchange = () => busy($("w-make"), $("w-err0"), async () => {
   const f = $("restore-file").files[0];
   $("restore-file").value = "";
   if (!f) return;
+  needRegion();
   if (f.size > 64 * 1024) throw new Error("That isn't a Fren wallet backup file. It's called fren-wallet-backup.json.");
   await api("POST", "/api/restore", { backup: await f.text() });
-  showWallets(await api("POST", "/api/finish", { network: $("network").value, jupiterApiKey: $("jup").value }));
+  showWallets(await api("POST", "/api/finish", finishBody()));
 });
 $("w-make").onclick = () => busy($("w-make"), $("w-err0"), async () => {
-  showWallets(await api("POST", "/api/finish", { network: $("network").value, jupiterApiKey: $("jup").value }));
+  needRegion();
+  showWallets(await api("POST", "/api/finish", finishBody()));
 });
 function showWallets(f) {
   $("a-sol").textContent = f.addresses.solana;

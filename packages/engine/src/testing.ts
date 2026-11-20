@@ -17,6 +17,7 @@ import { YieldVenue } from "./venues/yield.js";
 import { DeriveVenue, type DeriveInstrument, type DeriveTicker } from "./venues/derive.js";
 import {
   PolymarketVenue,
+  type GeoCheck,
   type PolyBook,
   type PolyFill,
   type PolyLivePosition,
@@ -544,7 +545,9 @@ export interface TestFrenOptions {
   live?: boolean;
   evmBalances?: Record<string, bigint>;
   /** Polymarket's region check; defaults to "allowed". */
-  geoblocked?: () => Promise<boolean>;
+  geoblocked?: () => Promise<GeoCheck | boolean>;
+  /** The owner's answer to the restricted-country question at setup. */
+  ownerRestricted?: boolean;
   /** Overrides for the Hyperliquid market cache (dexes, ttl, backoff). */
   hlMarkets?: import("./venues/hyperliquid-markets.js").HyperliquidMarketsOptions;
   /** Solana-to-Arbitrum bridge for Hyperliquid funding and EVM buys. */
@@ -645,7 +648,7 @@ export function buildTestFren(opts: TestFrenOptions = {}) {
     signer,
     spotPrice: async (asset) => (await hyperliquid.markets.get(asset))?.midPx ?? null,
   });
-  const polymarket = new PolymarketVenue({ store, data: poly, trader: signer ? polyTrader : null, geoblocked: opts.geoblocked ?? (async () => false) });
+  const polymarket = new PolymarketVenue({ store, data: poly, trader: signer ? polyTrader : null, geoblocked: opts.geoblocked ?? (async () => false), ...(opts.ownerRestricted !== undefined ? { ownerRestricted: opts.ownerRestricted } : {}) });
   const fren = new Fren({
     store,
     notifier,

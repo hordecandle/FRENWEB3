@@ -22,6 +22,7 @@ import {
 } from "./setup.js";
 import { BrokerError, claimManagedBot, startManagedBot, type ManagedBotSession } from "./managed-bot.js";
 import { SETUP_PAGE } from "./setup-page.js";
+import { restrictedCountriesText } from "@fren/core";
 
 /**
  * `fren setup --web`: the same setup as the terminal one, as a page in the
@@ -73,6 +74,7 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       channel: state.line ? state.channel : null,
       telegramBot: state.telegram?.bot ?? null,
       oneTapBot: !!broker,
+      restrictedCountries: restrictedCountriesText(),
       finished: state.finished ?? null,
       done: state.done,
     }),
@@ -193,7 +195,14 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       if (!state.line) throw new UserError("Connect Telegram or WhatsApp first.");
       const network = b.network === "testnet" ? "testnet" : "mainnet";
       const jupiterApiKey = String(b.jupiterApiKey ?? "").trim();
-      const { addresses } = await finishSetup(deps, { network, ...(jupiterApiKey ? { jupiterApiKey } : {}), line: state.line });
+      // "Do you live in a country where Polymarket is restricted?" has no default.
+      if (typeof b.restricted !== "boolean") throw new UserError("Answer the question about where you live first.");
+      const { addresses } = await finishSetup(deps, {
+        network,
+        ...(jupiterApiKey ? { jupiterApiKey } : {}),
+        restrictedRegion: b.restricted,
+        line: state.line,
+      });
       state.finished = { network, addresses };
       return state.finished;
     },

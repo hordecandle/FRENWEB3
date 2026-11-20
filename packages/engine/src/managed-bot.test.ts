@@ -168,8 +168,8 @@ describe("web setup, one-tap Telegram bot", () => {
     open.push(server);
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const call = async (method: string, path: string) => {
-      const res = await fetch(base + path, { method, headers: { cookie: `fren_setup=${SETUP}`, "content-type": "application/json" } });
+    const call = async (method: string, path: string, body?: Record<string, unknown>) => {
+      const res = await fetch(base + path, { method, headers: { cookie: `fren_setup=${SETUP}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
       return { status: res.status, json: (await res.json()) as Record<string, unknown> };
     };
 
@@ -188,7 +188,7 @@ describe("web setup, one-tap Telegram bot", () => {
     expect(runs).toContain(`openclaw channels add --channel telegram --token ${NEWBOT}`);
     expect((await call("GET", "/api/state")).json.channel).toBe("telegram");
 
-    const fin = await call("POST", "/api/finish");
+    const fin = await call("POST", "/api/finish", { restricted: false });
     expect(fin.status).toBe(200);
     expect(JSON.parse(readFileSync(deps.paths.config, "utf8")).telegram).toEqual({ botToken: NEWBOT, ownerChatId: String(OWNER) });
   });

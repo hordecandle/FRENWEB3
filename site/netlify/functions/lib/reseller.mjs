@@ -71,8 +71,9 @@ export function resellerClient({ token, base = "https://b2b.eqvps.com/api/resell
     },
 
     /** service_id of the new server. */
-    async order({ clientId, planId, osId, hostname }) {
-      const j = await call("POST", "/orders", { client_id: clientId, plan_id: planId, hostname, ...(osId ? { os_id: osId } : {}) });
+    /** location: EQVPS's code ("fi", "de"); the plan must include it. */
+    async order({ clientId, planId, osId, hostname, location }) {
+      const j = await call("POST", "/orders", { client_id: clientId, plan_id: planId, hostname, ...(location ? { location } : {}), ...(osId ? { os_id: osId } : {}) });
       const id = idOf(j, "service_id", "service.id", "id", "services.0.id", "service_ids.0");
       if (id == null) throw new Error("EQVPS didn't return a server id.");
       return id;

@@ -172,6 +172,42 @@ describe("live bets on Polymarket", () => {
     expect((await bet(closeOnly)).text).toMatch(/only lets this account close positions/);
     for (const t of [blocked, down, closeOnly]) expect(t.polyTrader.orders).toEqual([]);
   });
+
+  it("names the server's country and says how to move when only the server is blocked", async () => {
+    const { signer } = recordingSigner();
+    // What polymarket.com/api/geoblock answers from a German server.
+    const de = async () => ({ blocked: true, country: "DE", region: "HE" });
+    const owner = betWorld({ signer, live: true, ownerRestricted: false, geoblocked: de });
+    const text = (await bet(owner)).text;
+    expect(text).toMatch(/Polymarket sees this server in Germany, where it doesn't take new bets\. Fren won't try to get around that\./);
+    expect(text).toMatch(/Your server's location is the problem, not yours\. Get a Fren server in Finland at getfren\.netlify\.app\/vps/);
+    expect(text).toMatch(/Use my wallet backup instead/);
+    // Installed before the question: Fren doesn't know where the owner lives, so it says "if".
+    const old = betWorld({ signer, live: true, geoblocked: de });
+    expect((await bet(old)).text).toMatch(/If you live outside Polymarket's restricted countries: Your server's location/);
+    for (const t of [owner, old]) expect(t.polyTrader.orders).toEqual([]);
+  });
+
+  it("keeps Polymarket close-only for an owner who said they live in a restricted country, even from an allowed server", async () => {
+    const { signer } = recordingSigner();
+    let asked = 0;
+    const t = betWorld({ signer, live: true, ownerRestricted: true, geoblocked: async () => (asked++, { blocked: false, country: "FI" }) });
+    expect((await bet(t)).text).toMatch(/You told Fren at setup that you live in a country where Polymarket doesn't take new bets, so Fren can only close your Polymarket bets/);
+    expect(t.polyTrader.orders).toEqual([]);
+    expect(asked).toBe(0);
+    // Closing what they already hold still works.
+    t.polyTrader.held.set("eth-4k-yes", 100);
+    const sell = await t.fren.submit({ request: "close", steps: [{ leg: { kind: "prediction", venue: "polymarket", side: "sell", market: "eth-4k", amount: { type: "fraction", fraction: 1 }, limitPrice: 0.01 } }] });
+    expect(sell.text).not.toMatch(/told Fren at setup/);
+    expect(t.polyTrader.orders).toMatchObject([{ side: "sell", assetId: "eth-4k-yes", shares: 100 }]);
+  });
+
+  it("bets from an allowed server for an owner who said no", async () => {
+    const { signer } = recordingSigner();
+    const t = betWorld({ signer, live: true, ownerRestricted: false, geoblocked: async () => ({ blocked: false, country: "FI" }) });
+    expect((await bet(t)).text).toMatch(/✅ Bought 167 "Yes" shares/);
+    expect(t.polyTrader.orders).toHaveLength(1);
+  });
 });
 
 describe("funding Derive and Polymarket", () => {

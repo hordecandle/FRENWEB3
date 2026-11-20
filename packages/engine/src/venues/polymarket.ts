@@ -1,4 +1,4 @@
-import { shortDate, usd as fmtUsd, type PlanStep, type PredictionLeg, type ResolvedStep } from "@fren/core";
+import { countryName, shortDate, usd as fmtUsd, type PlanStep, type PredictionLeg, type ResolvedStep } from "@fren/core";
 import type { Store } from "../store.js";
 import { VenueError, type ExecContext, type ExecResult, type PositionView, type VenueAdapter } from "./types.js";
 
@@ -83,9 +83,26 @@ export interface PolymarketVenueOptions {
   data: PolymarketData;
   /** Null until live Polymarket is set up (needs wallets). */
   trader: PolymarketTrader | null;
-  /** Polymarket's own region check; true means this machine's IP may not trade. */
-  geoblocked?: () => Promise<boolean>;
+  /** Polymarket's own region check of this machine's IP. */
+  geoblocked?: () => Promise<GeoCheck | boolean>;
+  /**
+   * The owner said at setup they live where Polymarket is restricted: close-only
+   * for them, wherever the server is.
+   */
+  ownerRestricted?: boolean;
 }
+
+/** What Polymarket's region check says about this machine's IP. */
+export interface GeoCheck {
+  blocked: boolean;
+  /** ISO country code, e.g. "DE". */
+  country?: string;
+  region?: string;
+}
+
+/** Where to get a server Polymarket accepts; shown when the server's location is the problem. */
+export const MOVE_SERVER_HINT =
+  "Your server's location is the problem, not yours. Get a Fren server in Finland at getfren.netlify.app/vps and choose \"Use my wallet backup instead\" there: your wallets and money come with you.";
 
 /** What fren_bet_quote shows for a Polymarket bet. */
 export interface PredictionQuote {
@@ -241,12 +258,23 @@ export class PolymarketVenue implements VenueAdapter {
   private async liveTrade(leg: PredictionLeg, m: PolyMarket, out: PolyOutcome, ctx: ExecContext): Promise<ExecResult> {
     const trader = this.trader();
     if (leg.side === "buy") {
-      const blocked = this.o.geoblocked
+      if (this.o.ownerRestricted) {
+        throw new VenueError(
+          "You told Fren at setup that you live in a country where Polymarket doesn't take new bets, so Fren can only close your Polymarket bets, not open new ones.",
+        );
+      }
+      const raw = this.o.geoblocked
         ? await this.o.geoblocked().catch(() => {
             throw new VenueError("Couldn't reach Polymarket's region check, so Fren isn't placing the bet.");
           })
         : false;
-      if (blocked) throw new VenueError("Polymarket doesn't allow new bets from this machine's location. Fren won't try to get around that.");
+      const geo: GeoCheck = typeof raw === "boolean" ? { blocked: raw } : raw;
+      if (geo.blocked) {
+        const where = geo.country ? ` Polymarket sees this server in ${countryName(geo.country, geo.region)}, where it doesn't take new bets.` : "";
+        throw new VenueError(
+          `Polymarket doesn't allow new bets from this machine's location.${where} Fren won't try to get around that. ${this.o.ownerRestricted === false ? MOVE_SERVER_HINT : `If you live outside Polymarket's restricted countries: ${MOVE_SERVER_HINT}`}`,
+        );
+      }
       if (await trader.closedOnly()) throw new VenueError("Polymarket only lets this account close positions, so Fren can't place new bets.");
     }
     let fill: PolyFill;

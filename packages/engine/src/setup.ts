@@ -6,6 +6,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import type { FrenPaths, InitOptions } from "./config.js";
 import { initFren } from "./config.js";
+import { restrictedCountriesText } from "@fren/core";
 import type { Fetch } from "./http.js";
 import { claimManagedBot, startManagedBot } from "./managed-bot.js";
 import { writePersona } from "./persona.js";
@@ -96,8 +97,10 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
     ]);
     const jupiterApiKey = (await io.ask("Jupiter key (optional, makes fast buys of brand-new Solana coins more reliable; free at portal.jup.ag; Enter to skip)", "")).trim();
 
+    const restrictedRegion = await restrictedQuestion(io);
+
     io.say("Making your wallets and setting up OpenClaw, about a minute, keep this window open…");
-    const { addresses } = await finishSetup(deps, { network, jupiterApiKey, line });
+    const { addresses } = await finishSetup(deps, { network, jupiterApiKey, restrictedRegion, line });
     io.say(`
 ✓ Your wallets are ready
   Fren starts in paper mode: real prices, pretend money. No real money moves until you say so.
@@ -249,14 +252,19 @@ const LOCKED_AWAY = "Fren's keys are locked away with the engine user. Run `sudo
 /** Wallets, config and the plugin: the last step of both setups. */
 export async function finishSetup(
   deps: Pick<SetupDeps, "run" | "openclawBin" | "paths" | "pluginDir" | "home">,
-  o: { network: "mainnet" | "testnet"; jupiterApiKey?: string; line: Pick<InitOptions, "telegram" | "notify"> },
+  o: { network: "mainnet" | "testnet"; jupiterApiKey?: string; restrictedRegion?: boolean; line: Pick<InitOptions, "telegram" | "notify"> },
 ) {
   if (isolatedMarker(deps.paths)) {
     // Wallets live with the engine's own user now; a fresh initFren here would
     // quietly make new ones.
     throw new Error(LOCKED_AWAY);
   }
-  const res = initFren(deps.paths, { network: o.network, ...(o.jupiterApiKey ? { jupiterApiKey: o.jupiterApiKey } : {}), ...o.line });
+  const res = initFren(deps.paths, {
+    network: o.network,
+    ...(o.jupiterApiKey ? { jupiterApiKey: o.jupiterApiKey } : {}),
+    ...(o.restrictedRegion !== undefined ? { restrictedRegion: o.restrictedRegion } : {}),
+    ...o.line,
+  });
   await mustRun(deps, deps.openclawBin, ["plugins", "install", "--link", "--accept-capabilities", "--force", deps.pluginDir], "install the Fren plugin");
   await lockDownAgentTools(deps);
   await applyLoopGuard(deps);
@@ -720,6 +728,24 @@ export function launchdPlist(node: string, cli: string, pathEnv: string, frenHom
 </dict>
 </plist>
 `;
+}
+
+/** The same question as the setup page: does the owner live where Polymarket is restricted? */
+export const RESTRICTED_QUESTION = "Do you live in a country where Polymarket is restricted?";
+export const RESTRICTED_YES = "Polymarket stays close-only for you: Fren can close bets there but won't open new ones. Everything else works.";
+
+async function restrictedQuestion(io: Prompt): Promise<boolean> {
+  io.say(`\nRestricted countries: ${restrictedCountriesText()}.`);
+  // No default: Enter alone doesn't answer this one.
+  for (;;) {
+    const a = (await io.ask(`${RESTRICTED_QUESTION} Type yes or no`)).trim().toLowerCase();
+    if (a === "yes" || a === "y") {
+      io.say(RESTRICTED_YES);
+      return true;
+    }
+    if (a === "no" || a === "n") return false;
+    io.say("Type yes or no.");
+  }
 }
 
 async function choose<T extends string>(io: Prompt, question: string, options: [T, string][]): Promise<T> {

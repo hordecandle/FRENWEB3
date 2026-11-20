@@ -31,6 +31,24 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const NOT_OPEN = "Server setup isn't open yet. Please check back soon.";
 
+/**
+ * Polymarket's own answer to "may this server bet?", asked from the new server
+ * right after the install (polymarket.com/api/geoblock, see installCommand).
+ * EQVPS has servers in Germany, where Polymarket is close-only, and Finland,
+ * where it isn't, so new servers go to Finland and this proves it per server.
+ */
+export function polymarketGeo(output) {
+  const raw = String(output ?? "").match(/FREN_POLYMARKET_GEO=(\{.*\})/)?.[1];
+  if (!raw) return null;
+  try {
+    const j = JSON.parse(raw);
+    if (typeof j.blocked !== "boolean") return null;
+    return { blocked: j.blocked, ...(typeof j.country === "string" ? { country: j.country } : {}) };
+  } catch {
+    return null;
+  }
+}
+
 export class UserError extends Error {
   constructor(message, status = 400) {
     super(message);
@@ -178,7 +196,7 @@ export function createWizard(deps) {
         if (!serviceId) {
           const clientId = await deps.reseller.client(rec.email);
           const osId = await deps.reseller.osId(OS_NAME).catch(() => null);
-          serviceId = await deps.reseller.order({ clientId, planId: cfg.planId, osId, hostname });
+          serviceId = await deps.reseller.order({ clientId, planId: cfg.planId, osId, hostname, location: cfg.location });
         }
         rec.serviceId = serviceId;
         rec.stage = "provisioning";
@@ -343,6 +361,8 @@ export function createWizard(deps) {
         rec.stage = "ready";
         rec.setupUrl = url;
         rec.progress = "Done";
+        const geo = polymarketGeo(r.output);
+        if (geo) rec.polymarket = geo;
       } else {
         await fail(rec, "The install stopped before it finished.", tail(r.output));
         return;
@@ -385,7 +405,7 @@ export function createWizard(deps) {
       v.paidTxUrl = NETWORKS[rec.network].explorer(rec.paidTx);
       v.paidAmount = fromUnits(rec.paidUnits);
     }
-    for (const k of ["progress", "setupUrl", "error", "detail", "retryable"]) if (rec[k] !== undefined) v[k] = rec[k];
+    for (const k of ["progress", "setupUrl", "error", "detail", "retryable", "polymarket"]) if (rec[k] !== undefined) v[k] = rec[k];
     if (rec.stage === "failed" && contact) v.contact = contact;
     return v;
   }

@@ -78,6 +78,13 @@ export const FrenConfig = z.object({
    * { turnsPerDay: 200, turnsPerMinute: 6, toolCallsPerTurn: 12 }. See guard.ts.
    */
   agentGuard: AgentGuard,
+  /**
+   * The owner's answer at setup to "Are you in a country where Polymarket is
+   * restricted?" (see POLYMARKET_RESTRICTED). true: Polymarket is close-only
+   * for them, whatever the server's location. Unset on installs from before
+   * the question: only the server's own region check applies.
+   */
+  restrictedRegion: z.boolean().optional(),
 });
 export type FrenConfig = z.infer<typeof FrenConfig>;
 
@@ -150,6 +157,8 @@ export interface InitOptions {
   /** Replaces the notify list when given and non-empty. */
   notify?: { channel: string; to: string }[];
   telegram?: { botToken: string; ownerChatId: string };
+  /** The owner's answer to the restricted-country question. */
+  restrictedRegion?: boolean;
 }
 
 /**
@@ -171,6 +180,7 @@ export function initFren(paths: FrenPaths, opts: InitOptions) {
     ...(opts.jupiterApiKey ? { jupiterApiKey: opts.jupiterApiKey } : {}),
     ...(opts.notify?.length ? { notify: opts.notify } : {}),
     ...(opts.telegram ? { telegram: opts.telegram } : {}),
+    ...(opts.restrictedRegion !== undefined ? { restrictedRegion: opts.restrictedRegion } : {}),
   });
   writeFileSync(paths.config, JSON.stringify(config, null, 2), { mode: 0o600 });
   return { config, addresses: readKeystoreAddresses(paths.keystore) };
