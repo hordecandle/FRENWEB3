@@ -23,6 +23,13 @@ export function price(n: number): string {
   return `$${n.toPrecision(4)}`;
 }
 
+/** A token amount for chat: "9,518,222", "1.2346", "0.1446". */
+export function qty(n: number): string {
+  if (n >= 1000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  if (n >= 1) return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+  return n === 0 ? "0" : String(Number(n.toPrecision(4)));
+}
+
 function pctMove(p: number): string {
   return `${p >= 1 ? p.toFixed(1) : p.toPrecision(2)}%`;
 }
@@ -38,8 +45,16 @@ export const yieldProtocolName: Record<string, string> = {
 
 export const chainName: Record<string, string> = { solana: "Solana", base: "Base", robinhood: "Robinhood Chain", arbitrum: "Arbitrum" };
 
+/** Mints the engine swaps a ticker for, shown by name again. */
+const KNOWN_MINTS: Record<string, string> = {
+  So11111111111111111111111111111111111111112: "SOL",
+  EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: "USDC",
+};
+
 /** "0x1234…abcd" for long addresses, unchanged for symbols. */
 export function shortToken(t: string): string {
+  const known = KNOWN_MINTS[t];
+  if (known) return known;
   return t.length > 20 ? `${t.slice(0, 6)}…${t.slice(-4)}` : t;
 }
 

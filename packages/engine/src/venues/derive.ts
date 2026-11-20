@@ -143,28 +143,44 @@ export class DeriveVenue implements VenueAdapter {
    * before the date (the first expiry after it when none is before).
    */
   async bestOption(q: { asset: string; target: number; direction: "above" | "below"; by: Date; budgetUsd: number }): Promise<OptionQuote | null> {
+    const r = await this.bestOptionOrWhy(q);
+    return "why" in r ? null : r;
+  }
+
+  /** bestOption, or the reason there is none, in words for the owner. */
+  async bestOptionOrWhy(q: { asset: string; target: number; direction: "above" | "below"; by: Date; budgetUsd: number }): Promise<OptionQuote | { why: string }> {
     const type = q.direction === "above" ? "C" : "P";
     const list = (await this.options(q.asset)).filter((i) => i.option_details!.option_type === type);
-    if (!list.length) return null;
+    if (!list.length) return { why: `Derive lists no ${q.asset} ${type === "C" ? "calls" : "puts"}.` };
     const expiries = [...new Set(list.map((i) => i.option_details!.expiry))].sort((a, b) => a - b);
     const bySec = q.by.getTime() / 1000;
     const before = expiries.filter((e) => e <= bySec + 86_400);
     const expiry = before.at(-1) ?? expiries.find((e) => e > bySec);
-    if (expiry === undefined) return null;
+    if (expiry === undefined) return { why: `nothing on ${q.asset} expires near that date.` };
     const atExpiry = list.filter((i) => i.option_details!.expiry === expiry);
     atExpiry.sort((a, b) => Math.abs(num(a.option_details!.strike) - q.target) - Math.abs(num(b.option_details!.strike) - q.target));
-    for (const inst of atExpiry.slice(0, 3)) {
+    let cheapestMin: number | null = null;
+    let noSellers = 0;
+    const tried = atExpiry.slice(0, 3);
+    for (const inst of tried) {
       const t = await this.ticker(inst.instrument_name).catch(() => null);
       const ask = num(t?.a);
-      if (!t || ask <= 0) continue;
-      const contracts = floorStep(q.budgetUsd / ask, num(inst.amount_step));
-      if (contracts < num(inst.minimum_amount)) continue;
+      if (!t || ask <= 0) {
+        noSellers++;
+        continue;
+      }
+      const contracts = this.contractsFor(q.budgetUsd, ask, inst, num(t.I));
+      if (contracts < num(inst.minimum_amount)) {
+        const min = this.costOf(num(inst.minimum_amount), ask, inst, num(t.I));
+        cheapestMin = cheapestMin === null ? min : Math.min(cheapestMin, min);
+        continue;
+      }
       const strike = num(inst.option_details!.strike);
       return {
         instrument: inst.instrument_name,
         ask,
         contracts,
-        costUsd: contracts * ask,
+        costUsd: this.costOf(contracts, ask, inst, num(t.I)),
         strike,
         type: type === "C" ? "call" : "put",
         expiry: new Date(expiry * 1000),
@@ -172,7 +188,25 @@ export class DeriveVenue implements VenueAdapter {
         breakEven: type === "C" ? strike + ask : strike - ask,
       };
     }
-    return null;
+    const near = `the ${tried.map((i) => fmtPrice(num(i.option_details!.strike))).join(", ")} ${type === "C" ? "calls" : "puts"} expiring ${shortDate(new Date(expiry * 1000))}`;
+    if (cheapestMin !== null) return { why: `the smallest order Derive takes on ${near} costs about ${fmtUsd(cheapestMin)}, more than ${fmtUsd(q.budgetUsd)}.` };
+    if (noSellers === tried.length) return { why: `nobody is selling ${near} right now.` };
+    return { why: `${near} couldn't be priced right now.` };
+  }
+
+  /**
+   * Contracts a USD budget buys at a price, after Derive's taker and base
+   * fees, so a buy never spends more than the owner said. Quotes, paper and
+   * live orders all size the same way.
+   */
+  contractsFor(budgetUsd: number, px: number, inst: DeriveInstrument, spot: number): number {
+    const perContract = px + this.feePerContract(inst, px, spot);
+    return Math.max(0, floorStep((budgetUsd - num(inst.base_fee)) / perContract, num(inst.amount_step)));
+  }
+
+  /** What buying this many contracts costs with fees. */
+  costOf(contracts: number, px: number, inst: DeriveInstrument, spot: number): number {
+    return contracts * (px + this.feePerContract(inst, px, spot)) + num(inst.base_fee);
   }
 
   // -- plan steps ----------------------------------------------------------------
@@ -194,10 +228,10 @@ export class DeriveVenue implements VenueAdapter {
       const t = await this.ticker(leg.instrument);
       const ask = num(t.a);
       if (ask <= 0) throw new VenueError(`Nobody is selling ${describeOption(leg.instrument)} right now. Try another strike or expiry.`);
-      const contracts = floorStep(spend / ask, num(inst.amount_step));
+      const contracts = this.contractsFor(spend, ask, inst, num(t.I));
       if (contracts < num(inst.minimum_amount)) {
         throw new VenueError(
-          `${fmtUsd(spend)} buys ${contracts} contracts at ${fmtPrice(ask)}; Derive's minimum is ${inst.minimum_amount} (about ${fmtUsd(num(inst.minimum_amount) * ask)}).`,
+          `${fmtUsd(spend)} buys ${dec(contracts)} contracts at ${fmtPrice(ask)} after fees; Derive's minimum is ${inst.minimum_amount} (about ${fmtUsd(this.costOf(num(inst.minimum_amount), ask, inst, num(t.I)))}).`,
         );
       }
       notes.push(payoffNote(name.asset, name.type, name.strike, name.expiry, ask, contracts));
@@ -231,10 +265,9 @@ export class DeriveVenue implements VenueAdapter {
       const ask = num(t.a);
       if (ask <= 0) throw new VenueError(`Nobody is selling ${what} right now.`);
       const budget = leg.amount.type === "usd" ? leg.amount.usd : store.paperUsdc() * leg.amount.fraction;
-      const perContract = ask + this.feePerContract(inst, ask, num(t.I));
-      const contracts = floorStep((budget - num(inst.base_fee)) / perContract, step);
+      const contracts = this.contractsFor(budget, ask, inst, num(t.I));
       if (contracts < num(inst.minimum_amount)) throw new VenueError(`${fmtUsd(budget)} is under Derive's minimum for ${what}.`);
-      const cost = contracts * perContract + num(inst.base_fee);
+      const cost = this.costOf(contracts, ask, inst, num(t.I));
       if (cost > store.paperUsdc()) throw new VenueError(`Paper balance is ${fmtUsd(store.paperUsdc())}.`);
       store.setPaperUsdc(store.paperUsdc() - cost);
       store.setPaperHolding({ ...held, amount: held.amount + contracts, costUsd: held.costUsd + cost });
@@ -341,7 +374,8 @@ export class DeriveVenue implements VenueAdapter {
       if (ask <= 0) throw new VenueError(`Nobody is selling ${what} right now.`);
       limitPrice = floorStep(ask * (1 + slip), tick);
       const budget = leg.amount.type === "usd" ? leg.amount.usd : 0;
-      amount = floorStep(budget / limitPrice, step);
+      // Sized at the limit price with fees, so even a fill at the limit stays within the budget.
+      amount = this.contractsFor(budget, limitPrice, inst, num(t.I));
       if (amount < num(inst.minimum_amount)) throw new VenueError(`${fmtUsd(budget)} is under Derive's minimum for ${what}.`);
     } else {
       const bid = num(t.b);

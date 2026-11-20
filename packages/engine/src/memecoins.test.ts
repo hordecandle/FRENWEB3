@@ -41,7 +41,7 @@ describe("tokens on Base and Robinhood Chain", () => {
     expect(out).toMatch(/Paper: Bought 5,000 DOG on Base for \$50.00/);
 
     const status = await t.fren.status();
-    expect(status).toMatch(/5000 DOG \(Base\) worth \$50.00/);
+    expect(status).toMatch(/5,000 DOG \(Base\) worth \$50.00/);
     expect(status.match(/DOG/g)).toHaveLength(1);
 
     const sell = await t.fren.submit({

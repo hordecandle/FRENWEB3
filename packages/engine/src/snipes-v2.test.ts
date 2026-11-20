@@ -83,6 +83,26 @@ describe("a buy of a token that can't trade yet waits for it", () => {
   });
 });
 
+describe("sniping a Solana address that doesn't exist yet", () => {
+  const NOT_YET = "NotYet1111111111111111111111111111111111111";
+
+  it("says the token isn't created yet, rather than blaming the RPC", async () => {
+    const t = buildTestFren();
+    t.fake.solanaRpcAnswers = true;
+    const res = await t.fren.submit(swap({ venue: "jupiter", token: NOT_YET }, [{ type: "tradable", venue: "jupiter", token: NOT_YET }]));
+    expect(res.verdict).not.toBe("executed");
+    expect(res.text).toMatch(/doesn't exist on Solana yet/);
+    expect(res.text).toMatch(/ending in "pump"/);
+    expect(res.text).not.toMatch(/didn't answer/);
+  });
+
+  it("still blames the RPC when it really didn't answer", async () => {
+    const t = buildTestFren();
+    const res = await t.fren.submit(swap({ venue: "jupiter", token: NOT_YET }, [{ type: "tradable", venue: "jupiter", token: NOT_YET }]));
+    expect(res.text).toMatch(/didn't answer/);
+  });
+});
+
 describe("the live Solana feed", () => {
   function fakeSource() {
     const watched = new Map<number, { address: string; cb: () => void }>();
