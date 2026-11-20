@@ -659,7 +659,36 @@ install_sandbox() {
   if have apt-get && ! python3 -c 'import ensurepip, venv' >/dev/null 2>&1; then
     pkg_install python3 python3-venv python3-pip || warn "Couldn't install Python for the code sandbox; Node and bash scripts still work."
   fi
+  install_browser
   "$NODE_BIN" "$FREN_CLI" sandbox --agent-user "$SERVICE_USER" || warn "The code sandbox is off, so Fren can't run code. Everything else works."
+}
+
+# A headless Chromium for the sandbox, so Fren can screenshot web pages
+# (Hyperdash, charts, any site) and send them to the owner. It runs inside the
+# sandbox like any script: no keys, no local services. Optional, like the sandbox.
+FREN_BROWSER_DIR=/usr/local/lib/fren-browser
+PLAYWRIGHT_VERSION=1.63.0
+install_browser() {
+  [[ -x "$FREN_BROWSER_DIR/chrome" ]] && return 0
+  have apt-get || { warn "No browser for screenshots on this system (needs apt). Everything else works."; return 0; }
+  step "Browser for screenshots (a minute or two)"
+  local npx_bin bin
+  npx_bin="$(dirname "$NODE_BIN")/npx"
+  [[ -x "$npx_bin" ]] || npx_bin="$(command -v npx || true)"
+  [[ -n "$npx_bin" ]] || { warn "No npx, so no browser for screenshots. Everything else works."; return 0; }
+  install -d -m 755 "$FREN_BROWSER_DIR"
+  apt_wait
+  if ! PLAYWRIGHT_BROWSERS_PATH="$FREN_BROWSER_DIR" PLAYWRIGHT_SKIP_BROWSER_GC=1 "$npx_bin" -y "playwright@$PLAYWRIGHT_VERSION" install --with-deps --only-shell chromium >/var/log/fren-browser.log 2>&1; then
+    warn "Couldn't install the browser for screenshots (see /var/log/fren-browser.log). Everything else works."
+    return 0
+  fi
+  # Emoji and other scripts on the pages, where the system has the fonts.
+  pkg_install fonts-noto-color-emoji fonts-noto-cjk >/dev/null 2>&1 || true
+  bin="$(find "$FREN_BROWSER_DIR" -type f \( -name chrome-headless-shell -o -name headless_shell \) -perm -u+x 2>/dev/null | head -1)"
+  [[ -n "$bin" ]] || { warn "The browser download had no headless Chromium in it. Screenshots are off."; return 0; }
+  ln -sfn "$bin" "$FREN_BROWSER_DIR/chrome"
+  chmod -R a+rX "$FREN_BROWSER_DIR"
+  echo "✓ Headless browser in $FREN_BROWSER_DIR"
 }
 
 # A sealed engine (`fren isolate`) runs its own root-owned copy of Fren in

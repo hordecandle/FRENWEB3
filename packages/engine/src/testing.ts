@@ -164,6 +164,8 @@ export class FakeVenues {
   hlFills: Record<string, unknown>[] = [];
   /** Order types by oid, for orderStatus ("Stop Market", "Take Profit Market", ...). */
   hlOrderTypes: Record<number, string> = {};
+  /** Open positions by dex, as clearinghouseState lists them. */
+  hlPositions: Record<string, { position: Record<string, unknown> }[]> = {};
   /** What candleSnapshot returns. */
   hlCandles: { t: number; o: string; h: string; l: string; c: string }[] = [];
   /** Every POST body sent to /exchange. */
@@ -348,7 +350,7 @@ export class FakeVenues {
       if (body.type === "candleSnapshot") return json(this.hlCandles);
       if (body.type === "clearinghouseState") {
         const dex = (body.dex as string | undefined) ?? "";
-        return json({ marginSummary: { accountValue: "0" }, withdrawable: String(this.hlFree[dex] ?? this.hlFreeDefault), assetPositions: [] });
+        return json({ marginSummary: { accountValue: "0" }, withdrawable: String(this.hlFree[dex] ?? this.hlFreeDefault), assetPositions: this.hlPositions[dex] ?? [] });
       }
     }
     if (url.pathname === "/exchange") {

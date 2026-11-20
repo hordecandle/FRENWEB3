@@ -5,6 +5,7 @@ import type { Dashboard } from "./dashboard.js";
 import type { Updater } from "./updater.js";
 import { describeLimits, type Fren, type FundVenue } from "./engine.js";
 import type { AgentBudget } from "./guard.js";
+import { linkLabel } from "./receipt.js";
 
 /**
  * Local HTTP API for the OpenClaw plugin. Bound to 127.0.0.1 and gated by a
@@ -39,13 +40,32 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     "POST /close_all": async () => fren.requestCloseAll(),
     "POST /cancel": async (b) => ({ text: await fren.cancel(String(b.planId ?? "")) }),
     "POST /deposit/hyperliquid": async (b) => fren.depositWithReceipt(Number(b.amountUsd)),
-    "GET /settings": async () => ({ settings: fren.settings(), text: describeSettings(fren.settings()) }),
+    "GET /settings": async () => ({ settings: fren.settings(), text: describeSettings(fren.settings(), fren.receiptRoute) }),
     "POST /settings": async (b) => {
       const changes: { images?: boolean } = {};
       if (b.images !== undefined) changes.images = parseOnOff(b.images);
       const settings = fren.setSettings(changes);
-      return { settings, text: describeSettings(settings) };
+      return { settings, text: describeSettings(settings, fren.receiptRoute) };
     },
+    /** A picture for the owner's chat (a screenshot or an image the agent made in the sandbox). */
+    "POST /owner/image": async (b) => {
+      const image = Buffer.from(String(b.imageBase64 ?? ""), "base64");
+      const links = Array.isArray(b.links)
+        ? b.links.flatMap((l) => {
+            const o = (l ?? {}) as { label?: unknown; url?: unknown };
+            return typeof o.url === "string" ? [{ label: typeof o.label === "string" && o.label.trim() ? o.label.trim().slice(0, 60) : linkLabel(o.url), url: o.url }] : [];
+          })
+        : [];
+      return fren.sendImage({ image, ...(typeof b.caption === "string" ? { caption: b.caption } : {}), links, ...(typeof b.name === "string" ? { name: b.name } : {}) });
+    },
+    /** A price chart Fren draws itself, sent to the owner's chat. */
+    "POST /chart": async (b) =>
+      fren.sendChart({
+        ...(typeof b.market === "string" && b.market.trim() ? { market: b.market.trim() } : {}),
+        ...(typeof b.chain === "string" ? { chain: b.chain } : {}),
+        ...(typeof b.token === "string" && b.token.trim() ? { token: b.token.trim() } : {}),
+        ...(b.hours !== undefined ? { hours: Number(b.hours) } : {}),
+      }),
     "POST /bets/quote": async (b) => fren.quoteBet(betQuery(b), String(b.request ?? "")),
     /** /fren_dashboard: a one-time login link, sent to the owner privately when there's a line. */
     /** The Fren plugin calls this when the OpenClaw gateway starts: the chat line is up. */
@@ -81,7 +101,7 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
         let size = 0;
         for await (const c of req) {
           size += (c as Buffer).length;
-          if (size > 256 * 1024) return send(413, { error: "too large" });
+          if (size > (url.pathname === "/owner/image" ? 15 << 20 : 256 * 1024)) return send(413, { error: "too large" });
           chunks.push(c as Buffer);
         }
         body = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>) : {};
@@ -120,6 +140,7 @@ function parseOnOff(v: unknown): boolean {
   throw new Error('Say "on" or "off".');
 }
 
-export function describeSettings(s: { images: boolean }): string {
-  return `Chart snapshots on trade receipts: ${s.images ? "on" : "off"}. Turn them ${s.images ? "off with /fren_images off" : "on with /fren_images on"}.`;
+export function describeSettings(s: { images: boolean }, route?: string): string {
+  const line = `Chart snapshots on trade receipts: ${s.images ? "on" : "off"}. Turn them ${s.images ? "off with /fren_images off" : "on with /fren_images on"}.`;
+  return route ? `${line}\nReceipts go ${route}.` : line;
 }

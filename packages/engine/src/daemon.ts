@@ -1,3 +1,4 @@
+import { readTelegramOwner, type TelegramOwner } from "./owner-telegram.js";
 import { existsSync, readFileSync } from "node:fs";
 import { isolatedMarker } from "./setup.js";
 import { SignerProcess, type SignerApi } from "@fren/signer";
@@ -35,9 +36,13 @@ export interface BuildOptions {
 
 /** Wire the engine from its parts. Used by the daemon and by tests with fakes. */
 /** Lines to the owner, most private first. */
-export function ownerLines(config: FrenConfig, fetchFn: Fetch, exec?: Exec): OwnerLine[] {
+export function ownerLines(config: FrenConfig, fetchFn: Fetch, exec?: Exec, openClawTelegram: () => TelegramOwner | null = () => readTelegramOwner(config.notify)): OwnerLine[] {
+  // No Telegram line of Fren's own (older installs only had the gateway one):
+  // the bot token and owner are in OpenClaw's config, so receipts still get
+  // named links and pictures.
+  const telegram = config.telegram ?? openClawTelegram();
   return [
-    ...(config.telegram ? [new TelegramLine(fetchFn, config.telegram)] : []),
+    ...(telegram ? [new TelegramLine(fetchFn, telegram)] : []),
     ...config.notify.map((t) => new GatewayLine(t, exec, config.openclawBin)),
   ];
 }

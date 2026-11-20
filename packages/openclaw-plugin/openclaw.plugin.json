@@ -19,7 +19,9 @@
       "fren_fund",
       "fren_yield",
       "fren_run_code",
-      "fren_settings"
+      "fren_settings",
+      "fren_chart",
+      "fren_screenshot"
     ]
   },
   "activation": {
@@ -40,6 +42,10 @@
       "sandboxSocket": {
         "type": "string",
         "description": "The code sandbox's socket (fren sandbox). Default /run/fren-sandbox.sock"
+      },
+      "screenshotHelper": {
+        "type": "string",
+        "description": "The screenshot helper inside the sandbox. Default /usr/local/lib/fren-sandbox/shot.mjs"
       }
     }
   }

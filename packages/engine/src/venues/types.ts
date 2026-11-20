@@ -40,8 +40,8 @@ export interface VenueAdapter {
   resolve(step: PlanStep, index: number): Promise<ResolvedStep>;
   execute(resolved: ResolvedStep, ctx: ExecContext): Promise<ExecResult>;
   positions(mode: Mode): Promise<PositionView[]>;
-  /** Close every perp position (kill switch). Returns one line per close. */
-  flatten(mode: Mode): Promise<string[]>;
+  /** Close every perp position (kill switch). One line per close, with its receipt where the venue has one. */
+  flatten(mode: Mode): Promise<string[] | ExecResult[]>;
 }
 
 /** Spot venues can also say whether a not-yet-launched token trades yet. */

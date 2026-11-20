@@ -3,7 +3,17 @@ import { definePluginEntry, type OpenClawPluginApi, type OpenClawPluginToolConte
 import { EngineClient, type OwnerResult } from "./client.js";
 import { LoopGuard, type ToolContext, type TurnContext } from "./guard.js";
 import planSchema from "./plan-schema.json" with { type: "json" };
-import { SANDBOX_BUSY, SANDBOX_MISSING, SandboxBusy, SandboxUnavailable, formatRun, runWhenFree, type RunCodeRequest } from "./sandbox.js";
+import {
+  SANDBOX_BUSY,
+  SANDBOX_MISSING,
+  SandboxBusy,
+  SandboxUnavailable,
+  formatRun,
+  runWhenFree,
+  screenshotCode,
+  type RunCodeRequest,
+  type RunCodeResult,
+} from "./sandbox.js";
 
 /**
  * Fren for OpenClaw. The agent gets tools that propose plans and read state;
@@ -26,6 +36,8 @@ export const TOOL_NAMES = [
   "fren_yield",
   "fren_run_code",
   "fren_settings",
+  "fren_chart",
+  "fren_screenshot",
 ] as const;
 
 type ToolName = (typeof TOOL_NAMES)[number];
@@ -50,6 +62,30 @@ export const RECEIPT_NOTE =
 
 export function withReceiptNote(res: { text: string; receiptSent?: boolean }): string {
   return res.receiptSent ? `${res.text}\n\n${RECEIPT_NOTE}` : res.text;
+}
+
+/** After a picture went to the chat: the model shouldn't say it can't send images, or paste the link again. */
+export const PICTURE_NOTE = "It is already in their chat with the link under it: reply in one short line at most, and don't paste links.";
+
+export const SCREENSHOT_MISSING =
+  "Fren's browser isn't installed on this server yet. Tell the owner in one line that /fren_update installs it, and use fren_chart for price charts meanwhile.";
+
+/** Pictures a sandbox run saved in $FREN_OUT, sent to the owner's chat. Returns a line for the model. */
+async function sendImages(client: EngineClient, r: RunCodeResult): Promise<string> {
+  if (!r.images?.length) return "";
+  let ok = 0;
+  const problems: string[] = [];
+  for (const img of r.images) {
+    try {
+      const res = await client.call<{ sent: boolean; text: string }>("POST", "/owner/image", { imageBase64: img.base64, name: img.name });
+      if (res.sent) ok++;
+      else problems.push(res.text);
+    } catch (err) {
+      problems.push((err as Error).message);
+    }
+  }
+  const sent = ok ? `\n(Sent ${ok} picture${ok > 1 ? "s" : ""} from $FREN_OUT to the owner's chat. ${PICTURE_NOTE})` : "";
+  return sent + (problems.length ? `\n(Pictures not sent: ${problems[0]})` : "");
 }
 
 /**
@@ -82,7 +118,7 @@ export function noteLang(body: unknown) {
 }
 const langBody = () => (lastLang ? { lang: lastLang } : {});
 
-export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string } = {}): ToolSpec[] {
+export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; screenshotHelper?: string } = {}): ToolSpec[] {
   return [
     {
       name: "fren_wallet",
@@ -139,7 +175,10 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string }
       label: "Close all leveraged positions",
       description: "Close every open leveraged position at market. Only when the owner asks for it; in live mode the owner approves with a code. Spot tokens are not touched.",
       parameters: Type.Object({}),
-      run: async () => ownerReply(await client.call<OwnerResult>("POST", "/close_all")),
+      run: async () => {
+        const res = await client.call<OwnerResult>("POST", "/close_all");
+        return res.ownerCode ? ownerReply(res) : withReceiptNote(res);
+      },
     },
     {
       name: "fren_limits",
@@ -215,6 +254,87 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string }
           : (await client.call<{ text: string }>("GET", "/settings")).text,
     },
     {
+      name: "fren_chart",
+      label: "Send a chart",
+      description: [
+        "Draw a price chart and send it to the owner's chat as a picture, with links to follow it.",
+        'Use it whenever they ask to see a chart or "a screenshot of the chart" of a coin: a Hyperliquid perp (market, e.g. "BTC", "xyz:ANT"),',
+        "with their open position's entry and liquidation drawn in, or a token on Solana, Base or Arbitrum (token address and chain).",
+        "Fren draws it itself from the exchange's candles, so it's fast and always readable. For a picture of a whole web page use fren_screenshot.",
+      ].join(" "),
+      parameters: Type.Object({
+        market: Type.Optional(Type.String({ description: "Hyperliquid market, as fren_markets names it." })),
+        token: Type.Optional(Type.String({ description: "Token address (mint on Solana)." })),
+        chain: Type.Optional(Type.Union([Type.Literal("solana"), Type.Literal("base"), Type.Literal("arbitrum")])),
+        hours: Type.Optional(Type.Number({ minimum: 1, maximum: 720, description: "How far back. Default 6; 24 for a day, 168 for a week." })),
+      }),
+      run: async (p) => {
+        const r = await client.call<{ sent: boolean; text: string }>("POST", "/chart", p);
+        return r.sent ? `${r.text} ${PICTURE_NOTE}` : r.text;
+      },
+    },
+    {
+      name: "fren_screenshot",
+      label: "Screenshot a web page",
+      description: [
+        "Open a web page in Fren's headless browser and send the owner a screenshot of it, with the link.",
+        "Use it when they ask to see a page: their positions and PnL on Hyperdash (https://hyperdash.com/address/<their EVM address>),",
+        "a token or a project's site, an explorer page, a tweet, any public https page. The browser runs in the sandbox: no keys, no logins,",
+        "nothing on this machine. Sites behind a bot check (DexScreener, some exchanges) may only show that check, and pages that ask you to",
+        "accept terms show the popup: say so in one line and offer fren_chart instead. For a price chart, fren_chart is better.",
+      ].join(" "),
+      parameters: Type.Object({
+        url: Type.String({ description: "The page, https://…" }),
+        caption: Type.Optional(Type.String({ description: "One short line under the picture." })),
+        fullPage: Type.Optional(Type.Boolean({ description: "The whole scrolling page, not just the first screen." })),
+        waitSec: Type.Optional(Type.Number({ minimum: 0, maximum: 20, description: "Extra seconds for the page to fill in. Default 6." })),
+        mobile: Type.Optional(Type.Boolean({ description: "A phone-sized screen (430 wide) instead of a desktop one." })),
+      }),
+      run: async (p) => {
+        let url: URL;
+        try {
+          url = new URL(String(p.url ?? ""));
+        } catch {
+          return "That isn't a web address. Give a full https:// link.";
+        }
+        if (url.protocol !== "https:" && url.protocol !== "http:") return "Only http and https pages can be screenshotted.";
+        const code = screenshotCode({
+          url: url.href,
+          ...(p.mobile === true ? { width: 430, height: 932 } : {}),
+          ...(typeof p.waitSec === "number" ? { waitSec: p.waitSec } : {}),
+          ...(p.fullPage === true ? { fullPage: true } : {}),
+        }, opts.screenshotHelper);
+        let r: RunCodeResult;
+        try {
+          r = await runWhenFree({ lang: "node", code, timeoutSec: 90 }, opts.sandboxSocket ? { socket: opts.sandboxSocket } : {});
+        } catch (err) {
+          if (err instanceof SandboxUnavailable) return SCREENSHOT_MISSING;
+          if (err instanceof SandboxBusy) return SANDBOX_BUSY;
+          throw err;
+        }
+        const line = /^SHOT (.+)$/m.exec(r.output ?? "")?.[1];
+        const info = line ? (JSON.parse(line) as { ok: boolean; title?: string; finalUrl?: string; error?: string }) : null;
+        const image = r.images?.[0];
+        if (!info?.ok || !image) {
+          if (/No browser is installed|Cannot find module|ERR_MODULE_NOT_FOUND/.test(`${info?.error ?? ""}\n${r.output ?? ""}`)) return SCREENSHOT_MISSING;
+          const lastLines = (r.output ?? "").trim().split("\n").filter((l) => !/^Node\.js v/.test(l)).slice(-2).join(" ");
+          const why = info?.error ?? r.error ?? (r.timedOut ? "the page took too long" : lastLines);
+          return `The screenshot didn't work: ${why.slice(0, 300)}. Tell the owner in one line, and offer fren_chart for a price chart.`;
+        }
+        const finalUrl = info.finalUrl || url.href;
+        const title = (info.title ?? "").trim().slice(0, 120);
+        const caption = typeof p.caption === "string" && p.caption.trim() ? p.caption.trim() : `📸 ${title || new URL(finalUrl).hostname}`;
+        const sent = await client.call<{ sent: boolean; text: string }>("POST", "/owner/image", {
+          imageBase64: image.base64,
+          caption,
+          links: [{ url: finalUrl }],
+          name: "fren-screenshot",
+        });
+        if (!sent.sent) return sent.text;
+        return `Sent the owner a screenshot of "${title || finalUrl}" (${finalUrl}). ${PICTURE_NOTE}`;
+      },
+    },
+    {
       name: "fren_run_code",
       label: "Run code",
       description: [
@@ -225,6 +345,8 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string }
         "node runs as an ES module (import, top-level await); python3 and bash too. Files stay in the working folder between runs,",
         "so install packages once (npm i viem; python3 -m venv .venv && .venv/bin/pip install pandas) and reuse them. Up to 150 s and 768 MB per run.",
         "It can't sign or spend: anything that moves money still goes through fren_trade.",
+        "To show the owner a picture (a chart you plotted, a table as an image), save it as PNG or JPEG in the folder $FREN_OUT",
+        "(process.env.FREN_OUT in node, os.environ['FREN_OUT'] in python): up to 4 pictures go straight to their chat when the run ends.",
       ].join(" "),
       parameters: Type.Object({
         language: Type.Union([Type.Literal("node"), Type.Literal("python"), Type.Literal("bash")]),
@@ -237,7 +359,9 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string }
         if (typeof p.timeoutSec === "number") req.timeoutSec = p.timeoutSec;
         if (p.reset === true) req.reset = true;
         try {
-          return formatRun(await runWhenFree(req, opts.sandboxSocket ? { socket: opts.sandboxSocket } : {}));
+          const r = await runWhenFree(req, opts.sandboxSocket ? { socket: opts.sandboxSocket } : {});
+          const sent = await sendImages(client, r);
+          return formatRun(r) + sent;
         } catch (err) {
           if (err instanceof SandboxUnavailable) return SANDBOX_MISSING;
           if (err instanceof SandboxBusy) return SANDBOX_BUSY;
@@ -248,7 +372,7 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string }
   ];
 }
 
-function registerTools(api: OpenClawPluginApi, client: EngineClient, opts: { sandboxSocket?: string }) {
+function registerTools(api: OpenClawPluginApi, client: EngineClient, opts: { sandboxSocket?: string; screenshotHelper?: string }) {
   for (const spec of toolSpecs(client, opts)) {
     api.registerTool(
       (ctx) => {
@@ -477,12 +601,15 @@ export default definePluginEntry({
   name: "Fren",
   description: "Trade perps, spot, options and prediction markets from chat. Keys stay in the local Fren engine.",
   register(api) {
-    const cfg = (api.pluginConfig ?? {}) as { apiUrl?: string; tokenFile?: string; sandboxSocket?: string };
+    const cfg = (api.pluginConfig ?? {}) as { apiUrl?: string; tokenFile?: string; sandboxSocket?: string; screenshotHelper?: string };
     const client = new EngineClient({
       ...(cfg.apiUrl ? { apiUrl: cfg.apiUrl } : {}),
       ...(cfg.tokenFile ? { tokenFile: cfg.tokenFile } : {}),
     });
-    registerTools(api, client, cfg.sandboxSocket ? { sandboxSocket: cfg.sandboxSocket } : {});
+    registerTools(api, client, {
+      ...(cfg.sandboxSocket ? { sandboxSocket: cfg.sandboxSocket } : {}),
+      ...(cfg.screenshotHelper ? { screenshotHelper: cfg.screenshotHelper } : {}),
+    });
     const mode = api.registrationMode;
     if (mode !== "cli-metadata" && mode !== "setup-only" && mode !== "tool-discovery") {
       registerCommands(api, client);
