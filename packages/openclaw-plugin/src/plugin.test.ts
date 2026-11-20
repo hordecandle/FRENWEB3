@@ -102,7 +102,7 @@ describe("OpenClaw plugin against a real engine", () => {
     t.fake.addOption(optionName("ETH", 55, 4000), { ask: 120, bid: 110, spot: 3_500 });
     t.poly.addMarket({ slug: "eth-4k", question: "Will Ethereum reach $4,000 by December 31?", endDate: by.toISOString(), yesAsk: 0.3 });
     const out = await run("fren_bet_quote", { asset: "ETH", target: 4000, direction: "above", by: by.toISOString().slice(0, 10), budgetUsd: 50 });
-    expect(out).toMatch(/1\) Option on Derive: 0\.41 contracts of the ETH \$4,000 call/);
+    expect(out).toMatch(/1\) Option on Derive: 0\.4 contracts of the ETH \$4,000 call/);
     expect(out).toMatch(/2\) Polymarket: "Will Ethereum reach \$4,000 by December 31\?"/);
     const plan = JSON.parse(/^polymarket: (.*)$/m.exec(out)![1]!);
     expect(await run("fren_trade", { plan })).toMatch(/📝 Paper: Bought 167 "Yes" shares/);

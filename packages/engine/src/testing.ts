@@ -316,6 +316,9 @@ export class FakeVenues {
     ];
   }
 
+  /** The fake Solana RPC answers account reads (with "no account"); off, it fails like an RPC outage. */
+  solanaRpcAnswers = false;
+
   readonly fetch: Fetch = async (input, init) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
@@ -326,6 +329,10 @@ export class FakeVenues {
       const h = new Headers(init?.headers);
       const headers = Object.fromEntries(["X-DeriveWallet", "X-DeriveTimestamp", "X-DeriveSignature"].flatMap((k) => (h.get(k) ? [[k, h.get(k)!]] : [])));
       return json(this.derive(url.pathname.slice(1), body, headers));
+    }
+    if (url.hostname === "rpc.test" && this.solanaRpcAnswers && (body.method === "getAccountInfo" || body.method === "getParsedAccountInfo")) {
+      // No such account: a mint that hasn't been created yet.
+      return json({ jsonrpc: "2.0", id: body.id, result: { context: { slot: 1 }, value: null } });
     }
     if (url.hostname === "jup.test" && this.jupStatus !== 200) return json({ error: "Rate limit exceeded" }, this.jupStatus);
     if (url.pathname === "/info") {

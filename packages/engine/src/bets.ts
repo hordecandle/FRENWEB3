@@ -43,10 +43,12 @@ export async function quoteBet(venues: { derive: DeriveVenue; polymarket: Polyma
   if (Number.isNaN(by.getTime())) throw new Error(`"${q.by}" isn't a date.`);
   if (by.getTime() < Date.now()) throw new Error("That date has passed.");
 
-  const [option, prediction] = await Promise.all([
-    venues.derive.bestOption({ asset, target: q.target, direction: q.direction, by, budgetUsd: q.budgetUsd }).catch(() => null),
+  const [optionOrWhy, prediction] = await Promise.all([
+    venues.derive.bestOptionOrWhy({ asset, target: q.target, direction: q.direction, by, budgetUsd: q.budgetUsd }).catch(() => ({ why: "Derive didn't answer." })),
     venues.polymarket.bestMarket({ assetNames: NAMES[asset] ?? [asset], target: q.target, direction: q.direction, by, budgetUsd: q.budgetUsd }).catch(() => null),
   ]);
+  const optionMiss = "why" in optionOrWhy ? optionOrWhy.why : null;
+  const option = "why" in optionOrWhy ? null : optionOrWhy;
 
   const head = `${asset} ${q.direction} ${fmtPrice(q.target)} by ${shortDate(by)}, with ${fmtUsd(q.budgetUsd)}${option?.spot ? `. ${asset} is ${fmtPrice(option.spot)} now` : ""}.`;
   const lines = [head, ""];
@@ -58,7 +60,7 @@ export async function quoteBet(venues: { derive: DeriveVenue; polymarket: Polyma
       request,
       steps: [{ leg: { kind: "option", venue: "derive", side: "buy", instrument: option.instrument, amount: { type: "usd", usd: q.budgetUsd } } }],
     };
-  } else lines.push(`1) Option on Derive: nothing listed for ${asset} near ${fmtPrice(q.target)} around that date.`);
+  } else lines.push(`1) Option on Derive: nothing to buy for ${asset} near ${fmtPrice(q.target)} around that date${optionMiss ? `: ${optionMiss}` : "."}`);
   lines.push("");
 
   if (prediction) {

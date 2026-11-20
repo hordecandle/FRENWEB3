@@ -14,6 +14,7 @@ import {
   tradableKey,
   chainName,
   EVM_CHAINS,
+  qty,
   usd as fmtUsd,
   type Condition,
   type Limits,
@@ -1084,7 +1085,7 @@ function describePosition(p: PositionView): string {
   if (p.venue === "derive") return `${size} contracts of the ${p.symbol} worth ${fmtUsd(p.valueUsd)}${pnl}`;
   if (p.venue === "polymarket") return `${size} shares of ${p.symbol} worth ${fmtUsd(p.valueUsd)}${pnl}`;
   if (p.venue === "yield") return `${fmtUsd(p.valueUsd)} USDC lent on ${p.symbol}${p.pnlUsd !== null && p.pnlUsd > 0.005 ? ` (+${fmtUsd(p.pnlUsd)} interest)` : ""}`;
-  return `${p.size} ${p.symbol} worth ${fmtUsd(p.valueUsd)}${pnl}`;
+  return `${qty(p.size)} ${p.symbol} worth ${fmtUsd(p.valueUsd)}${pnl}`;
 }
 
 /** A step that only reduces exposure: closing a perp or selling a token. */

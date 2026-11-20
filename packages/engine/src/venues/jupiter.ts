@@ -223,6 +223,14 @@ export class JupiterVenue implements SpotVenueAdapter {
     return typeof parsed?.info?.decimals === "number" ? parsed.info.decimals : null;
   }
 
+  /** True only when the RPC answered and there is no account at this address. */
+  private async mintMissing(mint: string): Promise<boolean> {
+    const info = await Promise.resolve()
+      .then(() => this.connection.getAccountInfo(new PublicKey(mint)))
+      .then((v) => ({ v }), () => null);
+    return info !== null && info.v === null;
+  }
+
   /**
    * A token Jupiter's list doesn't know (a launch snipe, or a lookup that
    * failed). Decimals come from the chain; pump.fun coins (mint ends in "pump")
@@ -233,6 +241,11 @@ export class JupiterVenue implements SpotVenueAdapter {
     let decimals = await this.chainDecimals(mint);
     if (decimals === null && mint.endsWith("pump")) decimals = 6;
     if (decimals === null) {
+      if (await this.mintMissing(mint)) {
+        throw new VenueError(
+          `${shortToken(mint)} doesn't exist on Solana yet, so I can't tell how its amounts work and won't guess. I can snipe pump.fun addresses (ending in "pump") before launch; for this one, send it again once the token is created.`,
+        );
+      }
       throw new VenueError(`I couldn't confirm the price data for ${shortToken(mint)} right now (Jupiter and the Solana RPC didn't answer), so I won't trade it. Try again in a minute.`);
     }
     return { mint, symbol: shortToken(mint), name: "", decimals, verified: false, usdPrice: null, liquidityUsd: null };

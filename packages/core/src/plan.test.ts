@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { evaluateAll } from "./conditions.js";
 import { safeParsePlan } from "./plan.js";
+import { qty, shortToken } from "./render.js";
 
 describe("Plan schema", () => {
   it("accepts the brief's two-leg example", () => {
@@ -96,5 +97,17 @@ describe("stops and targets in dollars", () => {
   it("refuse a stop bigger than the margin, or a stop given twice", () => {
     expect(safeParsePlan(leg({ stopLossUsd: 60 })).error?.issues[0]?.message).toMatch(/more than the \$50 margin/);
     expect(safeParsePlan(leg({ stopLossUsd: 25, stopLossPct: 50 })).error?.issues[0]?.message).toMatch(/not both/);
+  });
+});
+
+describe("chat rendering of token amounts and well-known mints", () => {
+  it("formats amounts the way receipts do", () => {
+    expect(qty(9518221.87978339)).toBe("9,518,222");
+    expect(qty(1.23456789)).toBe("1.2346");
+    expect(qty(0.14458713349746333)).toBe("0.1446");
+  });
+  it("names SOL and USDC instead of their mints", () => {
+    expect(shortToken("So11111111111111111111111111111111111111112")).toBe("SOL");
+    expect(shortToken("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")).toBe("USDC");
   });
 });

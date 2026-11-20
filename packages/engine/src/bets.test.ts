@@ -47,9 +47,9 @@ describe("ETH hits $4,000 by a date: option vs Polymarket", () => {
     const t = betWorld();
     const q = await t.fren.quoteBet(query(t.by), "eth 4k by december, $1000");
     expect(q.text).toMatch(/^ETH above \$4,000 by .*, with \$1,000\. ETH is \$3,500 now\./);
-    expect(q.text).toMatch(/1\) Option on Derive: 8\.33 contracts of the ETH \$4,000 call expiring .* at \$120 each \(\$1,000 of your \$1,000\)/);
+    expect(q.text).toMatch(/1\) Option on Derive: 8\.25 contracts of the ETH \$4,000 call expiring .* at \$120 each \(\$999 of your \$1,000\)/);
     expect(q.text).toMatch(/Break-even \$4,120/);
-    expect(q.text).toMatch(/At \$4,400 you'd get \$3,332; at \$5,000, \$8,330/);
+    expect(q.text).toMatch(/At \$4,400 you'd get \$3,300; at \$5,000, \$8,250/);
     expect(q.text).toMatch(/2\) Polymarket: "Will Ethereum reach \$4,000 by December 31\?" Yes at 30¢ a share/);
     expect(q.text).toMatch(/trades at \$4,000 for a moment/);
     expect(q.text).not.toMatch(/14,000|Bitcoin/);
@@ -60,9 +60,16 @@ describe("ETH hits $4,000 by a date: option vs Polymarket", () => {
   it("says plainly when one side has nothing", async () => {
     const t = betWorld();
     const q = await t.fren.quoteBet({ ...query(t.by), asset: "SOL", target: 500 });
-    expect(q.text).toMatch(/1\) Option on Derive: nothing listed for SOL/);
+    expect(q.text).toMatch(/1\) Option on Derive: nothing to buy for SOL near \$500 around that date: Derive lists no SOL calls\./);
     expect(q.text).toMatch(/2\) Polymarket: no open market on SOL reaching \$500/);
     expect(q.plans).toEqual({});
+  });
+
+  it("says why there's no option when the budget is under Derive's smallest order", async () => {
+    const t = betWorld();
+    const q = await t.fren.quoteBet(query(t.by, 1));
+    expect(q.text).toMatch(/1\) Option on Derive: nothing to buy .*: the smallest order Derive takes on the .* calls expiring .* costs about \$\d+.*, more than \$1\.00\./);
+    expect(q.plans.derive).toBeUndefined();
   });
 
   it("paper: buys the option, sells half, and settles the rest at expiry", async () => {
@@ -126,13 +133,13 @@ describe("live options on Derive", () => {
     t.fake.deriveSubaccounts = [1234];
     await t.fren.submit(plan);
     const out = await t.fren.approve(codeFrom(t.notifier.sent));
-    expect(out).toMatch(/✅ Bought 4\.76 contracts of the ETH \$4,000 call expiring .* for \$573 at \$120 each on Derive/);
+    expect(out).toMatch(/✅ Bought 4\.71 contracts of the ETH \$4,000 call expiring .* for \$567 at \$120 each on Derive/);
 
     const addrs = await signer.addresses();
     const reg = t.fake.deriveCalls.find((c) => c.method === "private/set_session_key")!;
     expect(reg.body).toMatchObject({ public_session_key: addrs.deriveSession, protocol_scopes: ["trade:orderbook:option"] });
     const order = t.fake.deriveCalls.find((c) => c.method === "private/order")!;
-    expect(order.body).toMatchObject({ subaccount_id: 1234, instrument_name: t.call, direction: "buy", limit_price: "126", amount: "4.76", order_type: "limit", time_in_force: "ioc", signer: addrs.deriveSession });
+    expect(order.body).toMatchObject({ subaccount_id: 1234, instrument_name: t.call, direction: "buy", limit_price: "126", amount: "4.71", order_type: "limit", time_in_force: "ioc", signer: addrs.deriveSession });
     expect(order.headers["X-DeriveWallet"]).toBe(addrs.evm);
     expect(await recoverMessageAddress({ message: order.headers["X-DeriveTimestamp"]!, signature: order.headers["X-DeriveSignature"] as Hex })).toBe(addrs.deriveSession);
   });
