@@ -118,6 +118,9 @@ if [[ $SERVER -eq 1 ]]; then
   [[ $EUID -eq 0 ]] || die "--server needs root (run it as root on the VPS)."
   have systemctl || die "--server needs systemd."
   SUDO=""
+  # A result an earlier update left unread would be reported as this one's: an
+  # update that crashed before restarting the engine never got its result read.
+  if [[ $UPDATE -eq 1 ]]; then rm -f /var/lib/fren-engine/.fren/update-result; fi
 else
   if [[ $EUID -eq 0 ]]; then
     warn "You're root. On a VPS use --server so Fren runs as its own user."
