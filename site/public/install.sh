@@ -594,7 +594,9 @@ install_updater() {
     umask 022
   fi
   [[ -f /etc/fren/update.env ]] || return 0
-  cat >/usr/local/sbin/fren-update <<'SCRIPT'
+  # Written beside it and moved into place: an update runs inside this script,
+  # and sh would read the rest of a file rewritten under it as garbage.
+  cat >/usr/local/sbin/fren-update.new <<'SCRIPT'
 #!/bin/sh
 # Run by fren-update.service (root) when the owner sends /fren_update.
 dir=/var/lib/fren-engine/.fren
@@ -614,7 +616,8 @@ printf '%s\n%s\n' "$status" "$detail" >"$dir/update-result"
 chown fren-engine:fren-engine "$dir/update-result" 2>/dev/null
 chmod 600 "$dir/update-result"
 SCRIPT
-  chmod 755 /usr/local/sbin/fren-update
+  chmod 755 /usr/local/sbin/fren-update.new
+  mv -f /usr/local/sbin/fren-update.new /usr/local/sbin/fren-update
   cat >/etc/systemd/system/fren-update.path <<UNIT
 [Unit]
 Description=Watch for /fren_update requests
@@ -653,9 +656,17 @@ install_sandbox() {
   "$NODE_BIN" "$FREN_CLI" sandbox --agent-user "$SERVICE_USER" || warn "The code sandbox is off, so Fren can't run code. Everything else works."
 }
 
+# A sealed engine (`fren isolate`) runs its own root-owned copy of Fren in
+# /opt/fren, made from the app folder by `fren isolate --service`.
+engine_sealed() { [[ -f "$SERVICE_HOME/.fren/engine.json" ]]; }
+
 # --update: start the new version; if it won't run, put the old one back.
 finish_update() {
   write_server_units
+  # The engine's copy is the new version too, or the engine keeps running the old one.
+  if engine_sealed && ! "$NODE_BIN" "$FREN_CLI" isolate --agent-user "$SERVICE_USER" --service; then
+    undo_update "Couldn't hand the new version to the engine, so Fren is back on the version it had."
+  fi
   install_updater
   install_sandbox
   # The agent's instructions come with the code: refresh them too (safe to repeat).
@@ -667,13 +678,21 @@ finish_update() {
     bold "✓ Fren is updated. Wallets and settings are as they were."
     exit 0
   fi
-  warn "The new version didn't start. Putting the old one back."
+  undo_update "The new version didn't start, so Fren is back on the version it had."
+}
+
+undo_update() {
+  warn "Putting the old version back."
   systemctl stop fren-openclaw.service fren.service 2>/dev/null || true
   rm -rf "$FREN_APP_FINAL.failed"
   mv "$FREN_APP_FINAL" "$FREN_APP_FINAL.failed"
   mv "$FREN_APP_FINAL.old" "$FREN_APP_FINAL"
+  if engine_sealed; then
+    "$NODE_BIN" "$FREN_APP_FINAL/packages/engine/dist/cli.js" isolate --agent-user "$SERVICE_USER" --service >/dev/null \
+      || warn "Couldn't give the engine its old version back. See: journalctl -u fren -n 50"
+  fi
   systemctl restart fren.service fren-openclaw.service
-  die "The new version didn't start, so Fren is back on the version it had."
+  die "$1"
 }
 
 # --- Guided setup ------------------------------------------------------------
