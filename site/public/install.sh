@@ -609,8 +609,11 @@ if curl -fsSL --max-time 120 "$FREN_INSTALL_URL" | bash -s -- --server --update 
   detail=""
 else
   status=failed
-  detail="$(grep -E '^(x|!) ' "$log" | tail -1 | cut -c3-200)"
-  [ -n "$detail" ] || detail="$(grep -v '^[[:space:]]*$' "$log" | tail -1 | cut -c1-200)"
+  # The installer's lines are coloured: read them without the colour codes.
+  esc="$(printf '\033')"
+  plain() { sed "s/${esc}\[[0-9;]*m//g" "$log"; }
+  detail="$(plain | grep -E '^(x|!) ' | tail -1 | cut -c3-200)"
+  [ -n "$detail" ] || detail="$(plain | grep -v '^[[:space:]]*$' | tail -1 | cut -c1-200)"
 fi
 printf '%s\n%s\n' "$status" "$detail" >"$dir/update-result"
 chown fren-engine:fren-engine "$dir/update-result" 2>/dev/null
