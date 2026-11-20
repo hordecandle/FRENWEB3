@@ -34,6 +34,8 @@ export interface ChartRequest {
   subtitle?: string;
   levels: ChartLevel[];
   marks: ChartMark[];
+  /** How far back the chart goes (default 6 hours). */
+  hours?: number;
 }
 
 export interface StepReceipt {

@@ -7,7 +7,7 @@ import { postJson, type Fetch } from "../http.js";
 import type { Store } from "../store.js";
 import { HyperliquidMarkets, type HyperliquidMarketsOptions, type PerpMarket } from "./hyperliquid-markets.js";
 import { VenueError, type ExecContext, type ExecResult, type PositionView, type VenueAdapter } from "./types.js";
-import { rowFromText, type Link, type Row, type StepReceipt } from "../receipt.js";
+import { rowFromText, type ChartRequest, type Link, type Row, type StepReceipt } from "../receipt.js";
 import { hyperliquidLinks } from "../links.js";
 import type { ChartLevel } from "../chart.js";
 
@@ -502,6 +502,34 @@ export class HyperliquidVenue implements VenueAdapter {
   }
 
   /**
+   * What a chart of one market needs: its candles' source, and the owner's
+   * position on it drawn in (entry and liquidation) when there is one.
+   */
+  async chartView(symbol: string, mode: "paper" | "live", hours: number): Promise<{ chart: ChartRequest; links: Link[]; title: string; px: number }> {
+    // "ANT" for xyz:ANT: a chart is read-only, so the one market by that name is fine.
+    const m = await this.market(symbol).catch(async (err: unknown) => {
+      const same = (await this.markets.search(symbol, 8)).filter((x) => coinName(x.name).toUpperCase() === coinName(symbol).toUpperCase());
+      if (same.length === 1) return this.market(same[0]!.name);
+      throw err;
+    });
+    const pos = (await this.positions(mode).catch(() => [] as PositionView[])).find((p) => p.symbol.toUpperCase() === m.name.toUpperCase());
+    const levels: ChartLevel[] = [];
+    let subtitle = `${hours < 48 ? `${hours}h` : `${Math.round(hours / 24)}d`} · Hyperliquid perp`;
+    if (pos?.entryPx) {
+      levels.push({ kind: "entry", price: pos.entryPx, label: "ENTRY" });
+      if (pos.liquidationPx) levels.push({ kind: "liq", price: pos.liquidationPx, label: "LIQ" });
+      subtitle += ` · your ${pos.side} ${qty(pos.size)}, PnL ${pos.pnlUsd === null ? "?" : signedUsd(pos.pnlUsd)}${mode === "paper" ? " (paper)" : ""}`;
+    }
+    const links: Link[] = [hyperliquidLinks.chart(m.name, this.o.isTestnet)];
+    if (pos && this.o.signer) {
+      const { evm } = await this.signer().addresses();
+      links.unshift(this.o.isTestnet ? hyperliquidLinks.account(evm, true) : hyperliquidLinks.tracker(evm));
+    }
+    const title = `${coinName(m.name)} ${fmtPrice(m.midPx)}`;
+    return { chart: { source: { kind: "hyperliquid", coin: m.name }, title, subtitle, levels, marks: [], hours }, links, title, px: m.midPx };
+  }
+
+  /**
    * The exchange's hash for an order's fill, which opens it on Hyperliquid's
    * explorer. Orders don't get one in the reply, so it is read from the fills.
    */
@@ -668,15 +696,16 @@ export class HyperliquidVenue implements VenueAdapter {
     return states.reduce((sum, s) => sum + Number(s.marginSummary.accountValue), 0);
   }
 
-  async flatten(mode: "paper" | "live"): Promise<string[]> {
+  /** Closes every position at market. Each close comes with its receipt. */
+  async flatten(mode: "paper" | "live"): Promise<ExecResult[]> {
     const ctx: ExecContext = { mode, planId: null, idx: null };
-    const out: string[] = [];
+    const out: ExecResult[] = [];
     for (const p of await this.positions(mode)) {
       try {
         const leg: PerpCloseLeg = { kind: "perp_close", venue: "hyperliquid", market: p.symbol, fraction: 1, maxSlippagePct: 2 };
-        out.push((mode === "paper" ? await this.paperClose(leg, ctx) : await this.liveClose(leg, ctx)).text);
+        out.push(mode === "paper" ? await this.paperClose(leg, ctx) : await this.liveClose(leg, ctx));
       } catch (err) {
-        out.push(`❌ Could not close ${p.symbol}: ${(err as Error).message}`);
+        out.push({ text: `❌ Could not close ${p.symbol}: ${(err as Error).message}` });
       }
     }
     return out;

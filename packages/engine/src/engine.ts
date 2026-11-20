@@ -26,7 +26,7 @@ import {
 } from "@fren/core";
 import type { Addresses, SignerApi } from "@fren/signer";
 import { quoteBet, type BetQuery, type BetQuote } from "./bets.js";
-import type { Notifier } from "./notify.js";
+import { imageType, type Notifier } from "./notify.js";
 import type { Mode, PendingKind, Store } from "./store.js";
 import type { HyperliquidVenue } from "./venues/hyperliquid.js";
 import type { JupiterVenue } from "./venues/jupiter.js";
@@ -37,9 +37,12 @@ import type { PolymarketVenue } from "./venues/polymarket.js";
 import type { CashChain, YieldVenue } from "./venues/yield.js";
 import { NotTradableYet, VenueError, type PositionView, type SpotVenueAdapter, type VenueAdapter } from "./venues/types.js";
 import { closeReceipt } from "./venues/hyperliquid.js";
-import { receiptFromText, receiptHtml, receiptPlain, rowFromText, type Receipt, type StepReceipt } from "./receipt.js";
+import { escapeHtml, receiptFromText, receiptHtml, receiptPlain, rowFromText, type ChartRequest, type Link, type Receipt, type StepReceipt } from "./receipt.js";
 import { tokenChart } from "./links.js";
 import type { SnapshotMaker } from "./snapshot.js";
+
+/** Telegram takes photos up to 10 MB. */
+const MAX_IMAGE_BYTES = 10 << 20;
 
 export interface FrenDeps {
   store: Store;
@@ -243,6 +246,11 @@ export class Fren {
 
   // -- receipts ------------------------------------------------------------
 
+  /** How receipts and pictures reach the owner, in words. */
+  get receiptRoute(): string {
+    return this.d.notifier.route;
+  }
+
   settings(): Settings {
     return { images: this.d.store.getKv("receipt_images") !== "off" };
   }
@@ -268,6 +276,59 @@ export class Fren {
       ]);
     }
     return this.d.notifier.sendReceipt({ html: receiptHtml(receipt), plain: receiptPlain(receipt), photo, ...(text ? { text } : {}) }).catch(() => false);
+  }
+
+  /**
+   * A picture for the owner, sent straight to their chat: a screenshot of a
+   * page, or a chart or image the agent made in its sandbox. Only ever to the
+   * owner's own line, so nothing here can reach anyone else.
+   */
+  async sendImage(input: { image: Buffer; caption?: string; links?: Link[]; name?: string }): Promise<{ sent: boolean; text: string }> {
+    const type = imageType(input.image);
+    if (!type) return { sent: false, text: "That file isn't a PNG, JPEG or WebP picture, so it wasn't sent." };
+    if (input.image.length > MAX_IMAGE_BYTES) return { sent: false, text: `The picture is over ${MAX_IMAGE_BYTES >> 20} MB, so it wasn't sent. Make it smaller.` };
+    if (!this.d.notifier.showsImages) {
+      return { sent: false, text: `Pictures can't be sent on this line (receipts go ${this.d.notifier.route}). Describe it in words instead.` };
+    }
+    const caption = (input.caption ?? "").trim().slice(0, 900);
+    const links = (input.links ?? []).filter((l) => /^https:\/\//.test(l.url)).slice(0, 4);
+    const html = [caption ? escapeHtml(caption) : "", links.length ? `🔗 ${links.map((l) => `<a href="${escapeHtml(l.url).replace(/"/g, "&quot;")}">${escapeHtml(l.label)}</a>`).join(" · ")}` : ""]
+      .filter(Boolean)
+      .join("\n");
+    const plain = [caption, ...links.map((l) => `🔗 ${l.label}: ${l.url}`)].filter(Boolean).join("\n");
+    const ext = type === "image/jpeg" ? "jpg" : type.slice(6);
+    const name = (input.name ?? "").replace(/\.[a-z0-9]+$/i, "").replace(/[^\w-]/g, "").slice(0, 40) || "fren";
+    const sent = await this.d.notifier.sendReceipt({ html, plain, photo: input.image, photoName: `${name}.${ext}` }).catch(() => false);
+    return sent ? { sent, text: "Sent the picture to the owner's chat." } : { sent, text: "Telegram didn't take the picture. Try again in a minute." };
+  }
+
+  /**
+   * A price chart drawn by Fren itself (no browser needed): a Hyperliquid perp
+   * with the owner's position on it, or a token on Solana, Base or Arbitrum.
+   */
+  async sendChart(input: { market?: string; chain?: string; token?: string; hours?: number }): Promise<{ sent: boolean; text: string }> {
+    if (!this.d.snapshots) return { sent: false, text: "Charts aren't available here." };
+    const hours = Math.min(24 * 30, Math.max(1, Math.round(Number(input.hours) || 6)));
+    let chart: ChartRequest;
+    let links: Link[];
+    if (input.market) {
+      const v = await this.d.hyperliquid.chartView(input.market, this.limits().mode, hours);
+      chart = v.chart;
+      links = v.links;
+    } else if (input.token && (input.chain === "solana" || input.chain === "base" || input.chain === "arbitrum")) {
+      const label = input.token.length > 12 ? `${input.token.slice(0, 4)}…${input.token.slice(-4)}` : input.token;
+      chart = { source: { kind: "token", network: input.chain, address: input.token }, title: label, subtitle: `${hours}h on ${input.chain}`, levels: [], marks: [], hours };
+      links = [tokenChart(input.chain, input.token)].filter((l): l is Link => !!l);
+    } else {
+      return { sent: false, text: "Name a Hyperliquid market (market), or a token's address and its chain (solana, base or arbitrum)." };
+    }
+    const photo = await Promise.race([
+      this.d.snapshots.chart(chart).catch(() => null),
+      new Promise<null>((r) => setTimeout(() => r(null), 15_000).unref?.()),
+    ]);
+    if (!photo) return { sent: false, text: "No price history came back for that market, so there's no chart to draw." };
+    const r = await this.sendImage({ image: photo, caption: [chart.title, chart.subtitle].filter(Boolean).join(" · "), links, name: "fren-chart" });
+    return r.sent ? { sent: true, text: `Sent the owner a ${hours}h chart of ${chart.title}.` } : r;
   }
 
   /** A watcher result: logged for the record, and sent as a receipt (or as text when there's none). */
@@ -568,16 +629,20 @@ export class Fren {
 
   /** Close every leveraged position. Paper closes at once; live waits for the owner's code. Works while stopped. */
   async requestCloseAll(): Promise<OwnerRequestResult> {
-    if (this.limits().mode === "paper") return { text: await this.closeAllNow() };
+    if (this.limits().mode === "paper") return this.closeAllNow();
     const open = await this.d.hyperliquid.positions("live").catch(() => null);
     if (open && open.length === 0) return { text: "No leveraged positions to close." };
     const what = open ? open.map((p) => p.symbol).join(", ") : "every leveraged position";
     return this.issueCode("closeall", "", `Close ${what} now at market? Spot tokens stay as they are.`);
   }
 
-  private async closeAllNow(): Promise<string> {
-    const closes = await this.d.hyperliquid.flatten(this.limits().mode);
-    return [...(closes.length ? closes : ["No leveraged positions to close."]), "Spot tokens were left as they are."].join("\n");
+  private async closeAllNow(): Promise<{ text: string; receiptSent?: boolean }> {
+    const mode = this.limits().mode;
+    const closes = await this.d.hyperliquid.flatten(mode);
+    const text = [...(closes.length ? closes.map((c) => c.text) : ["No leveraged positions to close."]), "Spot tokens were left as they are."].join("\n");
+    const steps = closes.filter((c) => c.receipt).map((c) => c.receipt!);
+    const receiptSent = steps.length > 0 && (await this.deliver({ ...(mode === "paper" ? { header: "📝 Paper mode" } : {}), steps, footer: ["Spot tokens were left as they are."] }, text));
+    return { text, ...(receiptSent ? { receiptSent } : {}) };
   }
 
   async cancel(planId: string): Promise<string> {

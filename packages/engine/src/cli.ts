@@ -171,7 +171,10 @@ Next: \`fren start\`, then install the OpenClaw plugin (see README), or run \`fr
       const node = existsSync("/opt/fren/bin/node") ? "/opt/fren/bin/node" : process.execPath;
       await installSandbox(
         { run: systemSetupDeps(paths).run, say: (t) => console.log(t), uid: process.getuid?.() ?? -1, platform: process.platform },
-        { agentUser, agentHome, node, runnerSource: join(dirname(fileURLToPath(import.meta.url)), "sandbox-runner.js"), undo: values.undo ?? false },
+        { agentUser, agentHome, node, runnerSource: join(dirname(fileURLToPath(import.meta.url)), "sandbox-runner.js"),
+          shotSource: join(dirname(fileURLToPath(import.meta.url)), "sandbox-shot.js"),
+          undo: values.undo ?? false,
+        },
       );
       return;
     }

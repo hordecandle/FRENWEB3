@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FrenConfig } from "./config.js";
 import { ownerLines } from "./daemon.js";
-import { GatewayLine, OwnerNotifier, type Exec, type OwnerLine } from "./notify.js";
+import { GatewayLine, OwnerNotifier, TelegramLine, type Exec, type OwnerLine } from "./notify.js";
 import { Store } from "./store.js";
 
 function fakeExec(code = 0) {
@@ -69,6 +69,13 @@ describe("reaching the owner", () => {
       ],
     });
     expect(ownerLines(config, fetch).map((l) => l.name)).toEqual(["telegram", "whatsapp", "signal"]);
-    expect(ownerLines(FrenConfig.parse({}), fetch)).toEqual([]);
+    expect(ownerLines(FrenConfig.parse({}), fetch, undefined, () => null)).toEqual([]);
+  });
+
+  it("finds the Telegram line in OpenClaw's config when Fren's has none (older installs)", () => {
+    const config = FrenConfig.parse({ notify: [{ channel: "telegram", to: "42" }] });
+    const lines = ownerLines(config, fetch, undefined, () => ({ botToken: "123456:abcdefghijabcdefghijabc", ownerChatId: "42" }));
+    expect(lines.map((l) => l.name)).toEqual(["telegram", "telegram"]);
+    expect(lines[0]).toBeInstanceOf(TelegramLine);
   });
 });

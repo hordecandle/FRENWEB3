@@ -176,6 +176,8 @@ export interface SandboxInstallOptions {
   node: string;
   /** The built runner (dist/sandbox-runner.js). */
   runnerSource: string;
+  /** The built screenshot helper (dist/sandbox-shot.js), copied beside the runner as shot.mjs. */
+  shotSource?: string;
   undo?: boolean;
   unitDir?: string;
   libDir?: string;
@@ -206,6 +208,11 @@ export async function installSandbox(deps: SandboxInstallDeps, o: SandboxInstall
   const runner = join(libDir, "runner.mjs");
   copyFileSync(o.runnerSource, runner);
   await must(deps, "chmod", ["644", runner], "make the runner readable");
+  if (o.shotSource) {
+    const shot = join(libDir, "shot.mjs");
+    copyFileSync(o.shotSource, shot);
+    await must(deps, "chmod", ["644", shot], "make the screenshot helper readable");
+  }
   let resolvConf = "";
   try {
     resolvConf = o.resolvConf ?? readFileSync("/etc/resolv.conf", "utf8");
@@ -224,6 +231,29 @@ export async function installSandbox(deps: SandboxInstallDeps, o: SandboxInstall
     throw new Error(`The code sandbox failed its safety check (${problem}), so it's off. Everything else works.`);
   }
   deps.say("✓ Code sandbox ready: scripts run with no keys, no local services, and time and memory limits");
+  if (o.shotSource) {
+    const browser = await browserCheck(deps.call ?? ((req) => callSandbox(req, { timeoutMs: 90_000 })), join(libDir, "shot.mjs"));
+    deps.say(browser ? `! Screenshots are off: ${browser}. Everything else works.` : "✓ Browser ready: Fren can screenshot web pages and send them to you");
+  }
+}
+
+/** A screenshot of a tiny page, taken inside the sandbox the way the agent's tool takes one. Null when it works. */
+export async function browserCheck(call: (req: SandboxRequest) => Promise<SandboxResult>, shot: string): Promise<string | null> {
+  const page = "data:text/html,<body style='background:%23123'><h1 style='color:%23fff'>Fren</h1></body>";
+  let r: SandboxResult;
+  try {
+    r = await call({
+      lang: "node",
+      timeoutSec: 60,
+      code: `import { screenshot } from ${JSON.stringify(shot)};
+const r = await screenshot({ url: ${JSON.stringify(page)}, out: process.env.FREN_OUT + "/check.png", width: 400, height: 300, waitSec: 0, timeoutSec: 45 });
+console.log("SHOT " + r.bytes);`,
+    });
+  } catch (err) {
+    return `the sandbox didn't answer (${(err as Error).message})`;
+  }
+  if (/SHOT \d+/.test(r.output) && r.images?.length) return null;
+  return (r.error ?? r.output.trim().split("\n").slice(-2).join(" ")).slice(0, 200) || "the test page didn't render";
 }
 
 /** Proves it from inside: code runs, secrets aren't there, this machine's own services aren't reachable. */

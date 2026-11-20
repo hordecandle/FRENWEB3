@@ -17,6 +17,16 @@ export interface SnapshotOptions {
 }
 
 const HOURS = 6;
+const MAX_HOURS = 24 * 30;
+
+/** Candle size for a span, so a chart has about 50 to 150 candles. */
+export function candleStep(hours: number): { hlInterval: string; minutes: number; gecko: { timeframe: "minute" | "hour" | "day"; aggregate: number } } {
+  if (hours <= 12) return { hlInterval: "5m", minutes: 5, gecko: { timeframe: "minute", aggregate: 5 } };
+  if (hours <= 36) return { hlInterval: "15m", minutes: 15, gecko: { timeframe: "minute", aggregate: 15 } };
+  if (hours <= 24 * 8) return { hlInterval: "1h", minutes: 60, gecko: { timeframe: "hour", aggregate: 1 } };
+  if (hours <= 24 * 20) return { hlInterval: "4h", minutes: 240, gecko: { timeframe: "hour", aggregate: 4 } };
+  return { hlInterval: "1d", minutes: 1440, gecko: { timeframe: "day", aggregate: 1 } };
+}
 
 /**
  * Candles from Hyperliquid for perps and from GeckoTerminal (free, no key)
@@ -41,10 +51,12 @@ export class Snapshots implements SnapshotMaker {
 
   private async candles(req: ChartRequest): Promise<Candle[]> {
     const now = this.o.now?.() ?? Date.now();
+    const hours = Math.min(MAX_HOURS, Math.max(1, req.hours ?? HOURS));
+    const step = candleStep(hours);
     if (req.source.kind === "hyperliquid") {
       const rows = await this.o.hyperliquidInfo<{ t: number; o: string; h: string; l: string; c: string }[]>({
         type: "candleSnapshot",
-        req: { coin: req.source.coin, interval: "5m", startTime: now - HOURS * 3600_000, endTime: now + 60_000 },
+        req: { coin: req.source.coin, interval: step.hlInterval, startTime: now - hours * 3600_000, endTime: now + 60_000 },
       });
       return rows.map((k) => ({ t: k.t, o: Number(k.o), h: Number(k.h), l: Number(k.l), c: Number(k.c) }));
     }
@@ -55,7 +67,7 @@ export class Snapshots implements SnapshotMaker {
     if (!pool) return [];
     const ohlcv = await getJson<{ data?: { attributes?: { ohlcv_list?: number[][] } } }>(
       this.o.fetchFn,
-      `${base}/networks/${network}/pools/${pool}/ohlcv/minute?aggregate=5&limit=${HOURS * 12}&currency=usd&token=${address}`,
+      `${base}/networks/${network}/pools/${pool}/ohlcv/${step.gecko.timeframe}?aggregate=${step.gecko.aggregate}&limit=${Math.min(1000, Math.ceil((hours * 60) / step.minutes))}&currency=usd&token=${address}`,
     );
     return (ohlcv.data?.attributes?.ohlcv_list ?? [])
       .map(([t, o, h, l, c]) => ({ t: Number(t) * 1000, o: Number(o), h: Number(h), l: Number(l), c: Number(c) }))

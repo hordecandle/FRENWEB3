@@ -26,6 +26,25 @@ export interface RunCodeResult {
   ms: number;
   timeoutSec: number;
   error?: string;
+  /** Pictures the script saved in $FREN_OUT (base64), for the owner's chat. */
+  images?: { name: string; base64: string }[];
+}
+
+/** Where `fren sandbox` puts the screenshot helper, beside the runner. */
+export const SHOT_HELPER = "/usr/local/lib/fren-sandbox/shot.mjs";
+
+/** The sandbox script for one screenshot: prints "SHOT {json}" and leaves the PNG in $FREN_OUT. */
+export function screenshotCode(o: { url: string; width?: number; height?: number; waitSec?: number; fullPage?: boolean }, helper = SHOT_HELPER): string {
+  const opts = { url: o.url, width: o.width ?? 1280, height: o.height ?? 800, waitSec: o.waitSec ?? 6, fullPage: o.fullPage === true, timeoutSec: 75 };
+  return `import { screenshot } from ${JSON.stringify(helper)};
+try {
+  const r = await screenshot({ ...${JSON.stringify(opts)}, out: process.env.FREN_OUT + "/screenshot.png" });
+  console.log("SHOT " + JSON.stringify({ ok: true, title: r.title, finalUrl: r.finalUrl }));
+} catch (err) {
+  console.log("SHOT " + JSON.stringify({ ok: false, error: String(err && err.message || err) }));
+}
+process.exit(0);
+`;
 }
 
 export class SandboxUnavailable extends Error {}

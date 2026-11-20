@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -33,7 +33,19 @@ export interface SandboxResult {
   ms: number;
   timeoutSec: number;
   error?: string;
+  /** Pictures the script saved in $FREN_OUT, for the owner's chat. */
+  images?: SandboxImage[];
 }
+
+export interface SandboxImage {
+  name: string;
+  base64: string;
+}
+
+/** What comes back from $FREN_OUT: a few pictures, each small enough for Telegram. */
+export const MAX_IMAGES = 4;
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const IMAGE_EXT = /\.(png|jpe?g|webp)$/i;
 
 export const DEFAULT_TIMEOUT_SEC = 60;
 /** The unit's RuntimeMaxSec is a little longer, so the runner always gets to answer. */
@@ -115,12 +127,15 @@ export async function runCode(req: SandboxRequest, o: RunOptions): Promise<Sandb
   mkdirSync(runDir);
   const file = join(runDir, lang.file);
   writeFileSync(file, req.code);
+  const outDir = join(runDir, "out");
+  mkdirSync(outDir);
   // Nothing from the runner's own environment: the script gets a clean one.
   const env: Record<string, string> = {
     HOME: o.workspace,
     PATH: [join(o.workspace, ".venv", "bin"), join(o.workspace, "node_modules", ".bin"), o.path].join(":"),
     LANG: "C.UTF-8",
     TMPDIR: "/tmp",
+    FREN_OUT: outDir,
     NO_COLOR: "1",
     npm_config_update_notifier: "false",
     npm_config_fund: "false",
@@ -151,7 +166,8 @@ export async function runCode(req: SandboxRequest, o: RunOptions): Promise<Sandb
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        resolve({ exitCode, signal, timedOut, ...out.result(), ms: Date.now() - started, timeoutSec, ...(error ? { error } : {}) });
+        const images = collectImages(outDir);
+        resolve({ exitCode, signal, timedOut, ...out.result(), ms: Date.now() - started, timeoutSec, ...(error ? { error } : {}), ...(images.length ? { images } : {}) });
       };
       let grace: NodeJS.Timeout | undefined;
       child.on("error", (err) => finish(null, null, `Couldn't start ${lang.cmd}: ${err.message}`));
@@ -168,6 +184,29 @@ export async function runCode(req: SandboxRequest, o: RunOptions): Promise<Sandb
   } finally {
     rmSync(runDir, { recursive: true, force: true });
   }
+}
+
+/** The pictures a run left in its out folder, in name order. Others (too big, too many, not pictures) are skipped. */
+export function collectImages(dir: string): SandboxImage[] {
+  let names: string[];
+  try {
+    names = readdirSync(dir).filter((n) => IMAGE_EXT.test(n)).sort();
+  } catch {
+    return [];
+  }
+  const out: SandboxImage[] = [];
+  for (const name of names) {
+    if (out.length >= MAX_IMAGES) break;
+    try {
+      const p = join(dir, name);
+      const st = statSync(p);
+      if (!st.isFile() || st.size === 0 || st.size > MAX_IMAGE_BYTES) continue;
+      out.push({ name, base64: readFileSync(p).toString("base64") });
+    } catch {
+      // Gone or unreadable: skip it.
+    }
+  }
+  return out;
 }
 
 async function main() {

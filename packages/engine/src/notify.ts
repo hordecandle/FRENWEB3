@@ -8,6 +8,8 @@ export interface OwnerMessage {
   html: string;
   plain: string;
   photo?: Buffer | null;
+  /** The picture's file name in the chat (default fren-trade.png). */
+  photoName?: string;
   /** The venue's own one-line wording of the same result, kept for the event log. */
   text?: string;
 }
@@ -28,6 +30,8 @@ export interface Notifier {
   sendReceipt(msg: OwnerMessage): Promise<boolean>;
   /** True when a line can show pictures (worth drawing a chart for). */
   readonly showsImages: boolean;
+  /** How receipts reach the owner, in words (for the settings reply). */
+  readonly route: string;
 }
 
 /** One way to reach the owner. */
@@ -73,7 +77,7 @@ export class TelegramLine implements OwnerLine {
       const fits = visibleLength(msg.html) <= CAPTION_MAX;
       const form = new FormData();
       form.set("chat_id", this.cfg.ownerChatId);
-      form.set("photo", new Blob([new Uint8Array(msg.photo)], { type: "image/png" }), "fren-trade.png");
+      form.set("photo", new Blob([new Uint8Array(msg.photo)], { type: imageType(msg.photo) ?? "image/png" }), msg.photoName ?? "fren-trade.png");
       if (fits) {
         form.set("caption", msg.html);
         form.set("parse_mode", "HTML");
@@ -89,6 +93,14 @@ export class TelegramLine implements OwnerLine {
     if (res.ok) return true;
     return this.send(msg.plain);
   }
+}
+
+/** PNG, JPEG or WebP from the file's first bytes; null for anything else. */
+export function imageType(b: Buffer): string | null {
+  if (b.length > 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b.length > 12 && b.subarray(0, 4).toString("latin1") === "RIFF" && b.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+  return null;
 }
 
 /** Runs a program without a shell. Resolves with its exit code. */
@@ -147,7 +159,15 @@ export class OwnerNotifier implements Notifier {
   ) {
     this.hasPrivateLine = lines.length > 0;
     this.showsImages = Boolean(lines[0]?.sendRich);
+    const first = lines[0];
+    this.route = !first
+      ? "no direct line to you, so the chat relays them as text"
+      : first instanceof TelegramLine
+        ? "straight to Telegram, with named links and pictures"
+        : `through OpenClaw on ${first.name}, as plain text without pictures`;
   }
+
+  readonly route: string;
 
   async sendReceipt(msg: OwnerMessage): Promise<boolean> {
     for (const line of this.lines) {
@@ -179,6 +199,7 @@ export class MemoryNotifier implements Notifier {
     readonly hasPrivateLine = true,
     readonly showsImages = true,
   ) {}
+  readonly route = "memory";
   async sendReceipt(msg: OwnerMessage) {
     if (!this.hasPrivateLine) return false;
     this.receipts.push(msg);
