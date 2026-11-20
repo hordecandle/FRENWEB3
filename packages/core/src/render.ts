@@ -81,11 +81,11 @@ export function describeLeg(leg: Leg, resolved?: Pick<ResolvedStep, "symbol" | "
       const notional = resolved?.notionalUsd ?? margin * leg.leverage;
       const exits: string[] = [];
       if (leg.stopLossPct !== undefined) {
-        exits.push(`stop at -${leg.stopLossPct}% of margin (${pctMove(leg.stopLossPct / leg.leverage)} price move)`);
+        exits.push(`stop at -${leg.stopLossPct}% of margin, -${usd((margin * leg.stopLossPct) / 100)} (${pctMove(leg.stopLossPct / leg.leverage)} price move)`);
       }
       if (leg.stopPrice !== undefined) exits.push(`stop at ${price(leg.stopPrice)}`);
       if (leg.takeProfitPct !== undefined) {
-        exits.push(`take profit at +${leg.takeProfitPct}% (${pctMove(leg.takeProfitPct / leg.leverage)} price move)`);
+        exits.push(`take profit at +${leg.takeProfitPct}%, +${usd((margin * leg.takeProfitPct) / 100)} (${pctMove(leg.takeProfitPct / leg.leverage)} price move)`);
       }
       if (leg.takeProfitPrice !== undefined) exits.push(`take profit at ${price(leg.takeProfitPrice)}`);
       const tail = exits.length ? `, ${exits.join(", ")}` : "";

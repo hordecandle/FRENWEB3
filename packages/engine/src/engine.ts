@@ -860,9 +860,12 @@ It shows up as pUSD in your Polymarket wallet ${to}.`;
   async depositToHyperliquid(amountUsd: number): Promise<string> {
     if (!this.d.signer) return "No wallets yet. Run `fren init` first.";
     if (this.limits().paused) return "Fren is stopped. Send /resume first.";
-    const { txHash } = await this.d.signer.hlDepositFromArbitrum({ amountUsd, isTestnet: this.d.isTestnet });
-    const explorer = this.d.isTestnet ? "https://sepolia.arbiscan.io/tx/" : "https://arbiscan.io/tx/";
-    return `✅ Sent ${fmtUsd(amountUsd)} USDC from Arbitrum to your Hyperliquid account. It usually lands in about a minute. ${explorer}${txHash}`;
+    try {
+      return await this.d.hyperliquid.deposit(amountUsd);
+    } catch (err) {
+      if (err instanceof VenueError) return `Didn't deposit: ${err.message}`;
+      throw err;
+    }
   }
 
   async searchMarkets(query: string): Promise<string> {

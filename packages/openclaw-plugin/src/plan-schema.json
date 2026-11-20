@@ -99,6 +99,16 @@
                     "exclusiveMinimum": 0,
                     "maximum": 10000
                   },
+                  "stopLossUsd": {
+                    "description": "Stop loss as dollars lost, when the owner says it in dollars: 'lose at most $25' means 25. Instead of stopLossPct.",
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "takeProfitUsd": {
+                    "description": "Take profit as dollars gained, when the owner says it in dollars: 'take profit at $50 profit' means 50. Instead of takeProfitPct.",
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
                   "stopPrice": {
                     "description": "Absolute stop price, when the user names a level.",
                     "type": "number",

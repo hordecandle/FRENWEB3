@@ -1,7 +1,9 @@
 [build]
   publish = "public"
   # Pack Fren's source (the repo is private) for new servers: see vps-src.mjs.
-  command = "mkdir -p fren-src && git -C .. archive --format=tar.gz --prefix=fren/ -o site/fren-src/fren.tar.gz HEAD"
+  # From git when the build has the repo; from the uploaded files when it was
+  # deployed from a folder (no .git), leaving out what the installer rebuilds.
+  command = '''mkdir -p fren-src && (git -C .. archive --format=tar.gz --prefix=fren/ -o site/fren-src/fren.tar.gz HEAD 2>/dev/null || tar -C .. --exclude=./.git --exclude=node_modules --exclude=dist --exclude=./site/fren-src --exclude=./site/.netlify --transform 's,^\.,fren,' -czf "$PWD/fren-src/fren.tar.gz" .)'''
   # Always build, even when only code outside site/ changed: the package
   # above must match main, or new servers get an old Fren.
   ignore = "exit 1"

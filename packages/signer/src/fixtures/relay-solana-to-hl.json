@@ -1,0 +1,113 @@
+{
+  "_note": "A real Relay /quote/v2 answer (2026-11-20) for USDC from a throwaway Solana wallet with no funds to a placeholder Hyperliquid address; trimmed to what Fren reads.",
+  "evm": "0x1111111111111111111111111111111111111111",
+  "quote": {
+    "requestId": "0x17952017417d246c66066e4b7dbb210aaa5421beee25a870fb1b63ff26eee55c",
+    "steps": [
+      {
+        "id": "deposit",
+        "action": "Confirm transaction in your wallet",
+        "description": "Depositing funds to the relayer to execute the swap for USDC",
+        "kind": "transaction",
+        "items": [
+          {
+            "status": "incomplete",
+            "data": {
+              "instructions": [
+                {
+                  "keys": [
+                    {
+                      "pubkey": "Dodg2HifwU8rmaVVyMyUZDGTRbqAJTyVYxXPwcbNpBKc",
+                      "isSigner": false,
+                      "isWritable": false
+                    },
+                    {
+                      "pubkey": "DPbkmXosRGABFsPXLccawhbbNwRidZXwZQGvDXJPdrni",
+                      "isSigner": true,
+                      "isWritable": true
+                    },
+                    {
+                      "pubkey": "DPbkmXosRGABFsPXLccawhbbNwRidZXwZQGvDXJPdrni",
+                      "isSigner": false,
+                      "isWritable": false
+                    },
+                    {
+                      "pubkey": "7uTT8Xi5RWXzy7h9XL244GRgEycDYDhLjr3ZyNdXi8pZ",
+                      "isSigner": false,
+                      "isWritable": false
+                    },
+                    {
+                      "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                      "isSigner": false,
+                      "isWritable": false
+                    },
+                    {
+                      "pubkey": "66dvxN8DPxhvTgDS48vDNmzArjXPHxkiEC5K728Z55Mj",
+                      "isSigner": false,
+                      "isWritable": true
+                    },
+                    {
+                      "pubkey": "4nvJ5zWdVspxJiNZzB127U6amPH98SFFkBx2JZrAduia",
+                      "isSigner": false,
+                      "isWritable": true
+                    },
+                    {
+                      "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                      "isSigner": false,
+                      "isWritable": false
+                    },
+                    {
+                      "pubkey": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+                      "isSigner": false,
+                      "isWritable": false
+                    },
+                    {
+                      "pubkey": "11111111111111111111111111111111",
+                      "isSigner": false,
+                      "isWritable": false
+                    }
+                  ],
+                  "programId": "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2",
+                  "data": "0b9c60da27a3b413200c8201000000009f59c036db7e3ca42a7d27b572c1c98370ced23c7cde631a2ae6121f176bb7d8"
+                }
+              ],
+              "addressLookupTableAddresses": [
+                "Hm9fUgcn7qwDaiNTFiGh6pNtVATgnaRcmK6Bbx6EMZfP"
+              ]
+            },
+            "check": {
+              "endpoint": "/intents/status/v3?requestId=0x17952017417d246c66066e4b7dbb210aaa5421beee25a870fb1b63ff26eee55c",
+              "method": "GET"
+            }
+          }
+        ],
+        "requestId": "0x17952017417d246c66066e4b7dbb210aaa5421beee25a870fb1b63ff26eee55c",
+        "depositAddress": ""
+      }
+    ],
+    "details": {
+      "sender": "DPbkmXosRGABFsPXLccawhbbNwRidZXwZQGvDXJPdrni",
+      "recipient": "0x1111111111111111111111111111111111111111",
+      "currencyIn": {
+        "currency": {
+          "chainId": 792703809,
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "symbol": "USDC",
+          "decimals": 6
+        },
+        "amount": "25300000",
+        "minimumAmount": "25300000"
+      },
+      "currencyOut": {
+        "currency": {
+          "chainId": 1337,
+          "address": "0x00000000000000000000000000000000",
+          "symbol": "USDC",
+          "decimals": 8
+        },
+        "amount": "2527430600",
+        "minimumAmount": "2502156200"
+      }
+    }
+  }
+}

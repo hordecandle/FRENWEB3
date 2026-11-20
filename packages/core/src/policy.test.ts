@@ -92,7 +92,7 @@ describe("evaluatePolicy", () => {
   it("renders a readable summary", () => {
     const d = evaluatePolicy([perpStep({ margin: 300, stop: 5 })], DEFAULT_LIMITS, state);
     expect(describeDecision(d, [perpStep({ margin: 300, stop: 5 })])).toContain(
-      "Long BTC on Hyperliquid: $300 margin at 10x ($3,000 position), stop at -5% of margin (0.50% price move)",
+      "Long BTC on Hyperliquid: $300 margin at 10x ($3,000 position), stop at -5% of margin, -$15.00 (0.50% price move)",
     );
   });
 });

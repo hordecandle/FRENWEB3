@@ -1,6 +1,6 @@
 import { PublicKey, SystemProgram, VersionedTransaction, type AddressLookupTableAccount } from "@solana/web3.js";
 import { SignerRuleError } from "./errors.js";
-import { checkCctpIx, checkJupiterIx, checkJupiterLendIx, checkKaminoIx, CCTP_TOKEN_MESSENGER_MINTER_V2, type IxContext, type IxEffects } from "./solana-ix.js";
+import { checkCctpIx, checkJupiterIx, checkJupiterLendIx, checkKaminoIx, checkRelayDepositIx, CCTP_TOKEN_MESSENGER_MINTER_V2, RELAY_SOLANA_DEPOSITORY, type IxContext, type IxEffects } from "./solana-ix.js";
 
 export { SignerRuleError };
 
@@ -59,6 +59,8 @@ export const SOLANA_PROGRAMS = {
   addressLookupTable: "AddressLookupTab1e1111111111111111111111111",
   /** Circle CCTP V2, to move USDC to the wallet's own Arbitrum address. */
   cctp: CCTP_TOKEN_MESSENGER_MINTER_V2,
+  /** Relay's depository, to move USDC straight into the wallet's own Hyperliquid account. */
+  relayDepository: RELAY_SOLANA_DEPOSITORY,
 } as const;
 
 const NATIVE_MINT = new PublicKey("So11111111111111111111111111111111111111112");
@@ -178,6 +180,8 @@ export function checkSolanaTransaction(tx: VersionedTransaction, owner: PublicKe
       merge(checkJupiterLendIx(ctx));
     } else if (program === SOLANA_PROGRAMS.cctp) {
       merge(checkCctpIx(ctx, rules.evmOwner));
+    } else if (program === SOLANA_PROGRAMS.relayDepository) {
+      merge(checkRelayDepositIx(ctx));
     } else if (program === SOLANA_PROGRAMS.kaminoLend) {
       merge(checkKaminoIx(ctx));
     } else if (program === SOLANA_PROGRAMS.pumpFun || program === SOLANA_PROGRAMS.pumpAmm) {

@@ -13,7 +13,7 @@ import { AgentBudget } from "./guard.js";
 import { HyperliquidVenue } from "./venues/hyperliquid.js";
 import { JupiterVenue, USDC_MINT } from "./venues/jupiter.js";
 import { OnlinePumpFun } from "./venues/pumpfun.js";
-import { RELAY_SOLANA_CHAIN_ID, RelayVenue } from "./venues/relay.js";
+import { RELAY_DEPOSIT_MAX_SOL_LAMPORTS, RELAY_SOLANA_CHAIN_ID, RelayVenue } from "./venues/relay.js";
 import { SolanaToArbitrum } from "./venues/cctp.js";
 import { DeriveVenue } from "./venues/derive.js";
 import { PolymarketVenue } from "./venues/polymarket.js";
@@ -21,7 +21,7 @@ import { polymarketGeoblock, SdkPolymarketData, SdkPolymarketTrader } from "./ve
 import { AaveUsdc } from "./venues/aave.js";
 import { JupiterLendUsdc, KaminoUsdc } from "./venues/solana-lend.js";
 import { YieldVenue, type YieldProtocolAdapter } from "./venues/yield.js";
-import { Updater } from "./updater.js";
+import { UpdateReporter, Updater } from "./updater.js";
 import { SnipeFeed, solanaMentions } from "./snipe-feed.js";
 
 export interface BuildOptions {
@@ -44,7 +44,8 @@ export function ownerLines(config: FrenConfig, fetchFn: Fetch, exec?: Exec): Own
 export function buildFren({ config, store, signer, fetchFn = fetch, exec }: BuildOptions): Fren {
   const isTestnet = config.network === "testnet";
   // Money moves between the wallet's own Solana and EVM addresses. Circle's
-  // bridge (Solana to Arbitrum) and Relay to Solana run on mainnet only.
+  // bridge (Solana to Arbitrum), Relay to Solana and Relay from Solana to
+  // Hyperliquid run on mainnet only.
   // The venues are read lazily: they are built just below.
   const bridges = signer && !isTestnet;
   const solanaBridge: SolanaToArbitrum | null = bridges
@@ -67,6 +68,7 @@ export function buildFren({ config, store, signer, fetchFn = fetch, exec }: Buil
     // Read lazily: relay and jupiter are built just below.
     arbitrumUsdc: async () => (await relay.usdcBalances()).arbitrum ?? 0,
     solanaUsdc: async () => (await jupiter.usdcBalance()) ?? 0,
+    ...(bridges ? { solanaDirect: { send: (usd: number) => relay.solanaToHyperliquid(usd, (ixs) => jupiter.sendWithSigners(ixs, [], RELAY_DEPOSIT_MAX_SOL_LAMPORTS)) } } : {}),
     ...(solanaBridge ? { solanaBridge } : {}),
   });
   const jupiter: JupiterVenue = new JupiterVenue({
@@ -175,16 +177,11 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
     console.log(`dashboard on http://127.0.0.1:${port}, public at ${dashUrl}`);
   }
   const updater = new Updater(paths.home);
-  // Back from /fren_update: say how it went once the chat line is up again.
-  let updated = updater.takeResult();
-  const tellUpdated = () => {
-    if (!updated) return;
-    const text = updated;
-    updated = null;
-    void fren.tellOwner(text).catch(() => {});
-  };
-  if (updated) setTimeout(tellUpdated, 5 * 60_000).unref();
-  const server = createApi(fren, token, budget, { dashboard, updater, onGatewayUp: () => setTimeout(tellUpdated, 5000) });
+  // /fren_update: say how it went as soon as the result lands and the chat line is up.
+  const updates = new UpdateReporter(updater, (text) => fren.tellOwner(text));
+  const checkUpdates = () => void updates.check().catch(() => {});
+  setInterval(checkUpdates, 20_000).unref();
+  const server = createApi(fren, token, budget, { dashboard, updater, onGatewayUp: () => setTimeout(checkUpdates, 5000) });
   await new Promise<void>((res) => server.listen(config.api.port, config.api.host, res));
 
   const timer = setInterval(() => {

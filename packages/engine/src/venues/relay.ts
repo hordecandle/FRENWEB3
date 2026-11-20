@@ -1,4 +1,5 @@
-import { toRaw } from "./jupiter.js";
+import { toRaw, USDC_MINT } from "./jupiter.js";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { createPublicClient, decodeFunctionData, encodeFunctionData, erc20Abi, http, type Chain as ViemChain, type PublicClient } from "viem";
 import { arbitrum, arbitrumSepolia, base, baseSepolia, robinhood, robinhoodTestnet } from "viem/chains";
 import {
@@ -51,6 +52,15 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 /** Relay's chain id for Solana, for bridging USDC to the wallet's Solana address. */
 export const RELAY_SOLANA_CHAIN_ID = 792703809;
 
+/** Hyperliquid's perp account (HyperCore) as Relay names it, and USDC there. */
+export const RELAY_HYPERLIQUID_CHAIN_ID = 1337;
+export const RELAY_HYPERLIQUID_USDC = "0x00000000000000000000000000000000";
+/** Relay's Solana depository program: a deposit there, tagged with a quote's request id, pays for that quote. */
+export const RELAY_SOLANA_DEPOSITORY = "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2";
+const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
+/** SOL a Relay deposit may cost: the fee, plus rent if Relay's vault account had to be made. */
+export const RELAY_DEPOSIT_MAX_SOL_LAMPORTS = 5_000_000;
+
 /** Native ETH as Relay names it. */
 export const NATIVE_ETH = "0x0000000000000000000000000000000000000000" as const;
 /** What a plan may call native ETH: the ticker, Relay's zero address, or the common 0xEeee… placeholder. */
@@ -86,6 +96,7 @@ interface RelayAmount {
   amountFormatted?: string;
   amountUsd?: string;
   minimumAmount?: string;
+  currency?: { chainId: number; address?: string; decimals: number };
 }
 
 export interface RelayQuote {
@@ -368,6 +379,46 @@ export class RelayVenue implements SpotVenueAdapter {
     const got = Number(quote.details?.currencyOut?.amount ?? 0) / 1e6;
     const link = hashes.at(-1) ? ` ${this.chain(origin).explorer}${hashes.at(-1)}` : "";
     return `✅ Sent ${fmtUsd(req.usd)} USDC from ${chainName[origin]} to ${req.where}${got ? ` (about ${fmtUsd(got)} arrives after fees)` : ""}.${link}`;
+  }
+
+  /**
+   * Move USDC from the wallet's Solana address straight into its own
+   * Hyperliquid account: one Solana transaction into Relay's depository, paid
+   * in SOL, so it needs no ETH on Arbitrum. `send` signs and sends the
+   * instructions (the signer checks them). Lands on Hyperliquid's main perp dex.
+   */
+  async solanaToHyperliquid(usd: number, send: (ixs: TransactionInstruction[]) => Promise<string>): Promise<{ text: string; arrivesUsd: number }> {
+    const { evm, solana } = await this.signer().addresses();
+    const amountRaw = BigInt(Math.round(usd * 1e6));
+    const quote = await postJson<RelayQuote>(
+      this.o.fetchFn,
+      `${this.o.apiUrl}/quote/v2`,
+      {
+        user: solana,
+        recipient: evm,
+        refundTo: solana,
+        originChainId: RELAY_SOLANA_CHAIN_ID,
+        destinationChainId: RELAY_HYPERLIQUID_CHAIN_ID,
+        originCurrency: USDC_MINT,
+        destinationCurrency: RELAY_HYPERLIQUID_USDC,
+        amount: amountRaw.toString(),
+        tradeType: "EXACT_INPUT",
+        slippageTolerance: "100",
+      },
+      this.headers(),
+    ).catch((err: unknown) => {
+      throw new VenueError(`Relay can't move USDC from Solana to Hyperliquid right now: ${(err as Error).message}`);
+    });
+    const ixs = relaySolanaInstructions(quote, { solana, evm, amountRaw });
+    const signature = await send(ixs);
+    const requestId = quote.steps.find((st) => st.requestId)?.requestId ?? quote.requestId;
+    if (requestId) await this.waitForFill(requestId);
+    const out = quote.details?.currencyOut;
+    const arrivesUsd = out?.amount ? Number(out.amount) / 10 ** (out.currency?.decimals ?? 6) : 0;
+    return {
+      text: `✅ Moved ${fmtUsd(usd)} USDC from your Solana wallet into Hyperliquid through Relay${arrivesUsd ? ` (about ${fmtUsd(arrivesUsd)} after Relay's fee)` : ""} · https://solscan.io/tx/${signature}`,
+      arrivesUsd,
+    };
   }
 
   /** True once Relay can route USDC into the token: the snipe trigger for EVM launches. */
@@ -843,4 +894,41 @@ function fmtQty(q: number): string {
   if (q >= 1000) return q.toLocaleString("en-US", { maximumFractionDigits: 0 });
   if (q >= 1) return q.toLocaleString("en-US", { maximumFractionDigits: 4 });
   return q.toPrecision(4);
+}
+
+/**
+ * The Solana instructions of a Relay quote from the wallet's USDC to its own
+ * Hyperliquid account. Refuses anything but deposits into Relay's depository
+ * from this wallet, of this amount, for a quote naming the wallet as recipient.
+ * Compute-budget instructions are dropped: the sender sets its own.
+ */
+export function relaySolanaInstructions(quote: RelayQuote, w: { solana: string; evm: string; amountRaw: bigint }): TransactionInstruction[] {
+  const d = quote.details as (RelayQuote["details"] & { sender?: string; recipient?: string }) | undefined;
+  if (d?.recipient && d.recipient.toLowerCase() !== w.evm.toLowerCase()) throw new VenueError("Relay quoted a transfer to a different Hyperliquid account. Nothing was sent.");
+  if (d?.sender && d.sender !== w.solana) throw new VenueError("Relay quoted a transfer from a different Solana wallet. Nothing was sent.");
+  if (d?.currencyOut?.currency && d.currencyOut.currency.chainId !== RELAY_HYPERLIQUID_CHAIN_ID) throw new VenueError("Relay quoted a transfer to somewhere other than Hyperliquid. Nothing was sent.");
+  const ixs: TransactionInstruction[] = [];
+  for (const step of quote.steps) {
+    if (step.kind !== "transaction") throw new VenueError(`Relay asked for a "${step.id}" signature, which Fren doesn't sign.`);
+    for (const item of step.items) {
+      if (item.status === "complete") continue;
+      const list = (item.data as { instructions?: { programId: string; data: string; keys: { pubkey: string; isSigner: boolean; isWritable: boolean }[] }[] }).instructions;
+      if (!Array.isArray(list) || !list.length) throw new VenueError("Relay returned a Solana step without instructions.");
+      for (const ix of list) {
+        if (ix.programId === COMPUTE_BUDGET) continue;
+        if (ix.programId !== RELAY_SOLANA_DEPOSITORY) throw new VenueError(`Relay asked to call Solana program ${ix.programId}, which Fren doesn't. Nothing was sent.`);
+        const data = Buffer.from(ix.data, "hex");
+        if (data.length < 16 || data.readBigUInt64LE(8) !== w.amountRaw) throw new VenueError("Relay's deposit isn't for the amount asked. Nothing was sent.");
+        ixs.push(
+          new TransactionInstruction({
+            programId: new PublicKey(ix.programId),
+            keys: ix.keys.map((k) => ({ pubkey: new PublicKey(k.pubkey), isSigner: k.isSigner, isWritable: k.isWritable })),
+            data,
+          }),
+        );
+      }
+    }
+  }
+  if (ixs.length !== 1) throw new VenueError("Relay's route from Solana wasn't a single deposit. Nothing was sent.");
+  return ixs;
 }
