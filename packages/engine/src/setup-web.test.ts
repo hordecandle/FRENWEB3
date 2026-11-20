@@ -166,9 +166,16 @@ describe("web setup", () => {
     expect(tg.sent.some((b) => b.includes("Fren found you"))).toBe(true);
 
     expect((await call("POST", "/api/done")).status).toBe(400);
-    const fin = await call("POST", "/api/finish", { network: "mainnet" });
+    // The restricted-country question has no default: no answer, no wallets.
+    expect((await call("GET", "/api/state")).json.restrictedCountries).toMatch(/^United States, United Kingdom, France, Germany, .*Zimbabwe$/);
+    const unanswered = await call("POST", "/api/finish", { network: "mainnet" });
+    expect(unanswered.status).toBe(400);
+    expect(unanswered.json.error).toMatch(/where you live/);
+    expect(existsSync(deps.paths.keystore)).toBe(false);
+    const fin = await call("POST", "/api/finish", { network: "mainnet", restricted: false });
     expect((fin.json.addresses as { solana: string }).solana).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
     expect(JSON.parse(readFileSync(deps.paths.config, "utf8")).telegram.ownerChatId).toBe("777000123");
+    expect(JSON.parse(readFileSync(deps.paths.config, "utf8")).restrictedRegion).toBe(false);
 
     const backup = await call("GET", "/api/backup");
     expect(backup.json.passphrase).toBe(readFileSync(deps.paths.passphrase, "utf8").trim());
@@ -184,7 +191,7 @@ describe("web setup", () => {
     const a = await start();
     await a.call("POST", "/api/telegram/token", { token: TOKEN });
     await a.call("POST", "/api/telegram/confirm", { id: "777000123" });
-    const made = (await a.call("POST", "/api/finish", { network: "mainnet" })).json.addresses as { solana: string; evm: string };
+    const made = (await a.call("POST", "/api/finish", { network: "mainnet", restricted: false })).json.addresses as { solana: string; evm: string };
     const backup = (await a.call("GET", "/api/backup")).json;
     server!.close();
 
@@ -197,9 +204,10 @@ describe("web setup", () => {
     expect(existsSync(b.deps.paths.keystore)).toBe(false);
     const r = await b.call("POST", "/api/restore", { backup: JSON.stringify(backup) });
     expect(r.status).toBe(200);
-    const fin = (await b.call("POST", "/api/finish", { network: "mainnet" })).json.addresses as { solana: string; evm: string };
+    const fin = (await b.call("POST", "/api/finish", { network: "mainnet", restricted: true })).json.addresses as { solana: string; evm: string };
     expect(fin.solana).toBe(made.solana);
     expect(fin.evm).toBe(made.evm);
+    expect(JSON.parse(readFileSync(b.deps.paths.config, "utf8")).restrictedRegion).toBe(true);
     expect((await b.call("POST", "/api/restore", { backup: JSON.stringify(backup) })).json.error).toMatch(/already has wallets/);
   });
 

@@ -22,6 +22,8 @@ export function config() {
     addresses,
     planId: env("EQVPS_RESELLER_PLAN_ID"),
     contact: env("FREN_SUPPORT_CONTACT"),
+    // Finland: Polymarket takes bets from there; Germany, EQVPS's other location, is close-only.
+    location: env("EQVPS_LOCATION") || "fi",
   };
 }
 
@@ -60,7 +62,9 @@ export function installCommand(id, updateKey) {
   return (
     `curl -fsSL ${q(url)} | bash -s -- --server --web --lock-root --tarball ${q(tarball)}` +
     (updateSrc ? ` --update-src ${q(updateSrc)}` : "") +
-    (broker ? ` --bot-broker ${q(broker)}` : "")
+    (broker ? ` --bot-broker ${q(broker)}` : "") +
+    // After a good install, ask Polymarket from this server whether it may bet (see polymarketGeo).
+    ` && echo "FREN_POLYMARKET_GEO=$(curl -fsS -m 10 https://polymarket.com/api/geoblock | tr -d '\\n')"`
   );
 }
 

@@ -131,6 +131,7 @@ export function buildFren({ config, store, signer, fetchFn = fetch, exec }: Buil
       data: new SdkPolymarketData(),
       trader: signer && !isTestnet ? new SdkPolymarketTrader(signer) : null,
       geoblocked: polymarketGeoblock(fetchFn),
+      ...(config.restrictedRegion !== undefined ? { ownerRestricted: config.restrictedRegion } : {}),
     }),
     yield: new YieldVenue({
       store,

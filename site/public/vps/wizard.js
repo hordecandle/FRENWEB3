@@ -76,7 +76,7 @@
       const paid = { ...base, paidTx: "0xabc", paidTxUrl: "https://basescan.org/", paidAmount: r.amount };
       if (s < 6) return { ...paid, stage: "provisioning", progress: "Starting your server…" };
       if (s < 14) return { ...paid, stage: "installing", progress: "Installing Fren…" };
-      return { ...paid, stage: "ready", setupUrl: "https://51-75-123-45.sslip.io/setup?t=mocktoken" };
+      return { ...paid, stage: "ready", setupUrl: "https://51-75-123-45.sslip.io/setup?t=mocktoken", polymarket: { blocked: false, country: "FI" } };
     },
   };
 
@@ -108,6 +108,14 @@
   }
 
   // ---- UI ----
+  function countryName(code) {
+    try {
+      return new Intl.DisplayNames(["en"], { type: "region" }).of(code) || code;
+    } catch {
+      return code;
+    }
+  }
+
   function show(screen, step) {
     if (screen !== "s-pay") clearInterval(countdown);
     SCREENS.forEach((s) => ($(s).hidden = s !== screen));
@@ -194,6 +202,16 @@
         try {
           $("ready-host").textContent = new URL(d.setupUrl).host;
         } catch {}
+        // Polymarket's own check, asked from the new server after the install.
+        if (d.polymarket) {
+          const where = d.polymarket.country ? countryName(d.polymarket.country) : "its country";
+          const el = $("poly-check");
+          el.textContent = d.polymarket.blocked
+            ? "Polymarket says it doesn't take new bets from this server's location (" + where + "). Other venues work. Contact support to move it."
+            : "Checked with Polymarket: bets work from this server (" + where + ").";
+          el.className = "msg " + (d.polymarket.blocked ? "msg--bad" : "msg--ok");
+          el.hidden = false;
+        }
         return;
       case "failed":
         show("s-failed", "build");
