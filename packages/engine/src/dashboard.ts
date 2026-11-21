@@ -1,6 +1,9 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { DASHBOARD_PAGE, LOGIN_PAGE } from "./dashboard-page.js";
+import { describeMaxLoss, describeStep } from "@fren/core";
+import { DashboardAuth, type Mailer, type WalletKind } from "./dashboard-auth.js";
+import type { ChatBridge } from "./dashboard-chat.js";
+import { DASHBOARD_PAGE, LOGIN_PAGE, SIGNIN_PAGE } from "./dashboard-page.js";
 import type { Fren, OwnerRequestResult } from "./engine.js";
 
 /**
@@ -26,7 +29,24 @@ export interface DashboardOptions {
   /** Public base URL, e.g. https://1-2-3-4.sslip.io */
   publicUrl: string;
   now?: () => number;
+  /** The owner's conversation with Fren (the same one as in Telegram). None: the page has no chat. */
+  chat?: ChatBridge | null;
+  /** Sends email login codes. None: the email way in is off. */
+  mailer?: Mailer | null;
+  /** Shows the wallet keys after the owner's code. None: they stay locked in the signer. */
+  keys?: KeyVault | null;
+  /** The demo stand: plain-http cookie, a one-click login, codes shown on the page. Never on a real install. */
+  demo?: boolean;
 }
+
+/** What the owner can copy out to keep a backup of the wallets. */
+export interface KeyVault {
+  reveal(): Promise<{ label: string; value: string }[]>;
+}
+
+const KEY_CODE_TTL_MS = 5 * 60_000;
+/** Login attempts (email codes, wallet signatures) per minute, across everyone. */
+const AUTH_PER_MINUTE = 20;
 
 export class Dashboard {
   private readonly links = new Map<string, number>();
@@ -34,12 +54,33 @@ export class Dashboard {
   private readonly now: () => number;
   readonly publicUrl: string;
 
+  readonly auth: DashboardAuth;
+  private readonly chat: ChatBridge | null;
+  private readonly keys: KeyVault | null;
+  private readonly demo: boolean;
+  /** The last code sent for showing keys (demo: also shown on the page). */
+  private keyCode: { code: string; exp: number; tries: number } | null = null;
+  private authHits: number[] = [];
+  /** Demo stand only: the latest code a real install would have sent away. */
+  demoNote: string | null = null;
+
   constructor(
     private readonly fren: Fren,
     opts: DashboardOptions,
   ) {
     this.now = opts.now ?? Date.now;
     this.publicUrl = opts.publicUrl.replace(/\/+$/, "");
+    this.chat = opts.chat ?? null;
+    this.keys = opts.keys ?? null;
+    this.demo = opts.demo ?? false;
+    this.auth = new DashboardAuth(fren.store, opts.mailer ?? null, this.now);
+  }
+
+  private authLimited(): boolean {
+    const t = this.now();
+    this.authHits = this.authHits.filter((x) => x > t - 60_000);
+    this.authHits.push(t);
+    return this.authHits.length > AUTH_PER_MINUTE;
   }
 
   /** A one-time login link, good for 10 minutes. */
@@ -94,13 +135,34 @@ export class Dashboard {
   /** Everything the page shows, in one call. */
   async overview() {
     const limits = this.fren.limits();
-    const [positions, wallet] = await Promise.all([
+    const [positions, wallet, balances] = await Promise.all([
       this.fren.positions().catch((err: Error) => ({ error: err.message })),
       this.fren.wallet().catch(() => ({ addresses: null })),
+      this.fren.balances().catch(() => null),
     ]);
     const store = this.fren.store;
     const events = store.eventsSince(0).slice(-30).reverse();
+    const waiting = store.plansWithStatus("pending_confirm").map((p) => {
+      const resolved = store
+        .getSteps(p.id)
+        .map((s) => s.resolved)
+        .filter((r): r is NonNullable<typeof r> => r !== null);
+      return {
+        id: p.id,
+        at: p.createdAt,
+        request: p.request,
+        steps: p.plan.steps.map((st, i) => describeStep(st, resolved.find((r) => r.index === i))),
+        maxLoss: describeMaxLoss(resolved),
+      };
+    });
     return {
+      balances,
+      history: this.fren.history(30),
+      waiting,
+      signIn: { email: this.auth.email(), wallets: this.auth.wallets(), emailWorks: this.auth.methods().email || (this.demo && Boolean(this.auth.email())) },
+      chat: Boolean(this.chat),
+      keysCanShow: Boolean(this.keys),
+      demo: this.demo,
       limits,
       spentTodayUsd: store.spentTodayUsd(limits.mode),
       paperUsdc: limits.mode === "paper" ? store.paperUsdc() : null,
@@ -137,24 +199,55 @@ export class Dashboard {
         // Public on purpose: the setup page polls it after "Start Fren" to say
         // "live" only once the bot can answer. It reveals one boolean.
         if (req.method === "GET" && url.pathname === "/ready") return json(200, { ready: this.chatUpAt !== null });
+        const cookie = () => `fren_dash=${this.newSession()}; Path=/; HttpOnly;${this.demo ? "" : " Secure;"} SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`;
         if (req.method === "GET" && url.pathname === "/login") {
           const t = url.searchParams.get("t") ?? "";
           if (!this.takeLink(t)) return html(403, LOGIN_PAGE("That link has expired or was already used. Send /fren_dashboard to your bot for a new one."));
-          const s = this.newSession();
-          return html(303, "", {
-            location: "/",
-            "set-cookie": `fren_dash=${s}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`,
-          });
+          return html(303, "", { location: "/", "set-cookie": cookie() });
+        }
+        if (this.demo && req.method === "GET" && url.pathname === "/demo-login") return html(303, "", { location: "/", "set-cookie": cookie() });
+
+        // Other ways in: an email code or a wallet signature, for an email or wallet the owner added.
+        if (req.method === "POST" && url.pathname.startsWith("/auth/")) {
+          if (req.headers["x-fren"] !== "1") return json(403, { error: "forbidden" });
+          if (this.authLimited()) return json(429, { error: "Too many tries. Wait a minute." });
+          const body = await readJson(req);
+          const str = (k: string) => String(body[k] ?? "");
+          const kind = (str("kind") === "evm" ? "evm" : "solana") as WalletKind;
+          const loggedIn = (ok: boolean, fail: string) => {
+            if (!ok) return json(401, { error: fail });
+            res.writeHead(200, { ...SECURITY_HEADERS, "content-type": "application/json", "set-cookie": cookie() });
+            return res.end(JSON.stringify({ ok: true }));
+          };
+          switch (url.pathname) {
+            case "/auth/email/start": {
+              if (this.demo) this.demoNote = null;
+              const r = await this.auth.startEmail(str("email"));
+              return json(200, { text: r.text, ...(this.demo ? { demoNote: this.demoNote } : {}) });
+            }
+            case "/auth/email/check":
+              return loggedIn(this.auth.checkEmail(str("email"), str("code")), "That code didn't work. Check it, or ask for a new one.");
+            case "/auth/wallet/challenge":
+              return json(200, this.auth.challenge(kind, str("address"), "login"));
+            case "/auth/wallet/check":
+              return loggedIn(await this.auth.checkWallet(str("id"), kind, str("address"), str("signature")), "That wallet isn't one you added in your dashboard.");
+          }
+          return json(404, { error: "not found" });
         }
 
         const session = this.session(req);
         if (req.method === "GET" && url.pathname === "/") {
-          return session ? html(200, DASHBOARD_PAGE) : html(401, LOGIN_PAGE("Send /fren_dashboard to your Fren bot. It replies with a private login link."));
+          if (session) return html(200, DASHBOARD_PAGE);
+          return html(401, SIGNIN_PAGE({ ...this.auth.methods(), ...(this.demo ? { email: true, demo: true } : {}) }));
         }
         if (!url.pathname.startsWith("/api/")) return json(404, { error: "not found" });
         if (!session) return json(401, { error: "Logged out. Send /fren_dashboard to your bot for a new link." });
 
         if (req.method === "GET" && url.pathname === "/api/overview") return json(200, await this.overview());
+        if (req.method === "GET" && url.pathname === "/api/chat") {
+          if (!this.chat) return json(404, { error: "The chat isn't connected on this machine." });
+          return json(200, await this.chat.history(60));
+        }
 
         if (req.method !== "POST") return json(405, { error: "POST only." });
         // A cross-site form can't set this header, on top of SameSite=Lax (which already keeps the cookie off cross-site POSTs). Lax, not Strict, because the login link is opened from Telegram, and a Strict cookie would be dropped on the redirect.
@@ -173,6 +266,52 @@ export class Dashboard {
             return json(200, owner(await this.fren.changeLimits(String(body.args ?? ""))));
           case "/api/close_all":
             return json(200, owner(await this.fren.requestCloseAll()));
+          case "/api/chat": {
+            if (!this.chat) return json(404, { error: "The chat isn't connected on this machine." });
+            const text = String(body.text ?? "").trim().slice(0, 2000);
+            if (!text) return json(400, { error: "Type a message first." });
+            // Codes and commands stay in the chat app: that's where the owner's code goes.
+            if (text.startsWith("/"))
+              return json(200, { hint: "Commands like /ok go in your Telegram chat with Fren, where the code arrives. Here, use the buttons: Pause Fren and Close all positions." });
+            await this.chat.send(text);
+            // The chat app sees what was asked here, so both read as one conversation.
+            void this.fren.tellOwner(`🖥 You, from the dashboard:\n${text}`);
+            return json(200, { ok: true });
+          }
+          case "/api/sign-in/email":
+            return json(200, { email: this.auth.setEmail(body.email === null ? null : String(body.email ?? "")) });
+          case "/api/sign-in/wallet/challenge":
+            return json(200, this.auth.challenge(body.kind === "evm" ? "evm" : "solana", String(body.address ?? ""), "link"));
+          case "/api/sign-in/wallet/link":
+            return json(200, await this.auth.linkWallet(String(body.id ?? ""), body.kind === "evm" ? "evm" : "solana", String(body.address ?? ""), String(body.signature ?? "")));
+          case "/api/sign-in/wallet/remove":
+            this.auth.removeWallet(body.kind === "evm" ? "evm" : "solana", String(body.address ?? ""));
+            return json(200, { ok: true });
+          case "/api/keys/request": {
+            if (!this.keys)
+              return json(200, {
+                locked: true,
+                text: "On this install the keys stay locked inside the signer, a separate program the dashboard and the AI can't read. Ask Fren's team how to back them up.",
+              });
+            const code = String(randomBytes(4).readUInt32BE() % 1_000_000).padStart(6, "0");
+            this.keyCode = { code, exp: this.now() + KEY_CODE_TTL_MS, tries: 0 };
+            const sent = await this.fren.tellOwner(`🔐 Someone asked to show your wallet keys in the dashboard.\nCode: ${code}\n\nIf it wasn't you, don't share it and send /fren_stop.`);
+            if (this.demo) this.demoNote = `Demo: on a real install this code goes to your Telegram. Code: ${code}`;
+            return json(200, { needsCode: true, sent, text: "Fren sent a 6-digit code to your Telegram. Type it here to show the keys.", ...(this.demo ? { demoNote: this.demoNote } : {}) });
+          }
+          case "/api/keys/reveal": {
+            const k = this.keyCode;
+            if (!this.keys || !k || k.exp < this.now()) return json(400, { error: "Ask for a new code first." });
+            k.tries++;
+            const a = Buffer.from(k.code);
+            const b = Buffer.from(String(body.code ?? "").trim());
+            if (!(a.length === b.length && timingSafeEqual(a, b))) {
+              if (k.tries >= 3) this.keyCode = null;
+              return json(400, { error: "That code didn't work." });
+            }
+            this.keyCode = null;
+            return json(200, { keys: await this.keys.reveal() });
+          }
           case "/api/logout":
             this.sessions.delete(session);
             return json(200, { ok: true });

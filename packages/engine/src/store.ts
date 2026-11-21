@@ -112,6 +112,7 @@ export class Store {
       );
     `);
     if (this.getKv("paper_usdc") === null) this.setKv("paper_usdc", String(paperStartingUsd));
+    if (this.getKv("paper_start_usd") === null) this.setKv("paper_start_usd", String(paperStartingUsd));
   }
 
   // -- kv ------------------------------------------------------------------
@@ -166,6 +167,11 @@ export class Store {
 
   plansWithStatus(status: PlanStatus): PlanRecord[] {
     return (this.db.prepare("SELECT * FROM plans WHERE status = ? ORDER BY created_at").all(status) as Record<string, string>[]).map(toPlan);
+  }
+
+  /** Plans the owner went ahead with or that were turned down, newest first (no plans still waiting for a code). */
+  recentPlans(limit = 30): PlanRecord[] {
+    return (this.db.prepare("SELECT * FROM plans WHERE status != 'pending_confirm' ORDER BY created_at DESC, rowid DESC LIMIT ?").all(limit) as Record<string, string>[]).map(toPlan);
   }
 
   getSteps(planId: string): StepRecord[] {
@@ -234,6 +240,11 @@ export class Store {
   }
 
   // -- paper ledger --------------------------------------------------------
+
+  /** What the practice account started with. */
+  paperStartUsd(): number {
+    return Number(this.getKv("paper_start_usd") ?? 10_000);
+  }
 
   paperUsdc(): number {
     return Number(this.getKv("paper_usdc") ?? 0);

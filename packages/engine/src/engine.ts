@@ -3,6 +3,8 @@ import {
   applyLimitArgs,
   describeConditionStatus,
   describeDecision,
+  describeMaxLoss,
+  maxLoss as maxLossOf,
   describeStep,
   evaluateAll,
   evaluatePolicy,
@@ -235,8 +237,10 @@ export class Fren {
     const canonicalPlan: Plan = { ...plan, steps: resolved.map((r) => r.step) };
     if (decision.verdict === "confirm") {
       this.d.store.insertPlan({ id, request: plan.request, plan: canonicalPlan, status: "pending_confirm", mode }, resolved, () => "pending");
-      const owner = await this.issueCode("plan", id, `Confirm this plan:\n${describeDecision(decision, resolved)}`);
-      return { planId: id, verdict: "needs_code", text: `${header}${describeDecision(decision, resolved)}\n\n${owner.text}`, ...pick(owner) };
+      const loss = describeMaxLoss(resolved);
+      const what = `${describeDecision(decision, resolved)}${loss ? `\n\n${loss}` : ""}`;
+      const owner = await this.issueCode("plan", id, `Confirm this plan:\n${what}`);
+      return { planId: id, verdict: "needs_code", text: `${header}${what}\n\n${owner.text}`, ...pick(owner) };
     }
 
     this.d.store.insertPlan({ id, request: plan.request, plan: canonicalPlan, status: "active", mode }, resolved, () => "pending");
@@ -1033,6 +1037,82 @@ It shows up as pUSD in your Polymarket wallet ${to}.`;
     return { text, addresses: a };
   }
 
+  /**
+   * Everything Fren holds, in dollars, and where: one number for the owner and
+   * the parts behind it (each chain and wallet). Parts that can't be read are
+   * listed as unknown instead of silently counting as $0.
+   */
+  async balances(): Promise<Balances> {
+    const mode = this.limits().mode;
+    const positions = await this.positions().catch(() => [] as PositionView[]);
+    const parts: BalancePart[] = [];
+    // Leveraged positions live inside the Hyperliquid account; the rest is held outright.
+    const held = positions.filter((p) => p.kind !== "perp");
+    if (mode === "paper") {
+      parts.push({ place: "Practice money", wallet: "paper", asset: "USDC", amount: this.d.store.paperUsdc(), usd: this.d.store.paperUsdc() });
+      const pnl = new Map(positions.filter((p) => p.kind === "perp").map((p) => [p.symbol, p.pnlUsd ?? 0]));
+      for (const p of this.d.store.paperPositions())
+        parts.push({ place: `${p.side === "long" ? "Long" : "Short"} ${p.symbol} (practice)`, wallet: "paper", asset: p.symbol, amount: p.size, usd: p.margin + (pnl.get(p.symbol) ?? 0) });
+    } else if (this.d.signer) {
+      const px = async (coin: string) => (await this.d.hyperliquid.markets.get(coin).catch(() => null))?.midPx ?? null;
+      const [usdc, sol, hl, evm, eth, solPx, ethPx] = await Promise.all([
+        this.d.jupiter.usdcBalance().catch(() => null),
+        this.d.jupiter.solBalance().catch(() => null),
+        this.d.hyperliquid.accountValueUsd().catch(() => null),
+        this.d.relay.usdcBalances().catch(() => ({}) as Record<string, number>),
+        this.d.relay.ethBalances().catch(() => ({}) as Record<string, number>),
+        px("SOL"),
+        px("ETH"),
+      ]);
+      parts.push({ place: "Solana", wallet: "solana", asset: "USDC", amount: usdc, usd: usdc });
+      parts.push({ place: "Solana", wallet: "solana", asset: "SOL", amount: sol, usd: sol !== null && solPx !== null ? sol * solPx : null });
+      for (const [c, v] of Object.entries(evm)) parts.push({ place: chainName[c] ?? c, wallet: "evm", asset: "USDC", amount: v, usd: v });
+      for (const [c, v] of Object.entries(eth)) parts.push({ place: chainName[c] ?? c, wallet: "evm", asset: "ETH", amount: v, usd: ethPx !== null ? v * ethPx : null });
+      parts.push({ place: "Hyperliquid", wallet: "hyperliquid", asset: "USDC", amount: hl, usd: hl });
+    }
+    for (const p of held)
+      parts.push(
+        mode === "paper"
+          ? { place: `${p.symbol} (practice)`, wallet: "paper", asset: p.symbol, amount: p.size, usd: p.valueUsd }
+          : { place: `${p.symbol} on ${venueName[p.venue] ?? p.venue}`, wallet: p.venue === "jupiter" ? "solana" : "evm", asset: p.symbol, amount: p.size, usd: p.valueUsd },
+      );
+    const known = parts.filter((p) => p.usd !== null);
+    const openPnlUsd = positions.reduce((s, p) => s + (p.pnlUsd ?? 0), 0);
+    return {
+      mode,
+      totalUsd: known.reduce((s, p) => s + (p.usd ?? 0), 0),
+      complete: known.length === parts.length,
+      parts: parts.filter((p) => p.usd === null || p.usd >= 0.005 || p.wallet === "paper" || p.asset === "USDC"),
+      openPnlUsd,
+      ...(mode === "paper" ? { startUsd: this.d.store.paperStartUsd() } : {}),
+    };
+  }
+
+  /** The owner's trades, newest first: what was asked, how it went, and the proof links. */
+  history(limit = 30): HistoryItem[] {
+    const out: HistoryItem[] = [];
+    for (const rec of this.d.store.recentPlans(limit)) {
+      const steps = this.d.store.getSteps(rec.id);
+      const resolved = steps.map((s) => s.resolved).filter((r): r is NonNullable<typeof r> => r !== null);
+      const results = steps.map((s) => s.result ?? "").filter(Boolean);
+      out.push({
+        id: rec.id,
+        at: rec.createdAt,
+        mode: rec.mode,
+        request: rec.request,
+        status: rec.status,
+        steps: rec.plan.steps.map((st, i) => {
+          const r = resolved.find((x) => x.index === i);
+          return { text: describeStep(st, r), status: steps.find((x) => x.idx === i)?.status ?? "pending" };
+        }),
+        result: results.map((t) => t.replace(URL_IN_TEXT, "").replace(/\s*·\s*$/gm, "").trim()).join("\n"),
+        links: proofLinks(results.join(" ")),
+        maxLossUsd: maxLossOf(resolved)?.usd ?? null,
+      });
+    }
+    return out;
+  }
+
   async depositToHyperliquid(amountUsd: number): Promise<string> {
     if (!this.d.signer) return "No wallets yet. Run `fren init` first.";
     if (this.limits().paused) return "Fren is stopped. Send /resume first.";
@@ -1183,3 +1263,66 @@ interface StepOutcome {
   receipt?: StepReceipt;
 }
 
+
+export interface BalancePart {
+  /** Where the money sits, in words: "Solana", "Arbitrum", "Hyperliquid", "JUP on Jupiter". */
+  place: string;
+  wallet: "solana" | "evm" | "hyperliquid" | "paper";
+  asset: string;
+  amount: number | null;
+  /** Null when it couldn't be read just now. */
+  usd: number | null;
+}
+
+export interface Balances {
+  mode: Mode;
+  totalUsd: number;
+  /** False when some part couldn't be read, so the total may be short. */
+  complete: boolean;
+  parts: BalancePart[];
+  /** Profit or loss on what's open right now. */
+  openPnlUsd: number;
+  /** Practice mode: what the practice account started with. */
+  startUsd?: number;
+}
+
+export interface HistoryItem {
+  id: string;
+  at: string;
+  mode: Mode;
+  request: string;
+  status: string;
+  steps: { text: string; status: string }[];
+  result: string;
+  links: Link[];
+  maxLossUsd: number | null;
+}
+
+const venueName: Record<string, string> = { jupiter: "Jupiter", relay: "Relay", hyperliquid: "Hyperliquid", derive: "Derive", polymarket: "Polymarket", yield: "savings" };
+
+const URL_IN_TEXT = /https?:\/\/[^\s)]+/g;
+
+const EXPLORERS: [RegExp, string][] = [
+  [/solscan\.io/, "Solscan"],
+  [/sepolia\.arbiscan\.io|arbiscan\.io/, "Arbiscan"],
+  [/basescan\.org/, "Basescan"],
+  [/hyperliquid(-testnet)?\.xyz\/explorer/, "Hyperliquid explorer"],
+  [/hyperdash\.com/, "Hyperdash"],
+  [/blockscout\.com/, "Robinhood explorer"],
+  [/polygonscan\.com/, "Polygonscan"],
+  [/dexscreener\.com/, "Chart"],
+];
+
+/** Every explorer link in a trade's result, named by the site, once each. */
+export function proofLinks(text: string): Link[] {
+  const seen = new Set<string>();
+  const out: Link[] = [];
+  for (const url of text.match(URL_IN_TEXT) ?? []) {
+    const clean = url.replace(/[.,;]+$/, "");
+    if (seen.has(clean)) continue;
+    seen.add(clean);
+    const label = EXPLORERS.find(([re]) => re.test(clean))?.[1] ?? new URL(clean).hostname;
+    out.push({ label, url: clean });
+  }
+  return out;
+}

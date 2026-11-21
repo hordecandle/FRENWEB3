@@ -199,3 +199,46 @@ export function describeDecision(decision: PolicyDecision, resolved: ResolvedSte
   for (const reason of decision.reasons) lines.push(`❌ ${reason}`);
   return lines.join("\n");
 }
+
+/**
+ * The most a plan can lose, in dollars, before the owner says yes. Every trade
+ * that puts money in shows it, in words anyone reads the same way.
+ */
+export interface MaxLoss {
+  /** Everything the plan puts in: the worst case. */
+  usd: number;
+  /** About where the stop cuts the loss, when every leg that puts money in has one. */
+  withStopUsd: number | null;
+  /** A long or short on Hyperliquid: other money kept there backs it too. */
+  borrowed: boolean;
+}
+
+export function maxLoss(resolved: ResolvedStep[]): MaxLoss | null {
+  let total = 0;
+  let stop = 0;
+  let allStopped = true;
+  let borrowed = false;
+  for (const r of resolved) {
+    if (!(r.spendUsd > 0)) continue;
+    total += r.spendUsd;
+    const leg = r.step.leg;
+    if (leg.kind === "perp_open") {
+      borrowed = true;
+      if (leg.stopLossUsd !== undefined) stop += Math.min(leg.stopLossUsd, r.spendUsd);
+      else if (leg.stopLossPct !== undefined) stop += (r.spendUsd * Math.min(leg.stopLossPct, 100)) / 100;
+      else allStopped = false;
+    } else allStopped = false;
+  }
+  if (!(total > 0)) return null;
+  return { usd: total, withStopUsd: allStopped ? stop : null, borrowed };
+}
+
+/** "The most you can lose: $50 ..." or null when the plan puts no money in. */
+export function describeMaxLoss(resolved: ResolvedStep[]): string | null {
+  const m = maxLoss(resolved);
+  if (!m) return null;
+  let line = `🧯 The most you can lose: ${usd(m.usd)}, the money this puts in.`;
+  if (m.withStopUsd !== null) line += ` Your stop should cut it at about ${usd(m.withStopUsd)}.`;
+  if (m.borrowed) line += " If the price crashes, other money you keep on Hyperliquid can be used to keep it open.";
+  return line;
+}
