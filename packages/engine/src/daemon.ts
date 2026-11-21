@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { isolatedMarker } from "./setup.js";
 import { SignerProcess, type SignerApi } from "@fren/signer";
 import { createApi } from "./api.js";
+import { ResendMailer } from "./dashboard-auth.js";
+import { OpenClawChat } from "./dashboard-chat.js";
 import { Dashboard } from "./dashboard.js";
 import { Connection } from "@solana/web3.js";
 import { deriveApiUrl, hyperliquidApiUrl, jupiterApiUrl, jupiterLendApiUrl, frenPaths, loadConfig, relayApiUrl, type FrenConfig, type FrenPaths } from "./config.js";
@@ -177,7 +179,15 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
   });
   // The web dashboard runs where the installer put an HTTPS address in front of it (VPS).
   const dashUrl = dashboardUrl();
-  const dashboard = dashUrl ? new Dashboard(fren, { publicUrl: dashUrl }) : null;
+  // The page's chat is the owner's own OpenClaw conversation; email login needs a Resend key.
+  const mailKey = process.env.FREN_RESEND_API_KEY;
+  const dashboard = dashUrl
+    ? new Dashboard(fren, {
+        publicUrl: dashUrl,
+        chat: new OpenClawChat({ bin: process.env.OPENCLAW_BIN ?? "openclaw" }),
+        mailer: mailKey ? new ResendMailer(mailKey, process.env.FREN_MAIL_FROM ?? "Fren <login@getfren.xyz>") : null,
+      })
+    : null;
   const dashServer = dashboard?.server() ?? null;
   if (dashServer) {
     const port = Number(process.env.FREN_DASHBOARD_PORT ?? 7422);
