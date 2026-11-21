@@ -57,6 +57,15 @@ describe("most you can lose", () => {
     expect(r.verdict).toBe("needs_code");
     expect(t.notifier.sent.join("\n")).toMatch(/🧯 The most you can lose: \$200/);
   });
+
+  it("says a short as a bet in plain words, in the chat too: no margin, position or price-move jargon", async () => {
+    const t = buildTestFren();
+    t.store.setLimits({ ...t.store.getLimits(), autoApproveUsd: 10 });
+    await t.fren.submit({ request: "short BTC", steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "BTC", side: "short", sizing: { type: "margin", usd: 200 }, leverage: 5, stopLossPct: 10 } }] });
+    const text = t.notifier.sent.join("\n");
+    expect(text).toMatch(/Bet \$200 that BTC goes down, 5× boost on Hyperliquid\. Stop: if BTC rises ~2%, Fren closes it and you lose about \$20/);
+    expect(text).not.toMatch(/margin|position\)|price move|Longed|Shorted/);
+  });
 });
 
 describe("dashboard v2", () => {
@@ -67,6 +76,7 @@ describe("dashboard v2", () => {
     const d = await (await s.get("/api/overview", await s.login())).json();
     expect(d.balances.totalUsd).toBeCloseTo(10_000, 0);
     expect(d.balances.parts.map((p: { place: string }) => p.place)).toEqual(["Practice money", "SOL (practice)"]);
+    expect(d.balances.parts.map((p: { network: string }) => p.network)).toEqual(["Practice cash", "Solana"]);
     expect(d.history[0]).toMatchObject({ request: "buy $250 of SOL", status: "done", maxLossUsd: 250 });
     expect(JSON.stringify(d)).not.toMatch(/passphrase|private|secret/i);
   });

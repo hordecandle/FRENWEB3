@@ -72,7 +72,7 @@ describe("trade results that outlive the chat", () => {
       // The receipt already reached the owner on their own line: it isn't sent a second time.
       expect(res.receiptSent).toBe(true);
       expect(t.notifier.sent).toHaveLength(1);
-      expect(t.notifier.receipts[0]!.plain).toContain("Long GOLD opened");
+      expect(t.notifier.receipts[0]!.plain).toContain("Bet on GOLD going up");
     } finally {
       server.close();
     }

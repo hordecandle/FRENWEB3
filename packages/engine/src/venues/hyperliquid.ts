@@ -343,7 +343,7 @@ export class HyperliquidVenue implements VenueAdapter {
       const store = this.o.store;
       const plan = buildPerpOpenOrders(m, leg, m.midPx);
       const margin = plan.notionalUsd / leg.leverage;
-      if (store.paperUsdc() < margin) throw new VenueError(`Paper balance is ${fmtUsd(store.paperUsdc())}; this needs ${fmtUsd(margin)}.`);
+      if (store.paperUsdc() < margin) throw new VenueError(`Practice balance is ${fmtUsd(store.paperUsdc())}; this needs ${fmtUsd(margin)}.`);
       const existing = store.paperPosition(m.name);
       if (existing && existing.side !== leg.side) throw new VenueError(`You have a paper ${existing.side} on ${m.name}; close it first.`);
       const size = Number(plan.size);
@@ -373,7 +373,7 @@ export class HyperliquidVenue implements VenueAdapter {
         mode: "paper",
       });
       return {
-        text: `📝 Paper ${describeFill(leg.side, m.name, size, m.midPx, plan)}`,
+        text: `📝 Practice: ${describeFill(leg.side, m.name, size, m.midPx, plan)}`,
         receipt: openReceipt({ icon: "📝", side: leg.side, coin: m.name, size, px: m.midPx, leverage: leg.leverage, plan, margin: perpMarginOf(leg), moved: [], links: [hyperliquidLinks.chart(m.name, this.o.isTestnet)] }),
       };
     });
@@ -404,7 +404,7 @@ export class HyperliquidVenue implements VenueAdapter {
     if (fraction >= 1) store.deletePaperPosition(symbol);
     else store.upsertPaperPosition({ ...pos, size: pos.size - size, margin: pos.margin - marginBack });
     store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "hyperliquid", symbol, action: `close_${pos.side}`, size, price: px, usd: size * px, spendUsd: 0, mode: "paper" });
-    return `📝 Paper: ${verb} ${fraction >= 1 ? "" : `${Math.round(fraction * 100)}% of `}${pos.side} ${symbol} at ${fmtPrice(px)}, PnL ${signedUsd(pnl)}`;
+    return `📝 Practice: ${verb} ${fraction >= 1 ? "" : `${Math.round(fraction * 100)}% of `}the ${coinName(symbol)} ${pos.side === "long" ? "up" : "down"} bet at ${fmtPrice(px)}, result ${signedUsd(pnl)}`;
   }
 
   // -- live ------------------------------------------------------------------
@@ -725,7 +725,8 @@ function describeFill(side: string, symbol: string, size: number, px: number, pl
   const exits: string[] = [];
   if (plan.stopPx !== null) exits.push(`stop ${fmtPrice(plan.stopPx)}`);
   if (plan.takeProfitPx !== null) exits.push(`target ${fmtPrice(plan.takeProfitPx)}`);
-  return `${side === "long" ? "Longed" : "Shorted"} ${size} ${symbol} at ${fmtPrice(px)} (${fmtUsd(size * px)})${exits.length ? `, ${exits.join(", ")}` : ""}`;
+  const name = coinName(symbol);
+  return `Bet on ${name} going ${side === "long" ? "up" : "down"}: ${size} ${name} at ${fmtPrice(px)} (moves like ${fmtUsd(size * px)} of ${name})${exits.length ? `, ${exits.join(", ")}` : ""}`;
 }
 
 /** "xyz:ANT" reads as ANT; the dex prefix is plumbing. */
@@ -759,7 +760,7 @@ export function openReceipt(o: {
   const notional = o.size * o.px;
   const margin = o.margin ?? notional / o.leverage;
   const rows: Row[] = [
-    { text: `Size: ${qty(o.size)} ${name}, a ${fmtUsd(notional)} position on ${fmtUsd(margin)} margin at ${o.leverage}x` },
+    { text: `Put in: ${fmtUsd(margin)}, ${o.leverage}× boost (moves like ${fmtUsd(notional)} of ${name}, ${qty(o.size)} ${name})` },
     { text: `Entry: ${fmtPrice(o.px)}` },
   ];
   const levels: ChartLevel[] = [{ kind: "entry", price: o.px, label: "ENTRY" }];
@@ -773,19 +774,19 @@ export function openReceipt(o: {
   }
   if (o.plan.stopPx === null && o.plan.takeProfitPx === null) rows.push({ text: "No stop or target set." });
   if (o.liq) {
-    rows.push({ text: `Liquidation: about ${fmtPrice(o.liq)}` });
+    rows.push({ text: `If ${name} reaches about ${fmtPrice(o.liq)}, the exchange closes it by itself and what you put in is gone` });
     levels.push({ kind: "liq", price: o.liq, label: "LIQ" });
   }
   rows.push(...movedRows(o.moved));
   return {
     icon: o.icon,
-    title: `${o.side === "long" ? "Long" : "Short"} ${name} opened`,
+    title: `Bet on ${name} going ${o.side === "long" ? "up" : "down"}`,
     rows,
     links: o.links,
     chart: {
       source: { kind: "hyperliquid", coin: o.coin },
       title: `${o.side} ${name} ${o.leverage}x`,
-      subtitle: `${qty(o.size)} ${name} · ${fmtUsd(notional)} position · ${fmtUsd(margin)} margin`,
+      subtitle: `${fmtUsd(margin)} in · ${o.leverage}× boost · moves like ${fmtUsd(notional)} of ${name}`,
       levels,
       marks: [{ t: Date.now(), price: o.px, side: o.side === "long" ? "buy" : "sell" }],
     },
@@ -811,17 +812,17 @@ export function closeReceipt(o: {
   const rows: Row[] = [
     { text: `${o.partial ? "Closed part" : "Closed"}: ${qty(o.size)} ${name} at ${fmtPrice(o.px)}` },
     { text: `Entry was ${fmtPrice(o.entry)}` },
-    { text: `PnL: about ${signedUsd(o.pnl)}${o.fees ? ` (fees ${fmtUsd(o.fees)})` : ""}` },
+    { text: `Result: about ${signedUsd(o.pnl)}${o.fees ? ` (fees ${fmtUsd(o.fees)})` : ""}` },
   ];
   return {
     icon: o.icon,
-    title: `${o.side === "long" ? "Long" : "Short"} ${name} ${o.verb}`,
+    title: `${name} ${o.side === "long" ? "up" : "down"} bet ${o.verb}`,
     rows,
     links: o.links,
     chart: {
       source: { kind: "hyperliquid", coin: o.coin },
       title: `${name} ${o.side} ${o.verb}`,
-      subtitle: `PnL ${signedUsd(o.pnl)} · entry ${fmtPrice(o.entry)} · exit ${fmtPrice(o.px)}`,
+      subtitle: `Result ${signedUsd(o.pnl)} · entry ${fmtPrice(o.entry)} · exit ${fmtPrice(o.px)}`,
       levels: [
         { kind: "entry", price: o.entry, label: "ENTRY" },
         { kind: "exit", price: o.px, label: "EXIT" },

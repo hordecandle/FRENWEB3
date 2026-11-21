@@ -15,6 +15,7 @@ import {
   signedUsd,
   tradableKey,
   chainName,
+  marketName,
   EVM_CHAINS,
   qty,
   usd as fmtUsd,
@@ -227,7 +228,7 @@ export class Fren {
 
     const decision = evaluatePolicy(resolved, limits, this.policyState(mode));
     const id = randomUUID().slice(0, 8);
-    const header = mode === "paper" ? "📝 Paper mode\n" : "";
+    const header = mode === "paper" ? "📝 Practice mode, no real money\n" : "";
 
     if (decision.verdict === "reject") {
       this.d.store.insertPlan({ id, request: plan.request, plan, status: "rejected", mode }, resolved, () => "rejected");
@@ -245,7 +246,7 @@ export class Fren {
 
     this.d.store.insertPlan({ id, request: plan.request, plan: canonicalPlan, status: "active", mode }, resolved, () => "pending");
     const out = await this.run(id, resolved, decision);
-    const receiptSent = out.executed ? await this.deliver({ ...(mode === "paper" ? { header: "📝 Paper mode" } : {}), steps: out.steps }) : false;
+    const receiptSent = out.executed ? await this.deliver({ ...(mode === "paper" ? { header: "📝 Practice mode, no real money" } : {}), steps: out.steps }) : false;
     return { planId: id, verdict: "executed", text: `${header}${out.text}`, ...(receiptSent ? { receiptSent } : {}) };
   }
 
@@ -562,7 +563,7 @@ export class Fren {
     }
     this.d.store.setPlanStatus(rec.id, "active");
     const out = await this.run(rec.id, resolved, decision);
-    const receiptSent = out.executed && (await this.deliver({ ...(rec.mode === "paper" ? { header: "📝 Paper mode" } : {}), steps: out.steps }));
+    const receiptSent = out.executed && (await this.deliver({ ...(rec.mode === "paper" ? { header: "📝 Practice mode, no real money" } : {}), steps: out.steps }));
     return { text: out.text, ...(receiptSent ? { receiptSent } : {}) };
   }
 
@@ -646,7 +647,7 @@ export class Fren {
     const closes = await this.d.hyperliquid.flatten(mode);
     const text = [...(closes.length ? closes.map((c) => c.text) : ["No leveraged positions to close."]), "Spot tokens were left as they are."].join("\n");
     const steps = closes.filter((c) => c.receipt).map((c) => c.receipt!);
-    const receiptSent = steps.length > 0 && (await this.deliver({ ...(mode === "paper" ? { header: "📝 Paper mode" } : {}), steps, footer: ["Spot tokens were left as they are."] }, text));
+    const receiptSent = steps.length > 0 && (await this.deliver({ ...(mode === "paper" ? { header: "📝 Practice mode, no real money" } : {}), steps, footer: ["Spot tokens were left as they are."] }, text));
     return { text, ...(receiptSent ? { receiptSent } : {}) };
   }
 
@@ -858,7 +859,7 @@ export class Fren {
           out.waiting || !out.receipt
             ? null
             : {
-                header: `⚡ ${rec.mode === "paper" ? "Paper plan" : "Your plan"} fired: ${statuses.map(describeConditionStatus).join("; ")}`,
+                header: `⚡ ${rec.mode === "paper" ? "Practice plan" : "Your plan"} fired: ${statuses.map(describeConditionStatus).join("; ")}`,
                 steps: [out.receipt],
                 footer: [`You asked: "${rec.request.slice(0, 200)}"`],
               },
@@ -883,7 +884,7 @@ export class Fren {
       const text = this.d.hyperliquid.paperCloseAt(p.symbol, mark, 1, { mode: "paper", planId: null, idx: null }, verb);
       const kind = verb.startsWith("Liquidated") ? "liquidated" : verb.startsWith("Stop") ? "stop hit" : "target hit";
       const receipt = closeReceipt({ icon: kind === "liquidated" ? "💥" : kind === "stop hit" ? "🛑" : "🎯", verb: kind, side: p.side, coin: p.symbol, size: p.size, px: mark, entry: p.entry, pnl, links: [] });
-      await this.alertReceipt(text, { header: "📝 Paper mode", steps: [receipt] });
+      await this.alertReceipt(text, { header: "📝 Practice mode, no real money", steps: [receipt] });
     }
   }
 
@@ -910,7 +911,7 @@ export class Fren {
   async requestFunding(venue: FundVenue, usd: number): Promise<OwnerRequestResult> {
     if (!this.d.signer) return { text: "No wallets yet. Run `fren init` first." };
     if (this.limits().paused) return { text: "Fren is stopped. Send /resume first." };
-    if (this.limits().mode === "paper") return { text: `Paper mode trades ${FUND_NAMES[venue]} from your paper balance; nothing to fund. Switch to live first.` };
+    if (this.limits().mode === "paper") return { text: `Practice mode trades ${FUND_NAMES[venue]} from your practice balance; nothing to fund. Switch to live first.` };
     if (!(usd >= 10)) return { text: `Send at least $10 to ${FUND_NAMES[venue]}.` };
     const to = await this.fundingAddress(venue);
     return this.issueCode("fund", JSON.stringify({ venue, usd, to }), `Send ${fmtUsd(usd)} USDC from Arbitrum to your ${FUND_NAMES[venue]} account at ${to}?`);
@@ -966,13 +967,13 @@ It shows up as pUSD in your Polymarket wallet ${to}.`;
   async status(): Promise<string> {
     const limits = this.limits();
     const lines: string[] = [];
-    lines.push(limits.paused ? "🛑 Stopped (send /resume to turn back on)" : limits.mode === "paper" ? "📝 Paper mode" : "🟢 Live");
+    lines.push(limits.paused ? "🛑 Stopped (send /resume to turn back on)" : limits.mode === "paper" ? "📝 Practice mode, no real money" : "🟢 Live");
 
     const positions = await this.positions().catch((err: Error) => {
       lines.push(`Couldn't load positions: ${err.message}`);
       return [] as PositionView[];
     });
-    if (limits.mode === "paper") lines.push(`Paper USDC: ${fmtUsd(this.d.store.paperUsdc())}`);
+    if (limits.mode === "paper") lines.push(`Practice USDC: ${fmtUsd(this.d.store.paperUsdc())}`);
     if (positions.length) {
       lines.push("", "Positions:");
       for (const p of positions) lines.push(`• ${describePosition(p)}`);
@@ -1049,10 +1050,10 @@ It shows up as pUSD in your Polymarket wallet ${to}.`;
     // Leveraged positions live inside the Hyperliquid account; the rest is held outright.
     const held = positions.filter((p) => p.kind !== "perp");
     if (mode === "paper") {
-      parts.push({ place: "Practice money", wallet: "paper", asset: "USDC", amount: this.d.store.paperUsdc(), usd: this.d.store.paperUsdc() });
+      parts.push({ network: "Practice cash", place: "Practice money", wallet: "paper", asset: "USDC", amount: this.d.store.paperUsdc(), usd: this.d.store.paperUsdc() });
       const pnl = new Map(positions.filter((p) => p.kind === "perp").map((p) => [p.symbol, p.pnlUsd ?? 0]));
       for (const p of this.d.store.paperPositions())
-        parts.push({ place: `${p.side === "long" ? "Long" : "Short"} ${p.symbol} (practice)`, wallet: "paper", asset: p.symbol, amount: p.size, usd: p.margin + (pnl.get(p.symbol) ?? 0) });
+        parts.push({ network: "Hyperliquid", place: `${marketName(p.symbol)} ${p.side === "long" ? "up" : "down"} bet, ${p.leverage}× boost (practice)`, wallet: "paper", asset: marketName(p.symbol), amount: p.size, usd: p.margin + (pnl.get(p.symbol) ?? 0) });
     } else if (this.d.signer) {
       const px = async (coin: string) => (await this.d.hyperliquid.markets.get(coin).catch(() => null))?.midPx ?? null;
       const [usdc, sol, hl, evm, eth, solPx, ethPx] = await Promise.all([
@@ -1064,17 +1065,17 @@ It shows up as pUSD in your Polymarket wallet ${to}.`;
         px("SOL"),
         px("ETH"),
       ]);
-      parts.push({ place: "Solana", wallet: "solana", asset: "USDC", amount: usdc, usd: usdc });
-      parts.push({ place: "Solana", wallet: "solana", asset: "SOL", amount: sol, usd: sol !== null && solPx !== null ? sol * solPx : null });
-      for (const [c, v] of Object.entries(evm)) parts.push({ place: chainName[c] ?? c, wallet: "evm", asset: "USDC", amount: v, usd: v });
-      for (const [c, v] of Object.entries(eth)) parts.push({ place: chainName[c] ?? c, wallet: "evm", asset: "ETH", amount: v, usd: ethPx !== null ? v * ethPx : null });
-      parts.push({ place: "Hyperliquid", wallet: "hyperliquid", asset: "USDC", amount: hl, usd: hl });
+      parts.push({ network: "Solana", place: "Solana", wallet: "solana", asset: "USDC", amount: usdc, usd: usdc });
+      parts.push({ network: "Solana", place: "Solana", wallet: "solana", asset: "SOL", amount: sol, usd: sol !== null && solPx !== null ? sol * solPx : null });
+      for (const [c, v] of Object.entries(evm)) parts.push({ network: chainName[c] ?? c, place: chainName[c] ?? c, wallet: "evm", asset: "USDC", amount: v, usd: v });
+      for (const [c, v] of Object.entries(eth)) parts.push({ network: chainName[c] ?? c, place: chainName[c] ?? c, wallet: "evm", asset: "ETH", amount: v, usd: ethPx !== null ? v * ethPx : null });
+      parts.push({ network: "Hyperliquid", place: "Hyperliquid", wallet: "hyperliquid", asset: "USDC", amount: hl, usd: hl });
     }
     for (const p of held)
       parts.push(
         mode === "paper"
-          ? { place: `${p.symbol} (practice)`, wallet: "paper", asset: p.symbol, amount: p.size, usd: p.valueUsd }
-          : { place: `${p.symbol} on ${venueName[p.venue] ?? p.venue}`, wallet: p.venue === "jupiter" ? "solana" : "evm", asset: p.symbol, amount: p.size, usd: p.valueUsd },
+          ? { network: heldNetwork(p.venue), place: `${p.symbol} (practice)`, wallet: "paper", asset: p.symbol, amount: p.size, usd: p.valueUsd }
+          : { network: heldNetwork(p.venue), place: `${p.symbol} on ${venueName[p.venue] ?? p.venue}`, wallet: p.venue === "jupiter" ? "solana" : "evm", asset: p.symbol, amount: p.size, usd: p.valueUsd },
       );
     const known = parts.filter((p) => p.usd !== null);
     const openPnlUsd = positions.reduce((s, p) => s + (p.pnlUsd ?? 0), 0);
@@ -1264,8 +1265,15 @@ interface StepOutcome {
 }
 
 
+/** The network a held token sits on, by the venue that bought it. Relay doesn't say which EVM chain. */
+function heldNetwork(venue: string): string {
+  return venue === "jupiter" || venue === "yield" ? "Solana" : venue === "derive" ? "Derive" : venue === "polymarket" ? "Polygon" : venue === "hyperliquid" ? "Hyperliquid" : "EVM networks";
+}
+
 export interface BalancePart {
-  /** Where the money sits, in words: "Solana", "Arbitrum", "Hyperliquid", "JUP on Jupiter". */
+  /** The network it sits on, the group the page shows: "Solana", "Arbitrum", "Base", "Polygon", "Hyperliquid". */
+  network: string;
+  /** What it is, in words: "Solana", "JUP on Jupiter", "ETH up bet, 3× boost". */
   place: string;
   wallet: "solana" | "evm" | "hyperliquid" | "paper";
   asset: string;

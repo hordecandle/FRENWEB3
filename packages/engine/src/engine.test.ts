@@ -28,8 +28,8 @@ describe("paper trading end to end", () => {
   it("runs a small trade straight away", async () => {
     const res = await t.fren.submit(goldLong(50, 10));
     expect(res.verdict).toBe("executed");
-    expect(res.text).toContain("Paper mode");
-    expect(res.text).toMatch(/Longed 0\.125 xyz:GOLD at \$4,000/);
+    expect(res.text).toContain("Practice mode");
+    expect(res.text).toMatch(/Bet on GOLD going up: 0\.125 GOLD at \$4,000/);
     expect(t.store.paperUsdc()).toBeCloseTo(9_950);
   });
 
@@ -43,7 +43,7 @@ describe("paper trading end to end", () => {
     expect(t.store.paperPositions()).toHaveLength(0);
 
     const out = await t.fren.approve(code);
-    expect(out).toMatch(/Longed .* xyz:GOLD/);
+    expect(out).toMatch(/Bet on GOLD going up/);
     expect(out).toMatch(/stop \$3,900/);
     expect(t.store.paperPositions()[0]).toMatchObject({ symbol: "xyz:GOLD", side: "long", leverage: 20 });
     expect(await t.fren.approve(code)).toMatch(/wrong or expired/);
@@ -61,7 +61,7 @@ describe("paper trading end to end", () => {
     await t.fren.approve(codeFrom(t.notifier));
     const res = await t.fren.submit(goldLong(50, 100));
     expect(res.verdict).toBe("rejected");
-    expect(res.text).toMatch(/xyz:GOLD allows at most 20x/);
+    expect(res.text).toMatch(/GOLD allows at most a 20× boost/);
   });
 
   it("suggests close matches for an unknown market", async () => {
@@ -80,7 +80,7 @@ describe("paper trading end to end", () => {
         },
       ],
     });
-    expect(res.text).toMatch(/Watching: Short SOL/);
+    expect(res.text).toMatch(/Watching: Bet .* that SOL goes down/);
     await t.fren.tick();
     expect(t.store.paperPositions()).toHaveLength(0);
     expect(await t.fren.status()).toMatch(/⏳ SOL funding > 0.02%\/h \(now 0.0100%\/h\)/);
@@ -88,7 +88,7 @@ describe("paper trading end to end", () => {
     t.fake.setFunding("SOL", 0.03);
     await t.fren.tick();
     expect(t.store.paperPositions()[0]).toMatchObject({ symbol: "SOL", side: "short" });
-    expect(t.notifier.sent.at(-1)).toMatch(/Triggered[\s\S]*✅ SOL funding[\s\S]*Shorted/);
+    expect(t.notifier.sent.at(-1)).toMatch(/Triggered[\s\S]*✅ SOL funding[\s\S]*Bet on SOL going down/);
     await t.fren.tick();
     expect(t.store.paperPositions()[0]!.size).toBeCloseTo(1.25);
   });
@@ -98,7 +98,7 @@ describe("paper trading end to end", () => {
     t.fake.setMid("xyz:GOLD", 3_900);
     await t.fren.tick();
     expect(t.store.paperPositions()).toHaveLength(0);
-    expect(t.notifier.sent.at(-1)).toMatch(/Stop hit, closed long xyz:GOLD at \$3,900, PnL -\$12.50/);
+    expect(t.notifier.sent.at(-1)).toMatch(/Stop hit, closed the GOLD up bet at \$3,900, result -\$12.50/);
   });
 
   it("kill switch pauses and leaves positions open; /close_all closes them; resume needs the owner's code", async () => {
@@ -109,7 +109,7 @@ describe("paper trading end to end", () => {
     expect(stopped).not.toMatch(/Closed long/);
     expect(t.store.paperPositions()).toHaveLength(1);
     const closed = await t.fren.requestCloseAll();
-    expect(closed.text).toMatch(/Closed long xyz:GOLD/);
+    expect(closed.text).toMatch(/Closed the GOLD up bet/);
     expect(t.store.paperPositions()).toHaveLength(0);
     expect((await t.fren.submit(goldLong(10, 2))).verdict).toBe("rejected");
 

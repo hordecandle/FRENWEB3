@@ -66,6 +66,10 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .parts li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:11px 0;border-bottom:1px solid var(--line);font-size:15px}
 .parts .amt{color:var(--muted);font-size:13px;font-weight:300}
 .parts .usd{text-align:right;font-variant-numeric:tabular-nums;font-weight:500}
+.parts li.net{padding:13px 0 6px;border-bottom:0;font-weight:600;font-size:16px}
+.parts li.net .usd{font-weight:600}
+.parts li.coin{padding:6px 0 6px 14px;border-bottom:0;font-size:14px}
+.parts li.coin + li.net{border-top:1px solid var(--line);margin-top:6px}
 .tag{display:inline-block;font-size:12px;font-weight:500;border:1px solid var(--ink);border-radius:99px;padding:1px 8px;margin-left:6px;vertical-align:1px;background:#fff}
 .tag--ok{background:#d9f2e3}.tag--bad{background:#ffd9d4}.tag--wait{background:#fff3c4}
 .addrs{display:grid;gap:14px;margin-top:14px;grid-template-columns:1fr 1fr}
@@ -140,7 +144,7 @@ export const LOGIN_PAGE = (message: string) => `<!doctype html><html lang="en"><
 /** Shared bits of the page script: calls, money, small DOM helpers. */
 const COMMON_JS = `
   const $ = (id) => document.getElementById(id);
-  const usd = (n) => { if (n == null || !isFinite(n)) return "–"; const a = Math.abs(n), d = a >= 1000 && Math.abs(a - Math.round(a)) < 0.005 ? 0 : 2; return (n < 0 ? "-$" : "$") + a.toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d }); };
+  const usd = (n) => { if (n == null || !isFinite(n)) return "–"; const a = Math.abs(n), d = 2; return (n < 0 ? "-$" : "$") + a.toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d }); };
   const signed = (n) => (n == null ? "–" : (n > 0 ? "+" : "") + usd(n));
   const px = (n) => (n == null ? "–" : "$" + Number(n).toLocaleString("en-US", { maximumSignificantDigits: 6 }));
   function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -384,7 +388,6 @@ export const DASHBOARD_PAGE = `<!doctype html><html lang="en"><head>${HEAD}<titl
   }
   const td = (text, cls) => el("td", cls, text);
   const when = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); };
-  const chain = { solana: "Solana", evm: "EVM", hyperliquid: "Hyperliquid", paper: "Practice" };
 
   function renderBalance(d) {
     const b = d.balances;
@@ -398,13 +401,28 @@ export const DASHBOARD_PAGE = `<!doctype html><html lang="en"><head>${HEAD}<titl
     $("bal-note").textContent = (b.startUsd != null ? "Started with " + usd(b.startUsd) + ". " : "") + (b.complete ? "" : "Some places didn't answer, so this may be short.");
     const ul = $("parts");
     ul.replaceChildren();
+    // One group per network, its total first, the coins inside under it.
+    const nets = [];
     for (const x of b.parts) {
-      const li = el("li");
-      const l = el("div");
-      l.append(el("span", null, x.asset), el("span", "tag", x.place));
-      if (x.amount != null) l.append(el("div", "amt", Number(x.amount.toFixed(6)).toLocaleString("en-US") + " " + x.asset + " · " + (chain[x.wallet] || x.wallet) + " wallet"));
-      li.append(l, el("div", "usd", x.usd == null ? "didn't answer" : usd(x.usd)));
-      ul.append(li);
+      const k = x.network || x.place;
+      let g = nets.find((n) => n.k === k);
+      if (!g) nets.push((g = { k, items: [], usd: 0, unknown: false }));
+      g.items.push(x);
+      if (x.usd == null) g.unknown = true; else g.usd += x.usd;
+    }
+    for (const g of nets) {
+      const h = el("li", "net");
+      h.append(el("div", null, g.k), el("div", "usd", g.unknown && !g.usd ? "didn't answer" : usd(g.usd)));
+      ul.append(h);
+      for (const x of g.items) {
+        const li = el("li", "coin");
+        const l = el("div");
+        const what = x.place && x.place !== g.k ? x.place : x.asset;
+        l.append(el("span", null, what));
+        if (x.amount != null) l.append(el("div", "amt", Number(x.amount.toFixed(6)).toLocaleString("en-US") + " " + x.asset));
+        li.append(l, el("div", "usd", x.usd == null ? "didn't answer" : usd(x.usd)));
+        ul.append(li);
+      }
     }
     if (!b.parts.length) ul.append(el("li", "muted", "Nothing here yet. Top up below to start."));
   }

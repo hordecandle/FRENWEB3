@@ -56,9 +56,9 @@ describe("evaluatePolicy", () => {
     const limits = Limits.parse({ maxLeverage: 100 });
     const d = evaluatePolicy([perpStep({ leverage: 100 })], limits, state);
     expect(d.verdict).toBe("reject");
-    expect(d.steps[0]!.reasons.join()).toMatch(/at most 40x/);
+    expect(d.steps[0]!.reasons.join()).toMatch(/at most a 40× boost/);
     const d2 = evaluatePolicy([perpStep({ leverage: 30 })], DEFAULT_LIMITS, state);
-    expect(d2.steps[0]!.reasons.join()).toMatch(/max leverage of 20x/);
+    expect(d2.steps[0]!.reasons.join()).toMatch(/over your limit of 20×/);
   });
 
   it("rejects everything when paused", () => {
@@ -76,10 +76,10 @@ describe("evaluatePolicy", () => {
 
   it("warns when the stop is past liquidation or missing at high leverage", () => {
     const d = evaluatePolicy([perpStep({ leverage: 20, stop: 90 })], DEFAULT_LIMITS, state);
-    expect(d.steps[0]!.warnings.join()).toMatch(/past liquidation/);
+    expect(d.steps[0]!.warnings.join()).toMatch(/closes the bet by itself/);
     const limits = Limits.parse({ maxLeverage: 40 });
     const d2 = evaluatePolicy([perpStep({ leverage: 40 })], limits, state);
-    expect(d2.steps[0]!.warnings.join()).toMatch(/No stop set at 40x/);
+    expect(d2.steps[0]!.warnings.join()).toMatch(/No stop with a 40× boost/);
   });
 
   it("does not re-ask for confirmation at fire time but still checks caps", () => {
@@ -92,7 +92,7 @@ describe("evaluatePolicy", () => {
   it("renders a readable summary", () => {
     const d = evaluatePolicy([perpStep({ margin: 300, stop: 5 })], DEFAULT_LIMITS, state);
     expect(describeDecision(d, [perpStep({ margin: 300, stop: 5 })])).toContain(
-      "Long BTC on Hyperliquid: $300 margin at 10x ($3,000 position), stop at -5% of margin, -$15.00 (0.50% price move)",
+      "Bet $300 that BTC goes up, 10× boost on Hyperliquid. Stop: if BTC falls ~0.5%, Fren closes it and you lose about $15",
     );
   });
 });

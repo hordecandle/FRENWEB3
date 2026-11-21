@@ -35,7 +35,7 @@ describe("Hyperliquid: light prices, no hammering", () => {
     t.fake.setMid("BTC", 90_000);
     await t.fren.tick();
     expect(t.store.paperPositions()).toHaveLength(0);
-    expect(t.notifier.sent.at(-1)).toMatch(/Stop hit, closed long BTC/);
+    expect(t.notifier.sent.at(-1)).toMatch(/Stop hit, closed the BTC up bet/);
   });
 
   it("on a 429 it backs off, warns the owner once, and says when prices are back", async () => {

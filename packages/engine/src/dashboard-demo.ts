@@ -19,17 +19,17 @@ export async function startDemo(port: number, host = "0.0.0.0") {
   store.setLimits({ ...store.getLimits(), autoApproveUsd: 300 });
   await fren.submit({ request: "buy $250 of SOL", steps: [{ leg: { kind: "swap", venue: "jupiter", side: "buy", token: sol, amount: { type: "usd", usd: 250 } } }] });
   await fren.submit({ request: "put $100 into JUP", steps: [{ leg: { kind: "swap", venue: "jupiter", side: "buy", token: jup, amount: { type: "usd", usd: 100 } } }] });
-  await fren.submit({ request: "long ETH with $120, 3x, stop at -20%", steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "ETH", side: "long", sizing: { type: "margin", usd: 120 }, leverage: 3, stopLossPct: 20 } }] });
+  await fren.submit({ request: "bet $120 that ETH goes up, 3x boost, stop if I lose 20%", steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "ETH", side: "long", sizing: { type: "margin", usd: 120 }, leverage: 3, stopLossPct: 20 } }] });
   // Prices moved a bit since.
   t.fake.main.find((m) => m.name === "ETH")!.mid = 4_150;
   t.fake.tokens.find((x) => x.symbol === "JUP")!.usdPrice = 1.08;
   store.setLimits({ ...store.getLimits(), autoApproveUsd: 25 });
   // One that waits for the owner's /ok, to show the "most you can lose" line.
-  await fren.submit({ request: "short BTC with $200, 5x, stop at -10%", steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "BTC", side: "short", sizing: { type: "margin", usd: 200 }, leverage: 5, stopLossPct: 10 } }] });
+  await fren.submit({ request: "bet $200 that BTC goes down, 5x boost, stop if I lose 10%", steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "BTC", side: "short", sizing: { type: "margin", usd: 200 }, leverage: 5, stopLossPct: 10 } }] });
 
   const start = Date.now() - 50 * 60_000;
   const answers: [RegExp, string][] = [
-    [/hold|have|balance|money/i, "You hold about $250 of SOL, $108 of JUP and a long on ETH that's up a little. Everything is on practice money."],
+    [/hold|have|balance|money/i, "You hold about $250 of SOL, $108 of JUP and a bet that ETH goes up, which is a little ahead. Everything is on practice money."],
     [/stop|pause/i, "To stop me, press Pause Fren in the dashboard or send /fren_stop here. It works at once."],
     [/buy|long|short|sell/i, "Before I do it I'll show you what I'd buy and the most you can lose. Then you reply /ok with the code."],
   ];
@@ -40,10 +40,10 @@ export async function startDemo(port: number, host = "0.0.0.0") {
   const seed: ["you" | "fren", string][] = [
     ["you", "hey, buy $250 of SOL"],
     ["fren", "Done ✅ Bought 1.25 SOL for $250 on Jupiter. Practice money, so nothing real moved."],
-    ["you", "and long ETH with $120, 3x, stop at -20%"],
-    ["fren", "Opened a long on ETH: $120 of yours, 3x. If ETH falls 20% the stop closes it.\n🧯 The most you can lose: $120. Your stop should cut it at about $24."],
-    ["you", "short BTC with $200, 5x, stop at -10%"],
-    ["fren", "That's over your auto-approve limit, so I need your OK.\n🧯 The most you can lose: $200, the money this puts in. Your stop should cut it at about $20.\nReply /ok and the code I sent you."],
+    ["you", "and bet $120 that ETH goes up, 3x boost, stop if I lose 20%"],
+    ["fren", "Done ✅ Bet $120 that ETH goes up, 3× boost. If ETH falls ~6.7%, I close it and you lose about $24.\n🧯 The most you can lose: $120. Your stop should cut it at about $24."],
+    ["you", "bet $200 that BTC goes down, 5x boost, stop if I lose 10%"],
+    ["fren", "Bet $200 that BTC goes down, 5× boost. If BTC rises ~2%, I close it and you lose about $20.\nThat's more than I do without asking, so I need your OK.\n🧯 The most you can lose: $200, the money this puts in. Your stop should cut it at about $20.\nReply /ok and the code I sent you."],
   ];
   seed.forEach(([from, text], i) => chat.fromApp(from, text, start + i * 7 * 60_000));
 
@@ -56,6 +56,22 @@ export async function startDemo(port: number, host = "0.0.0.0") {
     ETH: [{ label: "Hyperliquid explorer", url: "https://app.hyperliquid.xyz/explorer" }, { label: "Chart", url: "https://app.hyperliquid.xyz/trade/ETH" }],
   };
   fren.history = (limit?: number) => history(limit).map((h) => ({ ...h, links: h.links.length ? h.links : (Object.entries(demoLinks).find(([k]) => h.request.includes(k))?.[1] ?? []) }));
+
+  // Practice money is one pot. On a real install it sits on several networks,
+  // so the demo spreads it the way a real wallet looks.
+  const balances = fren.balances.bind(fren);
+  const spread: [string, number][] = [["Solana", 0.35], ["Arbitrum", 0.25], ["Base", 0.15], ["Polygon", 0.1], ["Hyperliquid", 0.15]];
+  const order = spread.map(([n]) => n);
+  fren.balances = async () => {
+    const b = await balances();
+    const parts = b.parts.flatMap((p) =>
+      p.network === "Practice cash" && p.usd !== null
+        ? spread.map(([network, f]) => ({ ...p, network, place: "USDC", amount: p.usd! * f, usd: p.usd! * f }))
+        : [p],
+    );
+    parts.sort((x, y) => (order.indexOf(x.network) + 99) % 99 - ((order.indexOf(y.network) + 99) % 99));
+    return { ...b, parts };
+  };
 
   // Pretend addresses (no signer in the demo), so the top-up card has something to copy.
   fren.wallet = async () => ({

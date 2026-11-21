@@ -394,12 +394,12 @@ export class JupiterVenue implements SpotVenueAdapter {
     if (leg.side === "buy") {
       if (leg.amount.type === "tokens") throw new VenueError('Say how much USDC to spend on a buy: amount {type:"usd"}.');
       const usd = leg.amount.type === "usd" ? leg.amount.usd : store.paperUsdc() * leg.amount.fraction;
-      if (usd > store.paperUsdc()) throw new VenueError(`Paper balance is ${fmtUsd(store.paperUsdc())}.`);
+      if (usd > store.paperUsdc()) throw new VenueError(`Practice balance is ${fmtUsd(store.paperUsdc())}.`);
       const qty = usd / px;
       store.setPaperUsdc(store.paperUsdc() - usd);
       store.setPaperHolding({ ...held, amount: held.amount + qty, costUsd: held.costUsd + usd });
       store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "jupiter", symbol: t.symbol, action: "buy", size: qty, price: px, usd, spendUsd: usd, mode: "paper" });
-      return { text: `📝 Paper: Bought ${fmtQty(qty)} ${t.symbol} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
+      return { text: `📝 Practice: Bought ${fmtQty(qty)} ${t.symbol} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
     }
     if (leg.amount.type === "tokens" && leg.amount.tokens > held.amount + 1e-12) {
       throw new VenueError(`You hold ${fmtQty(held.amount)} paper ${t.symbol}, not ${leg.amount.tokens}.`);
@@ -411,7 +411,7 @@ export class JupiterVenue implements SpotVenueAdapter {
     store.setPaperUsdc(store.paperUsdc() + usd);
     store.setPaperHolding({ ...held, amount: held.amount - qty, costUsd: held.costUsd * (1 - qty / held.amount) });
     store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "jupiter", symbol: t.symbol, action: "sell", size: qty, price: px, usd, spendUsd: 0, mode: "paper" });
-    return { text: `📝 Paper: Sold ${fmtQty(qty)} ${t.symbol} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
+    return { text: `📝 Practice: Sold ${fmtQty(qty)} ${t.symbol} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
   }
 
   // -- live ------------------------------------------------------------------

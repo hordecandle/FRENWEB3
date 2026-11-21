@@ -57,7 +57,7 @@ describe("USDC yield", () => {
     expect(res.verdict).toBe("needs_code");
     expect(res.text).toMatch(/Lend \$3,000 of USDC on Jupiter Lend \(Solana\)/);
     expect(res.text).toMatch(/Earns about 5\.69% a year on \$3,000/);
-    expect(await t.fren.approve(codeFrom(t.notifier.sent))).toMatch(/📝 Paper: Lent \$3,000 USDC on Jupiter Lend \(Solana\) at 5\.69% a year/);
+    expect(await t.fren.approve(codeFrom(t.notifier.sent))).toMatch(/📝 Practice: Lent \$3,000 USDC on Jupiter Lend \(Solana\) at 5\.69% a year/);
     expect(t.store.paperUsdc()).toBe(7_000);
     expect(t.store.spentTodayUsd("paper")).toBe(0);
     expect(await t.fren.status()).toMatch(/\$3,000 USDC lent on Jupiter Lend \(Solana\)/);
@@ -67,7 +67,7 @@ describe("USDC yield", () => {
     expect(await t.fren.status()).toMatch(/\$3,171 USDC lent on Jupiter Lend \(Solana\) \(\+\$171 interest\)/);
     const out = await t.fren.submit(earn("withdraw", { type: "fraction", fraction: 1 }));
     expect(out.verdict).toBe("executed");
-    expect(out.text).toMatch(/📝 Paper: Took \$3,171 USDC back from Jupiter Lend \(Solana\), including \$171 of interest/);
+    expect(out.text).toMatch(/📝 Practice: Took \$3,171 USDC back from Jupiter Lend \(Solana\), including \$171 of interest/);
     expect(t.store.paperUsdc()).toBeCloseTo(10_170.7, 0);
     expect(await t.fren.status()).not.toMatch(/lent on/);
   });
@@ -79,7 +79,7 @@ describe("USDC yield", () => {
     expect(t.store.paperUsdc()).toBeCloseTo(100, 6);
     await t.fren.submit({ request: "buy", steps: [{ leg: { kind: "swap", venue: "jupiter", side: "buy", token: "JUP", amount: { type: "usd", usd: 400 } } }] });
     const out = await t.fren.approve(codeFrom(t.notifier.sent));
-    expect(out).toMatch(/↩️ Not enough idle USDC, so first:\n📝 Paper: Took \$300 USDC back from Jupiter Lend \(Solana\)\n📝 Paper: Bought 400 JUP for \$400/);
+    expect(out).toMatch(/↩️ Not enough idle USDC, so first:\n📝 Practice: Took \$300 USDC back from Jupiter Lend \(Solana\)\n📝 Practice: Bought 400 JUP for \$400/);
   });
 
   it("withdraws only what's there", async () => {

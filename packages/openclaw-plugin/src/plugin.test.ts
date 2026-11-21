@@ -94,7 +94,7 @@ describe("OpenClaw plugin against a real engine", () => {
 
     const ok = reg.commands.get("ok");
     expect((await ok.handler({ senderIsOwner: false, args: code })).text).toMatch(/Only the owner/);
-    expect((await ok.handler({ senderIsOwner: true, args: code })).text).toMatch(/Longed .* xyz:GOLD/);
+    expect((await ok.handler({ senderIsOwner: true, args: code })).text).toMatch(/Bet on GOLD going up/);
   });
 
   it("quotes a price bet both ways and hands the model plans it can submit unchanged", async () => {
@@ -105,7 +105,7 @@ describe("OpenClaw plugin against a real engine", () => {
     expect(out).toMatch(/1\) Option on Derive: 0\.4 contracts of the ETH \$4,000 call/);
     expect(out).toMatch(/2\) Polymarket: "Will Ethereum reach \$4,000 by December 31\?"/);
     const plan = JSON.parse(/^polymarket: (.*)$/m.exec(out)![1]!);
-    expect(await run("fren_trade", { plan })).toMatch(/📝 Paper: Bought 167 "Yes" shares/);
+    expect(await run("fren_trade", { plan })).toMatch(/📝 Practice: Bought 167 "Yes" shares/);
   });
 
   it("knows the owner from commands.ownerAllowFrom when OpenClaw doesn't say (2026.11+)", () => {
@@ -126,7 +126,7 @@ describe("OpenClaw plugin against a real engine", () => {
     expect(res.text).not.toMatch(/Closed long/);
     expect((await reg.commands.get("close_all").handler({ senderIsOwner: false })).text).toMatch(/Only the owner/);
     const closed = await reg.commands.get("close_all").handler({ senderIsOwner: true });
-    expect(closed.text).toMatch(/Closed long xyz:GOLD/);
+    expect(closed.text).toMatch(/Closed the GOLD up bet/);
     const resume = await reg.commands.get("resume").handler({ senderIsOwner: true });
     expect(resume.text).toMatch(/Code: [A-Z0-9]{6}/);
   });
@@ -164,11 +164,11 @@ describe("Bee's ANT long, from the chat tools down, with only USDC on Solana", (
     });
     expect(out).toMatch(/Moved \$51\.16 USDC from your Solana wallet into Hyperliquid through Relay/);
     expect(out).toMatch(/Moved \$50\.75 USDC to Hyperliquid's xyz market/);
-    expect(out).toMatch(/✅ Longed 2\.77 xyz:ANT at \$181\.8 \(\$504\), stop \$171, target \$198/);
+    expect(out).toMatch(/✅ Bet on ANT going up: 2\.77 ANT at \$181\.8 \(moves like \$504 of ANT\), stop \$171, target \$198/);
     // The owner got the receipt straight from Fren; the model is told not to post it again.
     expect(out).toContain(RECEIPT_NOTE);
     expect(t.notifier.receipts).toHaveLength(1);
-    expect(t.notifier.receipts[0]!.html).toMatch(/^✅ <b>Long ANT opened<\/b>/);
+    expect(t.notifier.receipts[0]!.html).toMatch(/^✅ <b>Bet on ANT going up<\/b>/);
   });
 
   it("images on and off: /fren_images from the owner, or fren_settings when they ask in words", async () => {
@@ -191,7 +191,7 @@ describe("Bee's ANT long, from the chat tools down, with only USDC on Solana", (
     const before = t.notifier.receipts.length;
     expect((await reg.commands.get("ok").handler({ senderIsOwner: true, args: code })).text).toBe("✅ Approved. Your receipt is just above.");
     expect(t.notifier.receipts).toHaveLength(before + 1);
-    expect(t.notifier.receipts.at(-1)!.html).toMatch(/Short BTC opened/);
+    expect(t.notifier.receipts.at(-1)!.html).toMatch(/Bet on BTC going down/);
   });
 
   it("\"deposit $20 to Hyperliquid\" comes from Solana when Arbitrum has nothing", async () => {

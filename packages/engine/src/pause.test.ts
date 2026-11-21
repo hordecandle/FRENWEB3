@@ -140,6 +140,6 @@ describe("pause: the watcher still runs exits", () => {
     t.fake.setMid("xyz:GOLD", 3_900);
     await t.fren.tick();
     expect(t.store.paperPositions()).toHaveLength(0);
-    expect(t.notifier.sent.at(-1)).toMatch(/Stop hit, closed long xyz:GOLD/);
+    expect(t.notifier.sent.at(-1)).toMatch(/Stop hit, closed the GOLD up bet/);
   });
 });

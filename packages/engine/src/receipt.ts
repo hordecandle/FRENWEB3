@@ -49,7 +49,7 @@ export interface StepReceipt {
 }
 
 export interface Receipt {
-  /** A line above every step, e.g. "📝 Paper mode" or "⚡ Your condition was met". */
+  /** A line above every step, e.g. "📝 Practice mode, no real money" or "⚡ Your condition was met". */
   header?: string;
   steps: StepReceipt[];
   /** Lines under the steps (warnings, the code to approve, what's watched). */
@@ -111,7 +111,7 @@ export function receiptFromText(text: string): StepReceipt {
   const main = lines.findLast((l) => /^(✅|📝|❌|⏳|👀)/.test(l)) ?? lines.at(-1) ?? "";
   const icon = /^(✅|📝|❌|⏳|👀)/.exec(main)?.[1] ?? "✅";
   const rows = lines.filter((l) => l !== main).map((l) => rowFromText(l.replace(/^(✅|↪)\s*/, "↪ ")));
-  const head = rowFromText(main.replace(/^(✅|📝|❌|⏳|👀)\s*(Paper:?\s*)?/, ""));
+  const head = rowFromText(main.replace(/^(✅|📝|❌|⏳|👀)\s*(?:(?:Paper|Practice):?\s*)?/, ""));
   return { icon, title: head.text, rows, links: head.links ?? [] };
 }
 

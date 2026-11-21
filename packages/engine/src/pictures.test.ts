@@ -115,7 +115,7 @@ describe("close all", () => {
     const r = await t.fren.approveWithReceipt(code!);
     expect(r.receiptSent).toBe(true);
     expect(t.notifier.receipts).toHaveLength(1);
-    expect(t.notifier.receipts[0]!.html).toMatch(/Long ANT closed/);
+    expect(t.notifier.receipts[0]!.html).toMatch(/ANT up bet closed/);
     expect(t.notifier.receipts[0]!.html).toContain("Spot tokens were left as they are.");
   });
 });

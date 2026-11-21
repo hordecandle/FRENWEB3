@@ -37,9 +37,9 @@ describe("one receipt for every trade", () => {
     expect(res.verdict).toBe("executed");
     expect(res.receiptSent).toBe(true);
     const [msg] = t.notifier.receipts;
-    expect(msg!.html).toMatch(/^✅ <b>Long ANT opened<\/b>/);
+    expect(msg!.html).toMatch(/^✅ <b>Bet on ANT going up<\/b>/);
     // The fake fills at the order's 1% slippage limit, so the stop and target are measured from that real fill.
-    expect(msg!.html).toContain("Size: 2.77 ANT, a $504 position on $50.00 margin at 10x");
+    expect(msg!.html).toContain("Put in: $50.00, 10× boost (moves like $504 of ANT, 2.77 ANT)");
     expect(msg!.html).toContain("Entry: $181.8");
     expect(msg!.html).toContain("Stop: $171 (about -$29.92)");
     expect(msg!.html).toContain("Target: $198 (about +$44.87)");
@@ -52,7 +52,7 @@ describe("one receipt for every trade", () => {
     expect(msg!.photo!.length).toBeGreaterThan(2_000);
     expect(t.fake.hlCalls.candleSnapshot).toBe(1);
     // What the model gets still has the facts, so it can answer questions about the trade.
-    expect(res.text).toMatch(/✅ Longed 2\.77 xyz:ANT at \$181\.8/);
+    expect(res.text).toMatch(/✅ Bet on ANT going up: 2\.77 ANT at \$181\.8/);
   });
 
   it("on mainnet the position links to Hyperdash, where the PnL can be followed", () => {
@@ -72,7 +72,7 @@ describe("one receipt for every trade", () => {
     const html = receiptHtml({ steps: [r] });
     expect(html).toContain('🔗 <a href="https://hyperdash.com/address/0xabc">Track PnL on Hyperdash</a>');
     expect(html).toContain('↪ Moved $50.75 USDC from Arbitrum into Hyperliquid · <a href="https://arbiscan.io/tx/0xdep">Arbiscan tx</a>');
-    expect(html).toContain("Liquidation: about $163.5");
+    expect(html).toContain("If ANT reaches about $163.5, the exchange closes it by itself");
     expect(r.chart?.levels.map((l) => l.kind)).toEqual(["entry", "stop", "target", "liq"]);
   });
 
@@ -109,7 +109,7 @@ describe("one receipt for every trade", () => {
     const t = buildTestFren();
     await t.fren.submit({ request: "buy $25 of JUP", steps: [{ leg: { kind: "swap", venue: "jupiter", side: "buy", token: "JUP", amount: { type: "usd", usd: 25 } } }] });
     const { html } = t.notifier.receipts[0]!;
-    expect(html).toMatch(/^<b>📝 Paper mode<\/b>\n\n📝 <b>Bought 25 JUP for \$25\.00 at \$1<\/b>/);
+    expect(html).toMatch(/^<b>📝 Practice mode, no real money<\/b>\n\n📝 <b>Bought 25 JUP for \$25\.00 at \$1<\/b>/);
     expect(html).toContain('<a href="https://dexscreener.com/solana/JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN">Chart on DexScreener</a>');
   });
 
@@ -124,8 +124,8 @@ describe("one receipt for every trade", () => {
     t.fake.main.find((m) => m.name === "SOL")!.mid = 99;
     await t.fren.tick();
     const { html } = t.notifier.receipts[0]!;
-    expect(html).toMatch(/⚡ Paper plan fired: ✅ SOL price/);
-    expect(html).toContain("📝 <b>Long SOL opened</b>");
+    expect(html).toMatch(/⚡ Practice plan fired: ✅ SOL price/);
+    expect(html).toContain("📝 <b>Bet on SOL going up</b>");
     expect(html).toContain('You asked: "if SOL drops under 100, long it"');
   });
 });
@@ -146,10 +146,10 @@ describe("stops and targets that fill on Hyperliquid", () => {
     await t.fren.checkExchangeExits(Date.now() + 60_000);
     expect(t.notifier.receipts).toHaveLength(1);
     const { html } = t.notifier.receipts[0]!;
-    expect(html).toMatch(/^🛑 <b>Long ANT stop hit<\/b>/);
+    expect(html).toMatch(/^🛑 <b>ANT up bet stop hit<\/b>/);
     expect(html).toContain("Closed: 2.77 ANT at $171");
     expect(html).toContain("Entry was $180");
-    expect(html).toContain("PnL: about -$24.93 (fees $0.19)");
+    expect(html).toContain("Result: about -$24.93 (fees $0.19)");
     expect(html).toContain('<a href="https://app.hyperliquid-testnet.xyz/explorer/tx/0xstophash">Order on Hyperliquid explorer</a>');
     await t.fren.checkExchangeExits(Date.now() + 120_000);
     expect(t.notifier.receipts).toHaveLength(1);
@@ -162,8 +162,8 @@ describe("stops and targets that fill on Hyperliquid", () => {
     t.fake.hlFills.push({ coin: "xyz:ANT", px: "198", sz: "2.77", time: Date.now() + 2_000, dir: "Close Long", closedPnl: "49.86", hash: "0xtp", oid: 78, fee: "0.2" });
     t.fake.hlOrderTypes[78] = "Take Profit Market";
     await t.fren.checkExchangeExits(Date.now() + 60_000);
-    expect(t.notifier.receipts[0]!.html).toMatch(/^🎯 <b>Long ANT target hit<\/b>/);
-    expect(t.notifier.receipts[0]!.html).toContain("PnL: about +$49.86");
+    expect(t.notifier.receipts[0]!.html).toMatch(/^🎯 <b>ANT up bet target hit<\/b>/);
+    expect(t.notifier.receipts[0]!.html).toContain("Result: about +$49.86");
   });
 
   it("does nothing in paper mode or before any live position", async () => {
@@ -198,7 +198,7 @@ describe("Telegram delivery", () => {
     }) as typeof fetch;
     return { calls, fetchFn, fail: (s: number) => void (status = s) };
   };
-  const msg = { html: "✅ <b>Long ANT opened</b>\n🔗 <a href=\"https://hyperdash.com/address/0x1\">Track PnL on Hyperdash</a>", plain: "✅ Long ANT opened\n🔗 Track PnL on Hyperdash: https://hyperdash.com/address/0x1" };
+  const msg = { html: "✅ <b>Bet on ANT going up</b>\n🔗 <a href=\"https://hyperdash.com/address/0x1\">Track PnL on Hyperdash</a>", plain: "✅ Bet on ANT going up\n🔗 Track PnL on Hyperdash: https://hyperdash.com/address/0x1" };
 
   it("sends the chart with the receipt as its caption, in one message", async () => {
     const c = capture();

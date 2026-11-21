@@ -55,7 +55,7 @@ describe("a perp pays for itself", () => {
     expect(t.fake.exchange[0]!.action).toMatchObject({ sourceDex: "", destinationDex: "xyz", amount: "50.75", token: expect.stringMatching(/^USDC:0x/) });
     expect(res.text).toMatch(/Moved \$50\.75 USDC from Arbitrum into Hyperliquid · https:\/\/sepolia\.arbiscan\.io\/tx\//);
     expect(res.text).toMatch(/Moved \$50\.75 USDC to Hyperliquid's xyz market/);
-    expect(res.text).toMatch(/✅ Longed/);
+    expect(res.text).toMatch(/✅ Bet on/);
     // What it was going to do is not repeated after it's done.
     expect(res.text).not.toMatch(/Fren first moves/);
   });
@@ -72,7 +72,7 @@ describe("a perp pays for itself", () => {
     const out = await t.fren.approve(codeFrom(t.notifier.sent));
     expect(deposits).toEqual([100.75]);
     expect(out).toMatch(/Moved \$101 USDC from Arbitrum into Hyperliquid/);
-    expect(out).toMatch(/✅ Longed/);
+    expect(out).toMatch(/✅ Bet on/);
   });
 
   it("a main-dex market only needs the deposit, and never less than Hyperliquid's $5 minimum", async () => {
@@ -170,7 +170,7 @@ describe("topping Arbitrum up from Solana", () => {
     expect(res.verdict).toBe("executed");
     expect(bridged).toEqual([30.75]);
     expect(deposits).toEqual([50.75]);
-    expect(res.text).toMatch(/Sent 30\.75 USDC from Solana[\s\S]*Moved \$50\.75 USDC from Arbitrum[\s\S]*✅ Longed/);
+    expect(res.text).toMatch(/Sent 30\.75 USDC from Solana[\s\S]*Moved \$50\.75 USDC from Arbitrum[\s\S]*✅ Bet on/);
   });
 
   it("over auto-approve, the code is asked once and covers the bridge, the deposit and the trade", async () => {
@@ -184,7 +184,7 @@ describe("topping Arbitrum up from Solana", () => {
     const out = await t.fren.approve(codeFrom(t.notifier.sent));
     expect(bridged).toEqual([30.75]);
     expect(deposits).toEqual([50.75]);
-    expect(out).toMatch(/✅ Longed/);
+    expect(out).toMatch(/✅ Bet on/);
   });
 
   it("still refuses when Solana and Arbitrum together are short", async () => {
@@ -233,8 +233,8 @@ describe("straight from Solana USDC through Relay", () => {
     expect(res.receiptSent).toBe(true);
     expect(t.notifier.receipts).toHaveLength(1);
     const { html } = t.notifier.receipts[0]!;
-    expect(html).toMatch(/^✅ <b>Long ANT opened<\/b>/);
-    expect(html).toMatch(/Size: 2\.77 ANT, a \$504 position on \$50\.00 margin at 10x/);
+    expect(html).toMatch(/^✅ <b>Bet on ANT going up<\/b>/);
+    expect(html).toMatch(/Put in: \$50\.00, 10× boost \(moves like \$504 of ANT, 2\.77 ANT\)/);
     expect(html).toMatch(/Entry: \$181\.8/);
     expect(html).toMatch(/Stop: \$171 \(about -\$[\d.]+\)/);
     expect(html).toMatch(/Target: \$198 \(about \+\$[\d.]+\)/);
@@ -262,7 +262,7 @@ describe("straight from Solana USDC through Relay", () => {
     ]);
     expect(res.text).toMatch(/Moved \$51\.16 USDC from your Solana wallet into Hyperliquid through Relay \(about \$51\.13 after Relay's fee\) · https:\/\/solscan\.io\/tx\/relaysig1/);
     expect(res.text).toMatch(/Moved \$50\.75 USDC to Hyperliquid's xyz market/);
-    expect(res.text).toMatch(/✅ Longed/);
+    expect(res.text).toMatch(/✅ Bet on/);
     expect(res.text).not.toMatch(/deposit \$|First, say/);
   });
 
@@ -271,13 +271,13 @@ describe("straight from Solana USDC through Relay", () => {
     await t.fren.changeLimits("autoApproveUsd=25");
     const res = await t.fren.submit(antLong);
     expect(res.verdict).toBe("needs_code");
-    expect(res.text).toMatch(/stop at -50% of margin, -\$25\.00 \(5\.0% price move\)/);
-    expect(res.text).toMatch(/take profit at \+100%, \+\$50\.00 \(10\.0% price move\)/);
+    expect(res.text).toMatch(/Stop: if ANT falls ~5%, Fren closes it and you lose about \$25/);
+    expect(res.text).toMatch(/Take profit: if ANT rises ~10%, Fren closes it and you win about \$50/);
     expect(res.text).toMatch(/sends \$51\.16 USDC from your Solana wallet straight into your Hyperliquid account through Relay/);
     expect(t.fake.relaySolanaTxs).toHaveLength(0);
     const out = await t.fren.approve(codeFrom(t.notifier.sent));
     expect(t.fake.relaySolanaTxs).toHaveLength(1);
-    expect(out).toMatch(/✅ Longed/);
+    expect(out).toMatch(/✅ Bet on/);
   });
 
   it("goes through Relay rather than Circle's bridge, which needs ETH on Arbitrum", async () => {

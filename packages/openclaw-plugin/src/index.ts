@@ -140,7 +140,7 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; 
       label: "Trade",
       description: [
         "Propose a trading plan built from the user's request. Fren checks it against the user's limits, then either executes it,",
-        "asks the user for a confirmation code, or refuses with reasons. Relay the returned text to the user as-is, including its \"📝 Paper mode\" or live marker: never drop it, the user must always see whether money is real.",
+        "asks the user for a confirmation code, or refuses with reasons. Relay the returned text to the user as-is, including its \"📝 Practice mode, no real money\" or live marker: never drop it, the user must always see whether money is real.",
         "One plan can hold several legs; legs with `when` conditions wait for the watcher.",
         'To snipe a launch, add when: [{type:"tradable", venue, chain, token}] with the same contract address.',
         "Never invent token addresses: use one the user gave or one fren_markets returned.",

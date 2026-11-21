@@ -1,5 +1,6 @@
 import type { Limits } from "./limits.js";
 import type { PlanStep } from "./plan.js";
+import { marketName } from "./render.js";
 
 /**
  * A plan step after the adapter has looked up the market: what it costs and
@@ -105,19 +106,19 @@ export function evaluatePolicy(
 
     if (leg.kind === "perp_open") {
       if (leg.leverage > limits.maxLeverage) {
-        reasons.push(`${leg.leverage}x is over your max leverage of ${limits.maxLeverage}x.`);
+        reasons.push(`A ${leg.leverage}× boost is over your limit of ${limits.maxLeverage}×.`);
       }
       if (r.venueMaxLeverage !== undefined && leg.leverage > r.venueMaxLeverage) {
-        reasons.push(`${r.symbol} allows at most ${r.venueMaxLeverage}x on ${leg.venue}.`);
+        reasons.push(`${marketName(r.symbol)} allows at most a ${r.venueMaxLeverage}× boost on ${leg.venue}.`);
       }
       // Liquidation hits before the margin is fully gone because of maintenance
       // margin, so a stop at or beyond ~80% of margin may never trigger.
       const liqMovePct = 100 / leg.leverage;
       if (leg.stopLossPct !== undefined && leg.stopLossPct >= 80) {
-        warnings.push(`A stop at -${leg.stopLossPct}% of margin is at or past liquidation; liquidation will likely hit first.`);
+        warnings.push(`This stop (lose ${leg.stopLossPct}% of what you put in) is past the point where the exchange closes the bet by itself, so that will likely happen first.`);
       }
       if (leg.stopLossPct === undefined && leg.stopPrice === undefined && leg.leverage >= 25) {
-        warnings.push(`No stop set at ${leg.leverage}x; a ${liqMovePct.toFixed(1)}% move against you wipes the margin.`);
+        warnings.push(`No stop with a ${leg.leverage}× boost: if the price moves ${Number(liqMovePct.toFixed(1))}% the wrong way, you lose everything you put in.`);
       }
       newPositions += 1;
     }

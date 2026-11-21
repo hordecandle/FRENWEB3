@@ -199,14 +199,14 @@ export class PolymarketVenue implements VenueAdapter {
     const book = await this.o.data.book(out.assetId);
     if (leg.side === "buy") {
       const budget = leg.amount.type === "usd" ? leg.amount.usd : store.paperUsdc() * leg.amount.fraction;
-      if (budget > store.paperUsdc()) throw new VenueError(`Paper balance is ${fmtUsd(store.paperUsdc())}.`);
+      if (budget > store.paperUsdc()) throw new VenueError(`Practice balance is ${fmtUsd(store.paperUsdc())}.`);
       const fill = walkBook(book.asks, { usd: budget }, leg.limitPrice ?? 0.99, "buy");
       if (fill.shares <= 0) throw new VenueError(`Nobody is selling "${out.label}" at that price right now.`);
       store.setPaperUsdc(store.paperUsdc() - fill.usd);
       store.setPaperHolding({ ...held, amount: held.amount + fill.shares, costUsd: held.costUsd + fill.usd });
       store.setKv(`poly_market:${out.assetId}`, m.slug);
       store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "polymarket", symbol: held.symbol, action: "buy", size: fill.shares, price: fill.avgPrice, usd: fill.usd, spendUsd: fill.usd, mode: "paper" });
-      return { text: `📝 Paper: Bought ${fmtShares(fill.shares)} "${out.label}" shares in "${m.question}" for ${fmtUsd(fill.usd)} at ${cents(fill.avgPrice)} each` };
+      return { text: `📝 Practice: Bought ${fmtShares(fill.shares)} "${out.label}" shares in "${m.question}" for ${fmtUsd(fill.usd)} at ${cents(fill.avgPrice)} each` };
     }
     const shares = leg.amount.type === "fraction" ? held.amount * leg.amount.fraction : Math.min(held.amount, leg.amount.usd / Math.max(book.bids[0]?.price ?? 1, 0.01));
     if (shares <= 0 || held.amount <= 0) throw new VenueError(`You hold no paper "${out.label}" shares in "${m.question}".`);
@@ -215,7 +215,7 @@ export class PolymarketVenue implements VenueAdapter {
     store.setPaperUsdc(store.paperUsdc() + fill.usd);
     store.setPaperHolding({ ...held, amount: held.amount - fill.shares, costUsd: held.costUsd * (1 - fill.shares / held.amount) });
     store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "polymarket", symbol: held.symbol, action: "sell", size: fill.shares, price: fill.avgPrice, usd: fill.usd, spendUsd: 0, mode: "paper" });
-    return { text: `📝 Paper: Sold ${fmtShares(fill.shares)} "${out.label}" shares in "${m.question}" for ${fmtUsd(fill.usd)} at ${cents(fill.avgPrice)} each` };
+    return { text: `📝 Practice: Sold ${fmtShares(fill.shares)} "${out.label}" shares in "${m.question}" for ${fmtUsd(fill.usd)} at ${cents(fill.avgPrice)} each` };
   }
 
   /** Resolved paper bets pay $1 a winning share. Returns one line per settled bet. */
@@ -236,8 +236,8 @@ export class PolymarketVenue implements VenueAdapter {
       this.o.store.insertFill({ planId: null, idx: null, venue: "polymarket", symbol: h.symbol, action: "settle", size: h.amount, price: out.price, usd: payout, spendUsd: 0, mode: "paper" });
       lines.push(
         out.price > 0
-          ? `🏁 Paper: "${m.question}" resolved "${out.label}". Your ${fmtShares(h.amount)} shares paid ${fmtUsd(payout)} (cost ${fmtUsd(h.costUsd)}).`
-          : `🏁 Paper: "${m.question}" resolved against "${out.label}". Lost ${fmtUsd(h.costUsd)}.`,
+          ? `🏁 Practice: "${m.question}" resolved "${out.label}". Your ${fmtShares(h.amount)} shares paid ${fmtUsd(payout)} (cost ${fmtUsd(h.costUsd)}).`
+          : `🏁 Practice: "${m.question}" resolved against "${out.label}". Lost ${fmtUsd(h.costUsd)}.`,
       );
     }
     return lines;
