@@ -122,6 +122,33 @@ describe("live USDC yield", () => {
     expect(await t.fren.yieldRates()).toMatch(/Kamino \(Solana\): 4\.68% · you have \$300 here/);
   });
 
+  // Live run 22.11: 0.0244 SOL on the wallet, the bot asked for /ok, and the
+  // first Kamino deposit (~0.033 SOL of rent for new accounts) couldn't land.
+  it("says before /ok that a first Kamino deposit needs SOL for rent, in the owner's language", async () => {
+    const { signer } = chainSigner({});
+    const t = buildTestFren({ signer, live: true });
+    t.fake.solanaUsdc = 12;
+    t.fake.solanaLamports = 24_439_310;
+    const res = await t.fren.submit(earn("deposit", { type: "usd", usd: 2 }, "kamino"));
+    expect(res.text).toMatch(/needs about 0\.035 SOL for rent and fees; your Solana wallet has 0\.0244 SOL\. Nothing was moved\. Add about 0\.0106 SOL, or lend on Jupiter Lend instead\./);
+    expect(codeFrom(t.notifier.sent)).toBe("");
+    expect(t.fake.lendCalls).toHaveLength(0);
+    t.fren.setOwnerLang("ru");
+    const ru = await t.fren.submit(earn("deposit", { type: "usd", usd: 2 }, "kamino"));
+    expect(ru.text).toMatch(/Первый вклад в Kamino открывает счёт, на ренту и комиссии нужно около 0\.035 SOL, а на кошельке Solana 0\.0244 SOL\. Ничего не переведено\./);
+  });
+
+  it("doesn't ask for rent SOL once the Kamino account is open", async () => {
+    const { signer } = chainSigner({});
+    const t = buildTestFren({ signer, live: true });
+    t.fake.solanaUsdc = 12;
+    t.fake.kaminoLent = 1;
+    t.fake.solanaLamports = 5_000_000;
+    const res = await t.fren.submit(earn("deposit", { type: "usd", usd: 2 }, "kamino"));
+    expect(res.text).not.toMatch(/rent/);
+    expect(res.text + (t.notifier.sent.at(-1) ?? "")).toMatch(/Kamino/);
+  });
+
   it("picks Aave when the USDC is on Arbitrum, approving the exact amount and supplying for the wallet itself", async () => {
     const balances: Record<string, bigint> = { [key("arbitrum", ARB.usdc)]: 500_000_000n };
     const { signer, sent } = chainSigner(balances);

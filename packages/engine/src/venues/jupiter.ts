@@ -429,6 +429,10 @@ export class JupiterVenue implements SpotVenueAdapter {
     return (await this.owner()).toBase58();
   }
 
+  async solLamports(): Promise<number> {
+    return this.connection.getBalance(await this.owner());
+  }
+
   /**
    * Sign (the signer checks the programs and simulates SOL loss), send and
    * confirm a transaction an API built for this wallet. Returns the signature.

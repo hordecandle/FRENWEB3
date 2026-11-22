@@ -52,6 +52,10 @@ const rules: Rule[] = [
   { re: /^✅ Limits updated\.$/, ru: () => "✅ Лимиты обновлены.", uk: () => "✅ Ліміти оновлено." },
   { re: /^✅ Fren is back on\. The watcher is running again\.$/, ru: () => "✅ Fren снова включён. Наблюдение работает.", uk: () => "✅ Fren знову ввімкнено. Спостереження працює." },
   { re: /^📝 Paper mode$/, ru: () => "📝 Тестовый режим (paper)", uk: () => "📝 Тестовий режим (paper)" },
+  // Kamino: first deposit without SOL for rent (22.11)
+  { re: /^((?:Step \d+: )?)Kamino's first deposit opens an account that needs about ([\d.]+) SOL for rent and fees; your Solana wallet has ([\d.]+) SOL\. Nothing was moved\. Add about ([\d.]+) SOL, or lend on Jupiter Lend instead\.$/,
+    ru: (p, need, have, add) => `${stepRu(p)}Первый вклад в Kamino открывает счёт, на ренту и комиссии нужно около ${need} SOL, а на кошельке Solana ${have} SOL. Ничего не переведено. Докинь около ${add} SOL или положи в Jupiter Lend.`,
+    uk: (p, need, have, add) => `${stepUk(p)}Перший внесок у Kamino відкриває рахунок, на ренту й комісії потрібно близько ${need} SOL, а на гаманці Solana ${have} SOL. Нічого не переказано. Докинь близько ${add} SOL або поклади в Jupiter Lend.` },
   // Hyperliquid: minimum order, money already there, withdrawals (22.11)
   { re: /^((?:Step \d+: )?)Hyperliquid's minimum order is (\$[\d.,]+)(?:, and this one comes to about (\$[\d.,]+))?( \(its stop counts too\))?\. Nothing was moved or opened\.(?: It goes through if you (?:put in (\$[\d.,]+) at (\d+)x)?(?:, or )?(?:keep (\$[\d.,]+) and use (\d+)x)?\.)?$/,
     ru: (p, min, now, st, m, ml, k, kl) => `${stepRu(p)}Минимальный заказ на Hyperliquid ${min}${now ? `, а этот выходит примерно на ${now}` : ""}${st ? " (стоп тоже считается)" : ""}. Ничего не переведено и не открыто.${m || k ? ` Пройдёт, если ${[m ? `вложить ${m} с плечом ${ml}x` : "", k ? `оставить ${k} и взять плечо ${kl}x` : ""].filter(Boolean).join(" или ")}.` : ""}`,

@@ -196,6 +196,8 @@ export class FakeVenues {
   solanaUsdc = 0;
   jupLent = 0;
   kaminoLent = 0;
+  /** The wallet's SOL, for Kamino's first-deposit rent check. */
+  solanaLamports = 1_000_000_000;
   /** Every lending API call that built a transaction. */
   lendCalls: { path: string; body: Record<string, unknown> }[] = [];
 
@@ -603,6 +605,7 @@ export function buildTestFren(opts: TestFrenOptions = {}) {
       return `sig${solanaSent.length}`;
     },
     ensureTokenAccount: async (mint) => void ensuredAccounts.push(mint),
+    solLamports: async () => fake.solanaLamports,
   };
   const yieldVenue = new YieldVenue({
     store,

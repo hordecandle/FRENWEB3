@@ -16,7 +16,15 @@ export interface SolanaAccess {
   sendApiTransaction(txBase64: string, maxSolSpendLamports: number): Promise<string>;
   /** Create the wallet's token account for a mint if it has none (see JupiterVenue). */
   ensureTokenAccount?(mint: string): Promise<void>;
+  /** The wallet's SOL, in lamports. */
+  solLamports?(): Promise<number>;
 }
+
+/**
+ * SOL a first Kamino deposit needs: it opens the owner's obligation, user
+ * metadata and lookup table (~0.033 SOL of rent, kept by those accounts), plus fees.
+ */
+export const KAMINO_FIRST_DEPOSIT_LAMPORTS = 35_000_000;
 
 /** Jupiter Lend's receipt token for USDC (jlUSDC). Its first deposit needs this account to exist. */
 export const JLUSDC_MINT = "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D";
@@ -175,6 +183,27 @@ export class KaminoUsdc implements YieldProtocolAdapter {
     });
     // A first deposit opens the account (obligation and lookup table): about 0.03 SOL of rent.
     return solscan(await this.o.solana.sendApiTransaction(transaction, 50_000_000));
+  }
+
+  /**
+   * Before /ok: a first deposit fails on-chain without enough SOL for the new
+   * accounts' rent (22.11 live run: 0.0244 SOL, the bot asked for /ok anyway).
+   */
+  async checkDeposit(): Promise<void> {
+    if (!this.o.solana.solLamports) return;
+    const owner = await this.o.solana.ownerAddress();
+    const obligations = await getJson<KaminoObligation[]>(
+      this.o.fetchFn,
+      `${this.o.apiUrl}/kamino-market/${KAMINO_MAIN_MARKET}/users/${owner}/obligations`,
+    ).catch(() => null);
+    // Unknown (API down) or an account already open: nothing to warn about here.
+    if (obligations === null || obligations.length > 0) return;
+    const have = await this.o.solana.solLamports().catch(() => null);
+    if (have === null || have >= KAMINO_FIRST_DEPOSIT_LAMPORTS) return;
+    const sol = (l: number) => (l / 1e9).toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+    throw new VenueError(
+      `Kamino's first deposit opens an account that needs about ${sol(KAMINO_FIRST_DEPOSIT_LAMPORTS)} SOL for rent and fees; your Solana wallet has ${sol(have)} SOL. Nothing was moved. Add about ${sol(KAMINO_FIRST_DEPOSIT_LAMPORTS - have)} SOL, or lend on Jupiter Lend instead.`,
+    );
   }
 
   async deposit(usd: number): Promise<string> {

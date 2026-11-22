@@ -20,6 +20,8 @@ export interface YieldProtocolAdapter {
   deposited(): Promise<number>;
   /** Live: lend this much USDC from the wallet. Returns a link to the transaction. */
   deposit(usd: number): Promise<string>;
+  /** Live, before /ok: throw a VenueError when this deposit can't go through (e.g. no SOL for rent). */
+  checkDeposit?(usd: number): Promise<void>;
   /** Live: take back this much USDC (or everything) to the wallet. Returns what came back and a link. */
   withdraw(usd: number | "all"): Promise<{ usd: number; link: string }>;
 }
@@ -118,6 +120,7 @@ export class YieldVenue implements VenueAdapter {
     if (leg.action === "deposit") {
       const { p, apy, usd } = await this.pick(leg, mode);
       if (!(usd > 0)) throw new VenueError("There's no USDC to lend.");
+      if (mode !== "paper" && p.checkDeposit) await p.checkDeposit(usd);
       const notes = [
         `Earns about ${apy === null ? "an unknown rate" : pct(apy)} a year on ${fmtUsd(usd)}, variable. You can take it back any time; Fren also takes it back on its own when a trade needs the cash.`,
       ];
