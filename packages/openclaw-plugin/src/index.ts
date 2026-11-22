@@ -1,6 +1,6 @@
 import { Type, type TSchema } from "typebox";
 import { definePluginEntry, type OpenClawPluginApi, type OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
-import { EngineClient, type OwnerResult } from "./client.js";
+import { EngineClient, setClientLang, type OwnerResult } from "./client.js";
 import { LoopGuard, type ToolContext, type TurnContext } from "./guard.js";
 import planSchema from "./plan-schema.json" with { type: "json" };
 import {
@@ -60,7 +60,12 @@ const text = (t: string) => ({ content: [{ type: "text" as const, text: t }], de
 export const RECEIPT_NOTE =
   "(Fren already sent the owner this result as a receipt in the chat, with the numbers, proof links and a chart when images are on. Don't repeat it or paste any links: reply in one short line, or answer only what they asked.)";
 
-export function withReceiptNote(res: { text: string; receiptSent?: boolean }): string {
+/** The plan and its code are already in the chat as Fren's own message; the model must not retell them. */
+export const CODE_NOTE =
+  "(The confirmation message, with the plan and the code, is already in the owner's chat. Don't repeat the plan or the code: add at most one short line, entirely in the language the owner writes in.)";
+
+export function withReceiptNote(res: { text: string; receiptSent?: boolean; codeSentPrivately?: boolean }): string {
+  if (res.codeSentPrivately) return `${res.text}\n\n${CODE_NOTE}`;
   return res.receiptSent ? `${res.text}\n\n${RECEIPT_NOTE}` : res.text;
 }
 
@@ -115,7 +120,10 @@ export function noteLang(body: unknown) {
   if (letters.length < 3) return;
   const cyr = letters.filter((c) => /[\u0400-\u04FF]/.test(c)).length;
   lastLang = cyr / letters.length < 0.5 ? "en" : /[іїєґІЇЄҐ]/.test(text) ? "uk" : "ru";
+  setClientLang(lastLang);
 }
+/** The short line after /ok when the receipt is already in the chat. */
+const APPROVED = { en: "✅ Approved. Your receipt is just above.", ru: "✅ Подтверждено. Чек выше.", uk: "✅ Підтверджено. Чек вище." };
 const langBody = () => (lastLang ? { lang: lastLang } : {});
 
 export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; screenshotHelper?: string } = {}): ToolSpec[] {
@@ -452,7 +460,7 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
         const code = (ctx.args ?? "").trim();
         const res = await client.call<OwnerResult>("POST", "/approve", { code });
         // The receipt with the numbers and links is already in the chat, just above this reply.
-        return res.receiptSent ? "✅ Approved. Your receipt is just above." : res.text;
+        return res.receiptSent ? APPROVED[lastLang ?? "en"] : res.text;
       }),
   });
 

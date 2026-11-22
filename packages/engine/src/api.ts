@@ -92,6 +92,8 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     };
     if (!authed(req)) return send(401, { error: "unauthorized" });
     const url = new URL(req.url ?? "/", "http://localhost");
+    // The plugin says which language the owner writes in, so what Fren sends itself matches it.
+    fren.setOwnerLang(req.headers["x-fren-lang"]);
     const handler = routes[`${req.method} ${url.pathname}`];
     if (!handler) return send(404, { error: "not found" });
     try {

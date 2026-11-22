@@ -8,6 +8,12 @@ export interface EngineClientOptions {
   fetchFn?: typeof fetch;
 }
 
+/** The owner's language (set by the plugin from their chat), sent with every request. */
+let ownerLang: string | null = null;
+export function setClientLang(l: string | null) {
+  ownerLang = l;
+}
+
 /** Thin HTTP client for the local Fren engine. Holds a token, never a key. */
 export class EngineClient {
   readonly apiUrl: string;
@@ -33,7 +39,7 @@ export class EngineClient {
     try {
       res = await this.fetchFn(`${this.apiUrl}${path}`, {
         method,
-        headers: { authorization: `Bearer ${this.token()}`, "content-type": "application/json" },
+        headers: { authorization: `Bearer ${this.token()}`, "content-type": "application/json", ...(ownerLang ? { "x-fren-lang": ownerLang } : {}) },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
     } catch {
