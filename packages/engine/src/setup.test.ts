@@ -265,6 +265,10 @@ describe("fren guard", () => {
     expect(runs).toContain(`openclaw config set agents.defaults.heartbeat.every "0m"`);
     expect(runs).toContain("openclaw config set agents.defaults.timeoutSeconds 600");
     expect(runs).toContain(`openclaw config set channels.telegram.groupPolicy "disabled"`);
+    // The Telegram menu: only Fren's commands, OpenClaw's 81 built-ins and skills out of it.
+    expect(runs).toContain("openclaw config set channels.telegram.commands.native false");
+    const menu = runs.find((r) => r.startsWith("openclaw config set channels.telegram.customCommands "))!;
+    expect(JSON.parse(menu.replace("openclaw config set channels.telegram.customCommands ", "")).map((c: { command: string }) => c.command)).toEqual(["ok", "positions", "wallet", "fren_dashboard", "limits", "fren_stop", "resume", "close_all", "fren_images", "fren_update"]);
     expect(runs.some((r) => r.startsWith("openclaw config set channels.whatsapp"))).toBe(false);
     expect(runs.at(-1)).toBe("openclaw daemon restart");
     expect(said.join("\n")).toMatch(/Loop guard on \(telegram\)/);

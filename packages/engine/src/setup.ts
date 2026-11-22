@@ -296,8 +296,30 @@ export const LOOP_GUARD: [string, string][] = [
   ["tools.exec.notifyOnExit", "false"],
   ["plugins.entries.fren.hooks.allowConversationAccess", "true"],
 ];
+/**
+ * The Telegram menu shows only Fren's commands. OpenClaw's own built-ins and skills (81 entries on
+ * 2026.11.4) crowd it out; with native menu entries off they still work when typed (commands.text),
+ * and Fren's plugin commands keep their handlers. Undo: `openclaw config unset
+ * channels.telegram.commands.native` and `... unset channels.telegram.customCommands`.
+ */
+export const TELEGRAM_MENU = [
+  { command: "ok", description: "Approve what Fren asked about" },
+  { command: "positions", description: "Positions and watched conditions" },
+  { command: "wallet", description: "Wallet addresses and how to top up" },
+  { command: "fren_dashboard", description: "Login link to your dashboard" },
+  { command: "limits", description: "Show or change limits" },
+  { command: "fren_stop", description: "Pause Fren, cancel what waits" },
+  { command: "resume", description: "Turn Fren back on" },
+  { command: "close_all", description: "Close every leveraged position" },
+  { command: "fren_images", description: "Charts on receipts on or off" },
+  { command: "fren_update", description: "Update Fren" },
+];
 export const LOOP_GUARD_CHANNEL: Record<"telegram" | "whatsapp", [string, string][]> = {
-  telegram: [["channels.telegram.groupPolicy", JSON.stringify("disabled")]],
+  telegram: [
+    ["channels.telegram.groupPolicy", JSON.stringify("disabled")],
+    ["channels.telegram.commands.native", "false"],
+    ["channels.telegram.customCommands", JSON.stringify(TELEGRAM_MENU)],
+  ],
   whatsapp: [
     ["channels.whatsapp.groupPolicy", JSON.stringify("disabled")],
     // Fren's own number writing to itself is never a message from the owner.
@@ -309,7 +331,7 @@ export async function applyLoopGuard(deps: Pick<SetupDeps, "run" | "openclawBin"
   for (const [path, value] of LOOP_GUARD) {
     await (LOOP_GUARD_IF_SUPPORTED.has(path) ? setConfigIfSupported : setConfig)(deps, path, value);
   }
-  for (const ch of channels) for (const [path, value] of LOOP_GUARD_CHANNEL[ch]) await setConfig(deps, path, value);
+  for (const ch of channels) for (const [path, value] of LOOP_GUARD_CHANNEL[ch]) await (LOOP_GUARD_IF_SUPPORTED.has(path) ? setConfigIfSupported : setConfig)(deps, path, value);
 }
 
 /**
@@ -645,7 +667,7 @@ async function setConfig(deps: Pick<SetupDeps, "run" | "openclawBin">, path: str
  * already where we want it. OpenClaw 2026.11.5 dropped agents.defaults.heartbeat
  * (and refuses the key), so on it there is no heartbeat to turn off.
  */
-export const LOOP_GUARD_IF_SUPPORTED = new Set(["agents.defaults.heartbeat.every"]);
+export const LOOP_GUARD_IF_SUPPORTED = new Set(["agents.defaults.heartbeat.every", "channels.telegram.commands.native", "channels.telegram.customCommands"]);
 
 async function setConfigIfSupported(deps: Pick<SetupDeps, "run" | "openclawBin">, path: string, value: string): Promise<void> {
   const r = await deps.run(deps.openclawBin, ["config", "set", path, value], {});
