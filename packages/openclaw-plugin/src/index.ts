@@ -110,7 +110,13 @@ async function deliverOwnerCode(res: OwnerResult, ctx: OpenClawPluginToolContext
   if (!res.ownerCode) return withReceiptNote(res);
   const send = ctx.delivery?.send;
   if (send) {
-    await send({ text: `🔐 Fren is waiting for your OK. Reply /ok to approve (code ${res.ownerCode}, never share it).` });
+    await send({
+      text: say3(
+        `🔐 Fren is waiting for your OK. Reply /ok to approve (code ${res.ownerCode}, never share it).`,
+        `🔐 Fren ждёт твоего «ок». Ответь /ok, чтобы одобрить (код ${res.ownerCode}, никому его не показывай).`,
+        `🔐 Fren чекає на твоє «ок». Відповідай /ok, щоб схвалити (код ${res.ownerCode}, нікому його не показуй).`,
+      ),
+    });
     return `${res.text}\n(The code was sent to the user directly; you do not have it and cannot approve on their behalf.)`;
   }
   return `${res.text}\nNo private channel is set up, so ask the user to run /fren_code to see the code.`;
@@ -169,6 +175,9 @@ export function approvedReply(text: string, lang: Lang | null): string {
     .map((l) => l.trim());
   return `${done.length ? done.join("\n") : APPROVED[lang ?? "en"]}\n${OK_NOTE[lang ?? "en"]}`;
 }
+/** One owner-facing line in the language Fren talks to the owner in. */
+const say3 = (en: string, ru: string, uk: string) => (lastLang === "ru" ? ru : lastLang === "uk" ? uk : en);
+const frenError = (err: unknown) => `${say3("Fren error", "Ошибка Fren", "Помилка Fren")}: ${(err as Error).message}`;
 const langBody = () => (lastLang ? { lang: lastLang } : {});
 const localizeDashboardHint = () =>
   lastLang === "ru" ? "Отправь /fren_dashboard, пришлю ссылку на дашборд." : lastLang === "uk" ? "Надішли /fren_dashboard, надішлю посилання на дашборд." : "Send /fren_dashboard and I'll send you the dashboard link.";
@@ -457,7 +466,7 @@ function registerTools(api: OpenClawPluginApi, client: EngineClient, opts: { san
             try {
               return text(await spec.run(params ?? {}, ctx));
             } catch (err) {
-              return text(`Fren error: ${(err as Error).message}`);
+              return text(frenError(err));
             }
           },
         };
@@ -501,13 +510,12 @@ export function isOwner(ctx: { senderIsOwner?: boolean; isAuthorizedSender?: boo
 }
 
 function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
-  const ownerOnly = "Only the owner of this Fren can do that.";
   const guard = async (isOwner: boolean | undefined, run: () => Promise<string>) => {
-    if (isOwner !== true) return { text: ownerOnly };
+    if (isOwner !== true) return { text: say3("Only the owner of this Fren can do that.", "Это может только владелец этого Fren.", "Це може лише власник цього Fren.") };
     try {
       return { text: await run() };
     } catch (err) {
-      return { text: `Fren error: ${(err as Error).message}` };
+      return { text: frenError(err) };
     }
   };
 
@@ -661,7 +669,7 @@ export function registerLoopGuard(api: Pick<OpenClawPluginApi, "on">, guard: Loo
         const r = await client.call<{ text: string; link?: string }>("POST", "/dashboard/link", langBody());
         return { handled: true as const, reply: { text: r.link ? localizeDashboardHint() : r.text }, reason: "fren: /dashboard is the Fren dashboard" };
       } catch (err) {
-        return { handled: true as const, reply: { text: `Fren error: ${(err as Error).message}` }, reason: "fren: /dashboard failed" };
+        return { handled: true as const, reply: { text: frenError(err) }, reason: "fren: /dashboard failed" };
       }
     }
     noteLang(body);

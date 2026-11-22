@@ -1,4 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { frenHome } from "./config.js";
 import {
   applyLimitArgs,
   describeConditionStatus,
@@ -38,7 +41,7 @@ import type { JupiterVenue } from "./venues/jupiter.js";
 import type { RelayVenue } from "./venues/relay.js";
 import type { DeriveVenue } from "./venues/derive.js";
 import { asLang, pauseMessage, type Lang } from "./pause-text.js";
-import { humanError, localize, localizeReceipt } from "./i18n.js";
+import { humanError, localize, localizeChart, localizeReceipt } from "./i18n.js";
 import type { PolymarketVenue } from "./venues/polymarket.js";
 import type { CashChain, YieldVenue } from "./venues/yield.js";
 import { NotTradableYet, VenueError, type PositionView, type SpotVenueAdapter, type VenueAdapter } from "./venues/types.js";
@@ -387,6 +390,7 @@ export class Fren {
     } else {
       return { sent: false, text: "Name a Hyperliquid market (market), or a token's address and its chain (solana, base or arbitrum)." };
     }
+    chart = localizeChart(chart, this.ownerLang);
     const photo = await Promise.race([
       this.d.snapshots.chart(chart).catch(() => null),
       new Promise<null>((r) => setTimeout(() => r(null), 15_000).unref?.()),
@@ -565,7 +569,8 @@ export class Fren {
    */
   private get ownerLang(): Lang {
     const l = this.d.store.getKv("owner_lang");
-    return l === "ru" || l === "uk" ? l : "en";
+    if (l === "en" || l === "ru" || l === "uk") return l;
+    return firstLang();
   }
   private set ownerLang(l: Lang) {
     if (this.d.store.getKv("owner_lang") !== l) this.d.store.setKv("owner_lang", l);
@@ -1543,6 +1548,23 @@ It shows up as pUSD in your Polymarket wallet ${to}.`;
   recentEvents(since: number) {
     return this.d.store.eventsSince(since);
   }
+}
+
+/**
+ * Before the owner has written a word: the language of their Telegram app, saved at setup
+ * (owner-lang, the plugin keeps the same file), else this computer's language. Never plain
+ * English for a Russian owner just because nobody has talked yet.
+ */
+function firstLang(): Lang {
+  if (process.env.VITEST) return "en";
+  try {
+    const l = readFileSync(join(frenHome(), "owner-lang"), "utf8").trim();
+    if (l === "en" || l === "ru" || l === "uk") return l;
+  } catch {
+    /* no setup file */
+  }
+  const loc = (process.env.LC_ALL || process.env.LANG || Intl.DateTimeFormat().resolvedOptions().locale || "").toLowerCase();
+  return loc.startsWith("uk") ? "uk" : loc.startsWith("ru") || loc.startsWith("be") ? "ru" : "en";
 }
 
 export type FundVenue = "derive" | "polymarket";

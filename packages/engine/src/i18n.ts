@@ -1,4 +1,4 @@
-import type { Receipt, StepReceipt } from "./receipt.js";
+import type { ChartRequest, Receipt, StepReceipt } from "./receipt.js";
 import { asLang, type Lang } from "./pause-text.js";
 
 /**
@@ -76,6 +76,8 @@ const rules: Rule[] = [
   { re: /^🖥 You, from the dashboard:$/, ru: () => "🖥 Ты, из дашборда:", uk: () => "🖥 Ти, з дашборда:" },
   { re: /^🖥 You approved it from the dashboard: (.+)$/, ru: (x) => `🖥 Ты одобрил из дашборда: ${x}`, uk: (x) => `🖥 Ти схвалив з дашборда: ${x}` },
   { re: /^🖥 You cancelled it from the dashboard: (.+)$/, ru: (x) => `🖥 Ты отменил из дашборда: ${x}`, uk: (x) => `🖥 Ти скасував з дашборда: ${x}` },
+  { re: /^Opened your dashboard in the browser on this computer\.$/, ru: () => "Открыл дашборд в браузере на этом компьютере.", uk: () => "Відкрив дашборд у браузері на цьому комп'ютері." },
+  { re: /^No browser here and no private chat line, so there's no safe place to show the link\. Send \/fren_dashboard to your bot\.$/, ru: () => "Здесь нет браузера и личного чата, поэтому ссылку негде безопасно показать. Отправь своему боту /fren_dashboard.", uk: () => "Тут немає браузера й особистого чату, тож посилання ніде безпечно показати. Надішли своєму боту /fren_dashboard." },
   { re: /^The dashboard isn't running on this machine\. Restart Fren, or set FREN_DASHBOARD=on\.$/, ru: () => "Дашборд на этом компьютере не запущен. Перезапусти Fren или включи его настройкой FREN_DASHBOARD=on.", uk: () => "Дашборд на цьому комп'ютері не запущено. Перезапусти Fren або ввімкни його налаштуванням FREN_DASHBOARD=on." },
   { re: /^That plan is no longer waiting for approval\.$/, ru: () => "Этот план больше не ждёт подтверждения.", uk: () => "Цей план більше не чекає підтвердження." },
   { re: /^Not doing this:$/, ru: () => "Не буду это делать:", uk: () => "Не робитиму цього:" },
@@ -112,14 +114,71 @@ const rules: Rule[] = [
   { re: /^(\s*)(🟡|🟢|❌) Bet (\$[\d.,]+) that (\S+) goes (up|down), (\d+)× boost on (.+?)(\. .*)?$/,
     ru: (s, i, a, m, d, lev, w, tail) => `${s}${i} Ставка ${a}, что ${m} ${d === "up" ? "вырастет" : "упадёт"}, усиление ×${lev} на ${w}${betExits(tail ?? "", "ru")}`,
     uk: (s, i, a, m, d, lev, w, tail) => `${s}${i} Ставка ${a}, що ${m} ${d === "up" ? "зросте" : "впаде"}, підсилення ×${lev} на ${w}${betExits(tail ?? "", "uk")}` },
-  { re: /^(\s*)(🟡|🟢|❌) Lend (.+) of USDC on (.+)$/, ru: (s, i, a, w) => `${s}${i} Положить ${a} USDC в ${w}`, uk: (s, i, a, w) => `${s}${i} Покласти ${a} USDC у ${w}` },
-  { re: /^(\s*)(🟡|🟢|❌) Withdraw (.+) from (.+)$/, ru: (s, i, a, w) => `${s}${i} Вывести ${a} из ${w}`, uk: (s, i, a, w) => `${s}${i} Вивести ${a} з ${w}` },
-  { re: /^(\s*)(🟡|🟢|❌) Buy (\$[\d.,]+|\d+% of your USDC) of (.+) on (.+)$/, ru: (s, i, a, t, w) => `${s}${i} Купить ${t} на ${a.replace("% of your USDC", "% твоего USDC")} (${w})`, uk: (s, i, a, t, w) => `${s}${i} Купити ${t} на ${a.replace("% of your USDC", "% твого USDC")} (${w})` },
+  { re: /^(\s*)(🟡|🟢|❌) Lend (.+?) on (.+)$/, ru: (s, i, a, w) => `${s}${i} Положить ${amtT(a, "ru")} ${whereT(w, "ru", "in")}`, uk: (s, i, a, w) => `${s}${i} Покласти ${amtT(a, "uk")} ${whereT(w, "uk", "in")}` },
+  { re: /^(\s*)(🟡|🟢|❌) Withdraw (.+?) from (.+)$/, ru: (s, i, a, w) => `${s}${i} Вывести ${amtT(a, "ru")} ${whereT(w, "ru", "from")}`, uk: (s, i, a, w) => `${s}${i} Вивести ${amtT(a, "uk")} ${whereT(w, "uk", "from")}` },
+  // options (Derive) and Polymarket, before the plain Buy and Sell
+  { re: /^(\s*)(🟡|🟢|❌) Buy (.+?) of the (.+) on Derive$/, ru: (s, i, a, o) => `${s}${i} Купить опцион ${optT(o, "ru")} на ${amtT(a, "ru")} (Derive)`, uk: (s, i, a, o) => `${s}${i} Купити опціон ${optT(o, "uk")} на ${amtT(a, "uk")} (Derive)` },
+  { re: /^(\s*)(🟡|🟢|❌) Sell (?:(\d+)% of your|(\$[\d.,]+) of your) (.+) on Derive$/, ru: (s, i, p, a, o) => `${s}${i} Продать ${p ? `${p}% ` : `на ${a} `}опциона ${optT(o, "ru")} (Derive)`, uk: (s, i, p, a, o) => `${s}${i} Продати ${p ? `${p}% ` : `на ${a} `}опціону ${optT(o, "uk")} (Derive)` },
+  { re: /^(\s*)(🟡|🟢|❌) Bet (.+?) on "(.+)" for "(.+)" on Polymarket(?: at up to (\d+)¢ a share)?$/,
+    ru: (s, i, a, o, m, c) => `${s}${i} Ставка ${amtT(a, "ru")} на «${o}» в «${m}» (Polymarket)${c ? `, не дороже ${c}¢ за долю` : ""}`,
+    uk: (s, i, a, o, m, c) => `${s}${i} Ставка ${amtT(a, "uk")} на «${o}» у «${m}» (Polymarket)${c ? `, не дорожче ${c}¢ за частку` : ""}` },
+  { re: /^(\s*)(🟡|🟢|❌) Sell (?:(\d+)% of your|(\$[\d.,]+) of your) "(.+)" shares in "(.+)" on Polymarket$/,
+    ru: (s, i, p, a, o, m) => `${s}${i} Продать ${p ? `${p}% долей` : `доли на ${a}`} «${o}» в «${m}» (Polymarket)`,
+    uk: (s, i, p, a, o, m) => `${s}${i} Продати ${p ? `${p}% часток` : `частки на ${a}`} «${o}» у «${m}» (Polymarket)` },
+  { re: /^(\s*)(🟡|🟢|❌) Buy (\$[\d.,]+|\d+% of your USDC) of (.+) on (.+)$/, ru: (s, i, a, t, w) => `${s}${i} Купить ${t} на ${amtT(a, "ru")} (${w})`, uk: (s, i, a, t, w) => `${s}${i} Купити ${t} на ${amtT(a, "uk")} (${w})` },
+  { re: /^(\s*)(🟡|🟢|❌) Buy ([\d.,]+) of (.+) on (.+)$/, ru: (s, i, n, t, w) => `${s}${i} Купить ${n} ${t} (${w})`, uk: (s, i, n, t, w) => `${s}${i} Купити ${n} ${t} (${w})` },
   { re: /^(\s*)(🟡|🟢|❌) Sell (\d+)% of your (.+) on (.+)$/, ru: (s, i, p, t, w) => `${s}${i} Продать ${p}% твоих ${t} (${w})`, uk: (s, i, p, t, w) => `${s}${i} Продати ${p}% твоїх ${t} (${w})` },
   { re: /^(\s*)(🟡|🟢|❌) Sell (\$[\d.,]+) of (.+) on (.+)$/, ru: (s, i, a, t, w) => `${s}${i} Продать ${t} на ${a} (${w})`, uk: (s, i, a, t, w) => `${s}${i} Продати ${t} на ${a} (${w})` },
   { re: /^(\s*)(🟡|🟢|❌) Sell ([\d.,]+) (\S+) on (.+)$/, ru: (s, i, n, t, w) => `${s}${i} Продать ${n} ${t} (${w})`, uk: (s, i, n, t, w) => `${s}${i} Продати ${n} ${t} (${w})` },
   { re: /^(\s*)(🟡|🟢|❌) (Long|Short) (\S+) on (\S+): (.+) margin at (\d+x) \((.+) position\)(.*)$/, ru: (s, i, side, m, w, mg, lev, pos, tail) => `${s}${i} ${side === "Long" ? "Лонг" : "Шорт"} ${m} на ${w}: маржа ${mg}, плечо ${lev} (позиция ${pos})${exits(tail, "ru")}`, uk: (s, i, side, m, w, mg, lev, pos, tail) => `${s}${i} ${side === "Long" ? "Лонг" : "Шорт"} ${m} на ${w}: маржа ${mg}, плече ${lev} (позиція ${pos})${exits(tail, "uk")}` },
-  { re: /^(\s*)(🟡|🟢|❌) Close (?:(\d+)% of )?your (\S+) position on (.+)$/, ru: (s, i, p, m, w) => `${s}${i} Закрыть ${p ? `${p}% ` : ""}позиции ${m} на ${w}`, uk: (s, i, p, m, w) => `${s}${i} Закрити ${p ? `${p}% ` : ""}позиції ${m} на ${w}` },
+  { re: /^(\s*)(🟡|🟢|❌) Close (?:(\d+)% of )?your (\S+) (?:position|bet) on (.+)$/, ru: (s, i, p, m, w) => `${s}${i} Закрыть ${p ? `${p}% ставки` : "ставку"} на ${m} (${w})`, uk: (s, i, p, m, w) => `${s}${i} Закрити ${p ? `${p}% ставки` : "ставку"} на ${m} (${w})` },
+  // waiting conditions (/status): "✅ BTC price < $90,000 (now $91,000)"
+  { re: /^(\s*)(✅|⏳) ((?:\S+ price [<>=]|\S+ funding [<>=]|\S+ starts trading|after \w{3}, ).*?)(?: \((no data yet|now .+|[^()]+)\))?$/, ru: (sp, i, c, n) => `${sp}${i} ${condsT(c, "ru")}${n ? ` (${nowT(n, "ru")})` : ""}`, uk: (sp, i, c, n) => `${sp}${i} ${condsT(c, "uk")}${n ? ` (${nowT(n, "uk")})` : ""}` },
+  // /status
+  { re: /^🛑 Stopped \(send \/resume to turn back on\)$/, ru: () => "🛑 Остановлен (отправь /resume, чтобы включить)", uk: () => "🛑 Зупинено (надішли /resume, щоб увімкнути)" },
+  { re: /^🟢 Live$/, ru: () => "🟢 Работает с настоящими деньгами", uk: () => "🟢 Працює зі справжніми грошима" },
+  { re: /^Couldn't load positions: (.+)$/, ru: (e) => `Не получилось загрузить позиции: ${e}`, uk: (e) => `Не вдалося завантажити позиції: ${e}` },
+  { re: /^Practice USDC: (\$[\d.,]+)$/, ru: (a) => `Тренировочные USDC: ${a}`, uk: (a) => `Тренувальні USDC: ${a}` },
+  { re: /^Positions:$/, ru: () => "Позиции:", uk: () => "Позиції:" },
+  { re: /^No open positions\.$/, ru: () => "Открытых позиций нет.", uk: () => "Відкритих позицій немає." },
+  { re: /^Watching:$/, ru: () => "Слежу:", uk: () => "Стежу:" },
+  { re: /^Spent today: (\$[\d.,]+) of (\$[\d.,]+)$/, ru: (a, b) => `Потрачено сегодня: ${a} из ${b}`, uk: (a, b) => `Витрачено сьогодні: ${a} з ${b}` },
+  { re: /^(long|short) ([\d.]+) (\S+) @ (\S+)(?: \(now (\S+)\))?(?:, PnL (\S+))?(?:, liq (\S+))?$/,
+    ru: (sd, n, m, e, now, pnl, liq) => `${sd === "long" ? "Лонг" : "Шорт"} ${n} ${m} по ${e}${now ? ` (сейчас ${now})` : ""}${pnl ? `, прибыль ${pnl}` : ""}${liq ? `, ликвидация ${liq}` : ""}`,
+    uk: (sd, n, m, e, now, pnl, liq) => `${sd === "long" ? "Лонг" : "Шорт"} ${n} ${m} за ${e}${now ? ` (зараз ${now})` : ""}${pnl ? `, прибуток ${pnl}` : ""}${liq ? `, ліквідація ${liq}` : ""}` },
+  { re: /^([\d.]+) contracts of the (\S+) worth (\$[\d.,]+)(?:, PnL (\S+))?$/, ru: (n, o, v, p) => `${n} контрактов ${o} на ${v}${p ? `, прибыль ${p}` : ""}`, uk: (n, o, v, p) => `${n} контрактів ${o} на ${v}${p ? `, прибуток ${p}` : ""}` },
+  { re: /^([\d.]+) shares of (.+) worth (\$[\d.,]+)(?:, PnL (\S+))?$/, ru: (n, m, v, p) => `${n} долей «${m}» на ${v}${p ? `, прибыль ${p}` : ""}`, uk: (n, m, v, p) => `${n} часток «${m}» на ${v}${p ? `, прибуток ${p}` : ""}` },
+  { re: /^(\$[\d.,]+) USDC lent on (.+?)(?: \(\+(\$[\d.,]+) interest\))?$/, ru: (a, w, i) => `${a} USDC под процентом в ${w}${i ? ` (+${i} процентов)` : ""}`, uk: (a, w, i) => `${a} USDC під відсотком у ${w}${i ? ` (+${i} відсотків)` : ""}` },
+  { re: /^([\d.,]+) (\S+) worth (\$[\d.,]+)(?:, PnL (\S+))?$/, ru: (n, t, v, p) => `${n} ${t} на ${v}${p ? `, прибыль ${p}` : ""}`, uk: (n, t, v, p) => `${n} ${t} на ${v}${p ? `, прибуток ${p}` : ""}` },
+  { re: /^\[(\S+)\] (.+)$/, ru: (id, x) => `[${id}] ${planLine(x, "ru")}`, uk: (id, x) => `[${id}] ${planLine(x, "uk")}` },
+  // /wallet
+  { re: /^No wallets yet\. Run `fren init` on the machine Fren runs on\.$/, ru: () => "Кошельков пока нет. Запусти `fren init` на компьютере, где работает Fren.", uk: () => "Гаманців поки немає. Запусти `fren init` на комп'ютері, де працює Fren." },
+  { re: /^Your Fren wallets\. Only this machine holds the keys\.$/, ru: () => "Твои кошельки Fren. Ключи есть только на этом компьютере.", uk: () => "Твої гаманці Fren. Ключі є лише на цьому комп'ютері." },
+  { re: /^Fund either one: any trade is paid from whichever wallet has the money, and Fren moves it between your own wallets itself\.$/, ru: () => "Пополни любой: сделка оплачивается из того кошелька, где есть деньги, а между твоими кошельками Fren переводит сам.", uk: () => "Поповни будь-який: угода оплачується з того гаманця, де є гроші, а між твоїми гаманцями Fren переказує сам." },
+  { re: /^ {2}USDC or SOL, plus about ([\d.]+) SOL for fees\.(?: Balance: (\$[\d.,]+) USDC\.)?(?: SOL: ([\d.]+)\.)?$/,
+    ru: (f, b, sol) => `  USDC или SOL, плюс около ${f} SOL на комиссии.${b ? ` Баланс: ${b} USDC.` : ""}${sol ? ` SOL: ${sol}.` : ""}`,
+    uk: (f, b, sol) => `  USDC або SOL, плюс близько ${f} SOL на комісії.${b ? ` Баланс: ${b} USDC.` : ""}${sol ? ` SOL: ${sol}.` : ""}` },
+  { re: /^ {2}USDC or ETH on Arbitrum or Base, plus about \$1 of ETH for gas\. A long or short moves the USDC into Hyperliquid by itself\.(?: Hyperliquid account value: (\$[\d.,]+)\.)?$/,
+    ru: (v) => `  USDC или ETH в Arbitrum или Base, плюс ETH примерно на $1 для комиссий сети. Для лонга или шорта Fren сам переведёт USDC на Hyperliquid.${v ? ` На счёте Hyperliquid: ${v}.` : ""}`,
+    uk: (v) => `  USDC або ETH в Arbitrum чи Base, плюс ETH приблизно на $1 для комісій мережі. Для лонга чи шорта Fren сам переказує USDC на Hyperliquid.${v ? ` На рахунку Hyperliquid: ${v}.` : ""}` },
+  { re: /^ {2}The same address holds tokens on Base and Robinhood Chain\.(?: USDC: (.+?)\.)?(?: ETH: (.+?)\.)?$/,
+    ru: (u, e) => `  На этом же адресе лежат токены в Base и Robinhood Chain.${u ? ` USDC: ${u.replace(/ on /g, " в ")}.` : ""}${e ? ` ETH: ${e.replace(/ on /g, " в ")}.` : ""}`,
+    uk: (u, e) => `  На цій самій адресі лежать токени в Base і Robinhood Chain.${u ? ` USDC: ${u.replace(/ on /g, " в ")}.` : ""}${e ? ` ETH: ${e.replace(/ on /g, " в ")}.` : ""}` },
+  { re: /^Trading key on Hyperliquid: (\S+) \(can trade, cannot withdraw\)\.$/, ru: (k) => `Торговый ключ на Hyperliquid: ${k} (может торговать, вывести не может).`, uk: (k) => `Торговий ключ на Hyperliquid: ${k} (може торгувати, вивести не може).` },
+  { re: /^Trading key on Derive: (\S+) \(option orders only, cannot withdraw\)\.$/, ru: (k) => `Торговый ключ на Derive: ${k} (только заказы на опционы, вывести не может).`, uk: (k) => `Торговий ключ на Derive: ${k} (лише замовлення на опціони, вивести не може).` },
+  { re: /^Options \(Derive\) and bets \(Polymarket\) use the same EVM address\. Say "fund Derive with \$500" or "fund Polymarket with \$500" to move USDC there from Arbitrum\.$/,
+    ru: () => "Опционы (Derive) и ставки (Polymarket) на том же EVM-адресе. Скажи «пополни Derive на $500» или «пополни Polymarket на $500», и я переведу туда USDC из Arbitrum.",
+    uk: () => "Опціони (Derive) і ставки (Polymarket) на тій самій EVM-адресі. Скажи «поповни Derive на $500» або «поповни Polymarket на $500», і я перекажу туди USDC з Arbitrum." },
+  // /limits and /fren_images
+  { re: /^Mode: (paper|live)( \(stopped\))?$/, ru: (m, st) => `Режим: ${m === "paper" ? "тренировка" : "настоящие деньги"}${st ? " (остановлен)" : ""}`, uk: (m, st) => `Режим: ${m === "paper" ? "тренування" : "справжні гроші"}${st ? " (зупинено)" : ""}` },
+  { re: /^Per trade: (\$[\d.,]+) · Per day: (\$[\d.,]+)$/, ru: (a, b) => `На сделку: ${a} · В день: ${b}`, uk: (a, b) => `На угоду: ${a} · На день: ${b}` },
+  { re: /^Max leverage: (\d+)x · Max open positions: (\d+)$/, ru: (a, b) => `Плечо до: ${a}x · Открытых позиций до: ${b}`, uk: (a, b) => `Плече до: ${a}x · Відкритих позицій до: ${b}` },
+  { re: /^Auto-approve up to: (\$[\d.,]+)$/, ru: (a) => `Без подтверждения до: ${a}`, uk: (a) => `Без підтвердження до: ${a}` },
+  { re: /^Venues: (.+)$/, ru: (v) => `Площадки: ${venuesT(v, "ru")}`, uk: (v) => `Майданчики: ${venuesT(v, "uk")}` },
+  { re: /^Automatic stop on bets: -(\d+)% of what you put in$/, ru: (p) => `Автостоп на ставках: -${p}% от вложенного`, uk: (p) => `Автостоп на ставках: -${p}% від вкладеного` },
+  { re: /^Chart snapshots on trade receipts: (on|off)\. Turn them (?:off with \/fren_images off|on with \/fren_images on)\.$/,
+    ru: (o) => (o === "on" ? "Картинки графиков в чеках: включены. Выключить: /fren_images off." : "Картинки графиков в чеках: выключены. Включить: /fren_images on."),
+    uk: (o) => (o === "on" ? "Картинки графіків у чеках: увімкнено. Вимкнути: /fren_images off." : "Картинки графіків у чеках: вимкнено. Увімкнути: /fren_images on.") },
   // warnings
   {
     re: /^(\s*)⚠️ Earns about (.+) a year on (.+), variable\. You can take it back any time; Fren also takes it back on its own when a trade needs the cash\.$/,
@@ -146,11 +205,74 @@ const rules: Rule[] = [
   { re: /^Chart on (.+)$/, ru: (x) => `График на ${x}`, uk: (x) => `Графік на ${x}` },
 ];
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const two = (n: number) => String(n).padStart(2, "0");
+/** "Dec 25, 2026" or "Tue, 01 Dec 2026 10:00:00 GMT" → "25.12.2026", "01.12.2026 10:00 UTC". */
+function dateT(x: string): string {
+  return x
+    .replace(/\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), (\d\d) (\w{3}) (\d{4}) (\d\d:\d\d):\d\d GMT\b/g, (m, d, mo, y, hm) => (MONTHS.includes(mo) ? `${d}.${two(MONTHS.indexOf(mo) + 1)}.${y} ${hm} UTC` : m))
+    .replace(/\b(\w{3}) (\d{1,2}), (\d{4})\b/g, (m, mo, d, y) => (MONTHS.includes(mo) ? `${two(Number(d))}.${two(MONTHS.indexOf(mo) + 1)}.${y}` : m));
+}
+
+/** An amount from a plan step: "$5.00", "$2.00 of USDC", "all your USDC", "30% of your USDC". */
+function amtT(a: string, lang: "ru" | "uk"): string {
+  const ru = lang === "ru";
+  let m: RegExpExecArray | null;
+  if (a === "all your USDC") return ru ? "весь твой USDC" : "весь твій USDC";
+  if ((m = /^(\$[\d.,]+) of USDC$/.exec(a))) return `${m[1]} USDC`;
+  if ((m = /^(\d+)% of your USDC$/.exec(a))) return ru ? `${m[1]}% твоего USDC` : `${m[1]}% твого USDC`;
+  return a;
+}
+
+/** Where money is lent or taken from: "the best USDC rate", "your yield", "Aave on Base", "Kamino (Solana)". */
+function whereT(w: string, lang: "ru" | "uk", dir: "in" | "from"): string {
+  const ru = lang === "ru";
+  if (w === "the best USDC rate") return ru ? "туда, где сейчас лучший процент" : "туди, де зараз найкращий відсоток";
+  if (w === "your yield") return ru ? "из вкладов под процент" : "з вкладів під відсоток";
+  const name = w.replace(/^Aave on (\w+)$/, "Aave ($1)");
+  return dir === "in" ? `${ru ? "в" : "у"} ${name}` : `${ru ? "из" : "з"} ${name}`;
+}
+
+/** "ETH $4,000 call expiring Dec 25, 2026" → "колл ETH по $4,000, до 25.12.2026". */
+function optT(o: string, lang: "ru" | "uk"): string {
+  const m = /^(\S+) (\$[\d.,]+) (call|put) expiring (.+)$/.exec(o);
+  if (!m) return o;
+  const ru = lang === "ru";
+  const kind = m[3] === "call" ? (ru ? "колл" : "кол") : ru ? "пут" : "пут";
+  return `${kind} ${m[1]} ${ru ? "по" : "за"} ${m[2]}, ${ru ? "до" : "до"} ${dateT(m[4]!)}`;
+}
+
+/** One condition of a plan step, from describeCondition. */
+function condT(c: string, lang: "ru" | "uk"): string {
+  const ru = lang === "ru";
+  let m: RegExpExecArray | null;
+  if ((m = /^(\S+) price (\S+) (\$[\d.,]+)$/.exec(c))) return `${ru ? "цена" : "ціна"} ${m[1]} ${m[2]} ${m[3]}`;
+  if ((m = /^(\S+) funding (\S+) (\S+)%\/h$/.exec(c))) return `${ru ? "фандинг" : "фандинг"} ${m[1]} ${m[2]} ${m[3]}%/${ru ? "ч" : "год"}`;
+  if ((m = /^(\S+) starts trading(?: on (.+))?$/.exec(c))) return `${m[1]} ${ru ? "начнёт торговаться" : "почне торгуватися"}${m[2] ? ` (${m[2]})` : ""}`;
+  if ((m = /^after (.+)$/.exec(c))) return `${ru ? "после" : "після"} ${dateT(m[1]!)}`;
+  return c;
+}
+const VENUE: Record<string, string> = { hyperliquid: "Hyperliquid", jupiter: "Jupiter", relay: "Relay", derive: "Derive", polymarket: "Polymarket" };
+const venuesT = (v: string, lang: "ru" | "uk") => v.split(", ").map((x) => VENUE[x] ?? (x === "yield" ? (lang === "ru" ? "вклады под процент" : "вклади під відсоток") : x)).join(", ");
+const condsT = (c: string, lang: "ru" | "uk") => c.split(" and ").map((x) => condT(x, lang)).join(lang === "ru" ? " и " : " і ");
+function nowT(n: string, lang: "ru" | "uk"): string {
+  const ru = lang === "ru";
+  if (n === "no data yet") return ru ? "данных пока нет" : "даних поки немає";
+  if (n === "not yet") return ru ? "пока нет" : "поки ні";
+  const m = /^now (.+)$/.exec(n);
+  if (m) return `${ru ? "сейчас" : "зараз"} ${m[1]!.replace(/%\/h$/, ru ? "%/ч" : "%/год")}`;
+  return n;
+}
+
 function betExits(tail: string, lang: "ru" | "uk"): string {
   const ru = lang === "ru";
   return tail
     .replace(/\. Stop: if (\S+) (falls|rises) ~([\d.]+%), Fren closes it and you lose about (\$[\d.,]+)(?: \(-([\d.]+)% of what you put in\))?/g, (_m, mk, dir, pc, usd, roe) => (ru ? `. Стоп: если ${mk} ${dir === "falls" ? "упадёт" : "вырастет"} примерно на ${pc}, Fren закроет, и ты потеряешь около ${usd}${roe ? ` (−${roe}% от вложенного)` : ""}` : `. Стоп: якщо ${mk} ${dir === "falls" ? "впаде" : "зросте"} приблизно на ${pc}, Fren закриє, і ти втратиш близько ${usd}${roe ? ` (−${roe}% від вкладеного)` : ""}`))
     .replace(/\. Take profit: if (\S+) (rises|falls) ~([\d.]+%), Fren closes it and you win about (\$[\d.,]+)/g, (_m, mk, dir, pc, usd) => (ru ? `. Тейк-профит: если ${mk} ${dir === "rises" ? "вырастет" : "упадёт"} примерно на ${pc}, Fren закроет, и ты выиграешь около ${usd}` : `. Тейк-профіт: якщо ${mk} ${dir === "rises" ? "зросте" : "впаде"} приблизно на ${pc}, Fren закриє, і ти виграєте близько ${usd}`))
+    .replace(/\. Stop: Fren closes it once you're down about (\$[\d.,]+)/g, (_m, usd) => (ru ? `. Стоп: Fren закроет, когда минус дойдёт примерно до ${usd}` : `. Стоп: Fren закриє, коли мінус дійде приблизно до ${usd}`))
+    .replace(/\. Take profit: Fren closes it once you're up about (\$[\d.,]+)/g, (_m, usd) => (ru ? `. Тейк-профит: Fren закроет, когда плюс дойдёт примерно до ${usd}` : `. Тейк-профіт: Fren закриє, коли плюс дійде приблизно до ${usd}`))
+    .replace(/\. Stop: if (\S+) reaches (\$[\d.,]+), Fren closes it/g, (_m, mk, px) => (ru ? `. Стоп: если ${mk} дойдёт до ${px}, Fren закроет` : `. Стоп: якщо ${mk} дійде до ${px}, Fren закриє`))
+    .replace(/\. Take profit: if (\S+) reaches (\$[\d.,]+), Fren closes it/g, (_m, mk, px) => (ru ? `. Тейк-профит: если ${mk} дойдёт до ${px}, Fren закроет` : `. Тейк-профіт: якщо ${mk} дійде до ${px}, Fren закриє`))
     .replace(/\. No stop: nothing closes it for you/g, ru ? ". Без стопа: само не закроется" : ". Без стопу: саме не закриється");
 }
 
@@ -184,10 +306,22 @@ function line(l: string, lang: "ru" | "uk"): string {
   if (/^\s*❌ /u.test(l))
     for (let i = l.indexOf(": "); i > 0; i = l.indexOf(": ", i + 2)) {
       const what = l.slice(0, i);
-      if (/(?:Stop|Take profit)$/.test(what)) continue; // "Stop: if BTC falls…" is part of the what
+      if (/(?:Stop|Take profit|No stop)$/.test(what)) continue; // "Stop: if BTC falls…" is part of the what
       const done = line(what, lang);
       if (done !== what) return `${done}: ${l.slice(i + 2)}`;
     }
+  // A step with a condition: "Buy $3.00 of JUP on Jupiter, when BTC price < $90,000"; a bet keeps
+  // its stop and target after it. Translate the step without it, then put the condition back.
+  const cond = /^(\s*(?:🟡|🟢|❌) .*?), when (.+?)((?:\. (?:Stop|Take profit|No stop)\b.*)?)$/u.exec(l);
+  if (cond) {
+    const [, head, c, tail] = cond as unknown as string[];
+    const full = line(head! + tail!, lang);
+    const h = line(head!, lang);
+    if (full !== head! + tail! && h !== head) {
+      const at = full.startsWith(h) ? h.length : full.length;
+      return `${full.slice(0, at)}, ${lang === "ru" ? "когда" : "коли"} ${condsT(c!, lang)}${full.slice(at)}`;
+    }
+  }
   for (const r of rules) {
     const m = r.re.exec(l);
     if (m) return r[lang](...(m.slice(1) as string[]));
@@ -215,7 +349,56 @@ export function localize(text: string, langIn: unknown): string {
 /** A step or whole receipt in the owner's language (titles, rows, header, footer). */
 export function localizeStep(s: StepReceipt, lang: unknown): StepReceipt {
   if (asLang(lang) === "en") return s;
-  return { ...s, title: localize(s.title, lang), rows: s.rows.map((r) => ({ ...r, text: localize(r.text, lang) })), links: s.links.map((l) => ({ ...l, label: localize(l.label, lang) })) };
+  return {
+    ...s,
+    title: localize(s.title, lang),
+    rows: s.rows.map((r) => ({ ...r, text: localize(r.text, lang) })),
+    links: s.links.map((l) => ({ ...l, label: localize(l.label, lang) })),
+    ...(s.chart ? { chart: localizeChart(s.chart, lang) } : {}),
+  };
+}
+
+const CHART_WORDS: [RegExp, string, string][] = [
+  [/^ENTRY$/, "ВХОД", "ВХІД"],
+  [/^EXIT$/, "ВЫХОД", "ВИХІД"],
+  [/^STOP$/, "СТОП", "СТОП"],
+  [/^TARGET$/, "ЦЕЛЬ", "ЦІЛЬ"],
+  [/^LIQ$/, "ЛИКВ", "ЛІКВ"],
+  [/^BUY$/, "ПОКУПКА", "КУПІВЛЯ"],
+  [/^SELL$/, "ПРОДАЖА", "ПРОДАЖ"],
+  [/\bliquidated$/, "ликвидирована", "ліквідована"],
+  [/\bstop hit$/, "сработал стоп", "спрацював стоп"],
+  [/\btarget hit$/, "достигнута цель", "досягнуто ціль"],
+  [/\bclosed on Hyperliquid$/, "закрыта", "закрита"],
+  [/\bclosed$/, "закрыта", "закрита"],
+  [/^Bought\b/, "Куплено", "Куплено"],
+  [/^Sold\b/, "Продано", "Продано"],
+  [/^long\b/, "Лонг", "Лонг"],
+  [/^short\b/, "Шорт", "Шорт"],
+  [/ long /, " лонг ", " лонг "],
+  [/ short /, " шорт ", " шорт "],
+  [/^Result /, "Итог ", "Підсумок "],
+  [/ · entry /, " · вход ", " · вхід "],
+  [/ · exit /, " · выход ", " · вихід "],
+  [/ in · /, " внесено · ", " внесено · "],
+  [/× boost · moves like (\S+) of (\S+)$/, "× плечо · как $1 в $2", "× плече · як $1 у $2"],
+  [/(\d)h on (\w+)$/, "$1 ч, $2", "$1 год, $2"],
+  [/^(\d+)h · /, "$1 ч · ", "$1 год · "],
+  [/^(\d+)d · /, "$1 дн · ", "$1 дн · "],
+  [/Hyperliquid perp/, "Hyperliquid, бессрочный", "Hyperliquid, безстроковий"],
+  [/ · your (лонг|шорт|long|short) /, " · твой $1 ", " · твій $1 "],
+  [/, PnL /, ", итог ", ", підсумок "],
+  [/ \(paper\)$/, " (учебно)", " (навчально)"],
+  [/ for (\$[\d.,]+)/, " за $1", " за $1"],
+  [/ at (\$[\d.,]+)/, " по $1", " по $1"],
+];
+
+/** A chart's own words (title, subtitle, level tags) in the owner's language; the pixel font has Cyrillic capitals. */
+export function localizeChart(c: ChartRequest, lang: unknown): ChartRequest {
+  const l = asLang(lang);
+  if (l === "en") return c;
+  const tr = (t: string) => CHART_WORDS.reduce((acc, [re, ru, uk]) => acc.replace(re, l === "ru" ? ru : uk), t);
+  return { ...c, title: tr(c.title), ...(c.subtitle ? { subtitle: tr(c.subtitle) } : {}), levels: c.levels.map((v) => ({ ...v, label: tr(v.label) })) };
 }
 
 export function localizeReceipt(r: Receipt, lang: unknown): Receipt {

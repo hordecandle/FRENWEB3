@@ -165,10 +165,10 @@ export class Dashboard {
    */
   async openForOwner(): Promise<{ text: string }> {
     const link = this.newLink();
-    if (this.local && (await this.openBrowser(link))) return { text: "Opened your dashboard in the browser on this computer." };
+    if (this.local && (await this.openBrowser(link))) return { text: this.fren.localize("Opened your dashboard in the browser on this computer.") };
     this.links.delete(new URL(link).searchParams.get("t") ?? "");
     const r = await this.sendLink();
-    return { text: r.link ? "No browser here and no private chat line, so there's no safe place to show the link. Send /fren_dashboard to your bot." : r.text };
+    return { text: r.link ? this.fren.localize("No browser here and no private chat line, so there's no safe place to show the link. Send /fren_dashboard to your bot.") : r.text };
   }
 
   /** The first time the chat comes up: a login link in the chat, so the install ends in the dashboard. */

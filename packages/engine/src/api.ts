@@ -23,14 +23,17 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
 
   const routes: Record<string, (body: Record<string, unknown>, url: URL) => Promise<unknown>> = {
     "GET /health": async () => ({ ok: true }),
-    "GET /wallet": async () => fren.wallet(),
-    "GET /status": async () => ({ text: await fren.status() }),
+    "GET /wallet": async () => {
+      const w = await fren.wallet();
+      return { ...w, text: fren.localize(w.text) };
+    },
+    "GET /status": async () => ({ text: fren.localize(await fren.status()) }),
     "GET /markets": async (_b, url) => {
       const bet = Number(url.searchParams.get("bet"));
       return { text: await fren.searchMarkets(url.searchParams.get("q") ?? "", Number.isFinite(bet) && bet > 0 ? Math.min(bet, 1_000_000) : undefined) };
     },
     "GET /yield": async () => ({ text: await fren.yieldRates() }),
-    "GET /limits": async () => ({ limits: fren.limits(), text: describeLimits(fren.limits()) }),
+    "GET /limits": async () => ({ limits: fren.limits(), text: fren.localize(describeLimits(fren.limits())) }),
     "GET /events": async (_b, url) => ({ events: fren.recentEvents(Number(url.searchParams.get("since") ?? 0)) }),
     // The plugin asks before every agent turn; without a budget (old callers) it keeps its own count.
     "GET /agent/guard": async () => (budget ? { guard: budget.limits(), usedToday: budget.usedToday() } : { guard: null }),
@@ -45,12 +48,12 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     "POST /cancel": async (b) => ({ text: await fren.cancel(String(b.planId ?? "")) }),
     "POST /deposit/hyperliquid": async (b) => fren.depositWithReceipt(Number(b.amountUsd)),
     "POST /withdraw/hyperliquid": async (b) => fren.requestHlWithdraw(b.amountUsd === undefined || b.amountUsd === null ? "all" : Number(b.amountUsd)),
-    "GET /settings": async () => ({ settings: fren.settings(), text: describeSettings(fren.settings(), fren.receiptRoute) }),
+    "GET /settings": async () => ({ settings: fren.settings(), text: fren.localize(describeSettings(fren.settings(), fren.receiptRoute)) }),
     "POST /settings": async (b) => {
       const changes: { images?: boolean } = {};
       if (b.images !== undefined) changes.images = parseOnOff(b.images);
       const settings = fren.setSettings(changes);
-      return { settings, text: describeSettings(settings, fren.receiptRoute) };
+      return { settings, text: fren.localize(describeSettings(settings, fren.receiptRoute)) };
     },
     /** A picture for the owner's chat (a screenshot or an image the agent made in the sandbox). */
     "POST /owner/image": async (b) => {

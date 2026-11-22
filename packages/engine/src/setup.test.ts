@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { frenPaths } from "./config.js";
-import { applyLoopGuard, findTelegramOwner, guardExisting, runSetup, systemdUnit, type Prompt, type Runner, type SetupDeps } from "./setup.js";
+import { applyLoopGuard, findTelegramOwner, guardExisting, rememberOwnerLang, runSetup, systemdUnit, type Prompt, type Runner, type SetupDeps } from "./setup.js";
 
 const TOKEN = "123456789:AAtesttokentesttokentesttokentest";
 
@@ -239,6 +239,32 @@ describe("findTelegramOwner", () => {
     const io = scriptedIo(["y"]);
     const owner = await findTelegramOwner({ io, fetchFn: fakeTelegram([group, bot, startMessage]).fetchFn, sleep: async () => {} }, TOKEN, "b");
     expect(owner).toEqual({ id: "777000123", name: "Bee (@beeonchain)" });
+  });
+});
+
+describe("rememberOwnerLang", () => {
+  const deps = (has: boolean) => {
+    const files = new Map<string, string>();
+    return { files, d: { exists: () => has, writeFile: (f: string, v: string) => void files.set(f, v), paths: frenPaths("/h/.fren") } };
+  };
+  it("keeps the owner's Telegram language so Fren speaks it before their first message", () => {
+    for (const [code, want] of [["uk", "uk"], ["ru-RU", "ru"], ["be", "ru"], ["en-GB", "en"], ["de", "en"]] as const) {
+      const { files, d } = deps(false);
+      rememberOwnerLang(d, code);
+      expect([...files.values()]).toEqual([want]);
+      expect([...files.keys()][0]).toMatch(/owner-lang$/);
+    }
+  });
+  it("never overrides a language the owner already spoke in", () => {
+    const { files, d } = deps(true);
+    rememberOwnerLang(d, "en");
+    rememberOwnerLang(deps(false).d, undefined);
+    expect(files.size).toBe(0);
+  });
+  it("the owner found in Telegram carries the app language", async () => {
+    const msg = { update_id: 3, message: { chat: { type: "private" }, from: { id: 42, is_bot: false, first_name: "Тим", language_code: "uk" } } };
+    const owner = await findTelegramOwner({ io: scriptedIo(["y"]), fetchFn: fakeTelegram([msg]).fetchFn, sleep: async () => {} }, TOKEN, "b");
+    expect(owner.lang).toBe("uk");
   });
 });
 

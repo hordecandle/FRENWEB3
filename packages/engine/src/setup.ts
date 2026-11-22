@@ -489,6 +489,7 @@ Make your bot with @BotFather (takes a minute):
   const owner = await findTelegramOwner(deps, token, bot);
   io.say("Linking your bot to OpenClaw, about a minute, keep this window open…");
   const line = await configureTelegram(deps, token, owner.id);
+  rememberOwnerLang(deps, owner.lang);
   io.say(`✓ Telegram linked: only ${owner.name} can use @${bot}`);
   return line;
 }
@@ -509,6 +510,7 @@ Waiting for you to press Create (up to 15 minutes)…`);
       if (!bot) throw new Error("Telegram didn't accept the new bot's token");
       io.say(`Got it: @${bot}. Linking it to OpenClaw, about a minute, keep this window open…`);
       const line = await configureTelegram(deps, r.token, r.owner.id);
+      rememberOwnerLang(deps, r.owner.lang);
       io.say(`✓ Telegram linked: only ${r.owner.name} can use @${bot}. Open it and press Start.`);
       return line;
     }
@@ -537,15 +539,34 @@ export async function telegramBot(fetchFn: Fetch, token: string): Promise<string
 /** One look for a private message to the bot (long-polls up to `waitS`). */
 export async function pollTelegramOwner(fetchFn: Fetch, token: string, offset: number, waitS = 20) {
   const r = await telegram<TgUpdate[]>(fetchFn, token, "getUpdates", { offset, timeout: waitS, allowed_updates: ["message"] });
-  if (!r.ok) return { busy: r.error_code === 409, offset, candidates: [] as { id: string; name: string }[] };
-  const candidates: { id: string; name: string }[] = [];
+  if (!r.ok) return { busy: r.error_code === 409, offset, candidates: [] as TgCandidate[] };
+  const candidates: TgCandidate[] = [];
   for (const u of r.result) {
     offset = u.update_id + 1;
     const from = u.message?.from;
     if (!from || from.is_bot || u.message?.chat.type !== "private") continue;
-    candidates.push({ id: String(from.id), name: tgName(from) });
+    candidates.push({ id: String(from.id), name: tgName(from), ...(from.language_code ? { lang: from.language_code } : {}) });
   }
   return { busy: false, offset, candidates };
+}
+
+export interface TgCandidate {
+  id: string;
+  name: string;
+  /** The language of their Telegram app (language_code), e.g. "ru". */
+  lang?: string;
+}
+
+/**
+ * The owner's language from their Telegram app, so the very first things Fren writes by
+ * itself (the dashboard link, /status) aren't English for a Russian owner. Only until they
+ * write to Fren: the plugin learns it from their words then, and this never overwrites that.
+ */
+export function rememberOwnerLang(deps: Pick<SetupDeps, "exists" | "writeFile" | "paths">, code: string | undefined): void {
+  if (!code) return;
+  const file = join(deps.paths.home, "owner-lang");
+  if (deps.exists(file)) return;
+  deps.writeFile(file, /^uk/i.test(code) ? "uk" : /^(?:ru|be)/i.test(code) ? "ru" : "en");
 }
 
 function tgName(from: { first_name: string; last_name?: string; username?: string }): string {
@@ -562,7 +583,7 @@ export async function ackTelegram(fetchFn: Fetch, token: string, offset: number)
  * has to look it up. Falls back to asking when OpenClaw is already reading
  * this bot (Telegram allows one reader) or nothing arrives.
  */
-export async function findTelegramOwner(deps: Pick<SetupDeps, "io" | "fetchFn" | "sleep">, token: string, bot: string): Promise<{ id: string; name: string }> {
+export async function findTelegramOwner(deps: Pick<SetupDeps, "io" | "fetchFn" | "sleep">, token: string, bot: string): Promise<TgCandidate> {
   const { io } = deps;
   io.say(`Now open your bot and press Start, so Fren knows it's you: https://t.me/${bot}`);
   let offset = 0;
@@ -595,7 +616,7 @@ export async function findTelegramOwner(deps: Pick<SetupDeps, "io" | "fetchFn" |
 
 interface TgUpdate {
   update_id: number;
-  message?: { chat: { type: string }; from?: { id: number; is_bot: boolean; first_name: string; last_name?: string; username?: string } };
+  message?: { chat: { type: string }; from?: { id: number; is_bot: boolean; first_name: string; last_name?: string; username?: string; language_code?: string } };
 }
 
 type TgResult<T> = { ok: true; result: T } | { ok: false; error_code: number; description?: string };
