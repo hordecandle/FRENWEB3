@@ -46,7 +46,7 @@ export async function startDemo(port: number, host = "0.0.0.0") {
     ["you", "and bet $120 that ETH goes up, 3x boost, stop if I lose 20%"],
     ["fren", "Done ✅ Bet $120 that ETH goes up, 3× boost. If ETH falls ~6.7%, I close it and you lose about $24.\n🧯 The most you can lose: $120. Your stop should cut it at about $24."],
     ["you", "bet $200 that BTC goes down, 5x boost, stop if I lose 10%"],
-    ["fren", "Bet $200 that BTC goes down, 5× boost. If BTC rises ~2%, I close it and you lose about $20.\nThat's more than I do without asking, so I need your OK.\n🧯 The most you can lose: $200, the money this puts in. Your stop should cut it at about $20.\nReply /ok, or press Approve on the dashboard."],
+    ["fren", "Bet $200 that BTC goes down, 5× boost. If BTC rises ~2%, I close it and you lose about $20.\nThat's more than I do without asking, so I need your OK.\n🧯 The most you can lose: $200, the money this puts in. Your stop should cut it at about $20.\nReply `/ok`, or press Approve on the dashboard."],
   ];
   seed.forEach(([from, text], i) => chat.fromApp(from, text, start + i * 7 * 60_000));
 
