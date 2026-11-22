@@ -14,7 +14,12 @@ import type { YieldProtocolAdapter } from "./yield.js";
 export interface SolanaAccess {
   ownerAddress(): Promise<string>;
   sendApiTransaction(txBase64: string, maxSolSpendLamports: number): Promise<string>;
+  /** Create the wallet's token account for a mint if it has none (see JupiterVenue). */
+  ensureTokenAccount?(mint: string): Promise<void>;
 }
+
+/** Jupiter Lend's receipt token for USDC (jlUSDC). Its first deposit needs this account to exist. */
+export const JLUSDC_MINT = "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D";
 
 const solscan = (sig: string) => `https://solscan.io/tx/${sig}`;
 const raw6 = (usd: number) => BigInt(Math.floor(usd * 1e6));
@@ -80,6 +85,8 @@ export class JupiterLendUsdc implements YieldProtocolAdapter {
 
   async deposit(usd: number): Promise<string> {
     const signer = await this.o.solana.ownerAddress();
+    // The API's transaction doesn't create the jlUSDC account; without it the first deposit fails (3012).
+    await this.o.solana.ensureTokenAccount?.(JLUSDC_MINT);
     return this.send("/earn/deposit", { asset: USDC_MINT, signer, amount: raw6(usd).toString() });
   }
 

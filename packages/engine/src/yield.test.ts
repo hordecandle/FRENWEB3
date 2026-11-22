@@ -100,6 +100,8 @@ describe("live USDC yield", () => {
     const sol = (await signer.addresses()).solana;
     expect(t.fake.lendCalls[0]).toEqual({ path: "/earn/deposit", body: { asset: USDC_MINT, signer: sol, amount: "1000000000" } });
     expect(t.solanaSent[0]).toEqual({ txBase64: "jup-tx-1", maxSolSpendLamports: 10_000_000 });
+    // First deposit: the jlUSDC token account must be ensured before the API's transaction (else error 3012).
+    expect(t.ensuredAccounts).toEqual(["9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D"]);
 
     const back = await t.fren.submit(earn("withdraw", { type: "fraction", fraction: 1 }));
     expect(back.text).toMatch(/✅ Took \$1,000 USDC back from Jupiter Lend \(Solana\)/);
