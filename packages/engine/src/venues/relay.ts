@@ -6,6 +6,7 @@ import {
   chainName,
   price as fmtPrice,
   shortToken,
+  swapSlippageBps,
   usd as fmtUsd,
   type EvmChain,
   type PlanStep,
@@ -661,7 +662,7 @@ export class RelayVenue implements SpotVenueAdapter {
         from: { chain: origin, currency: pay.currency },
         to: { chain: t.chain, currency: t.address },
         amountRaw: pay.amountRaw,
-        slippageBps: leg.maxSlippageBps,
+        slippageBps: swapSlippageBps(leg),
         // No USDC on Robinhood Chain to swap for gas later, so bring some ETH along.
         topupGas: !this.chain(t.chain).usdc,
       }).catch((err: unknown) => {
@@ -716,7 +717,7 @@ export class RelayVenue implements SpotVenueAdapter {
         from: { chain: t.chain, currency: t.address },
         to: { chain: home, currency: this.chain(home).usdc! },
         amountRaw: amount,
-        slippageBps: leg.maxSlippageBps,
+        slippageBps: swapSlippageBps(leg),
       });
       qty = Number(amount) / 10 ** t.decimals;
       usd = Number(quote.details?.currencyOut?.amount ?? "0") / 1e6;

@@ -1,5 +1,5 @@
 import type { Limits } from "./limits.js";
-import type { PlanStep } from "./plan.js";
+import { swapSlippageBps, type PlanStep } from "./plan.js";
 import { marketName } from "./render.js";
 
 /**
@@ -130,7 +130,7 @@ export function evaluatePolicy(
 
     if (leg.kind === "swap" && r.step.when.some((c) => c.type === "tradable")) {
       warnings.push(
-        `Launch snipe: buys at whatever the price is when it starts trading, with up to ${(leg.maxSlippageBps / 100).toFixed(1)}% slippage. Bots usually get the first block.`,
+        `Launch snipe: buys at whatever the price is when it starts trading, with up to ${(swapSlippageBps(leg) / 100).toFixed(1)}% slippage. Bots usually get the first block.`,
       );
     }
 

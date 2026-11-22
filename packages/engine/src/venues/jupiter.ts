@@ -1,6 +1,6 @@
 import { ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
 import { JITO_TIP_ACCOUNTS } from "@fren/signer";
-import { price as fmtPrice, shortToken, usd as fmtUsd, type PlanStep, type ResolvedStep, type SwapLeg } from "@fren/core";
+import { price as fmtPrice, shortToken, usd as fmtUsd, type PlanStep, type ResolvedStep, type SwapLeg, swapSlippageBps } from "@fren/core";
 import type { SignerApi } from "@fren/signer";
 import { getJson, HttpError, postJson, type Fetch } from "../http.js";
 import type { Store } from "../store.js";
@@ -537,7 +537,7 @@ export class JupiterVenue implements SpotVenueAdapter {
     }
     let quote: JupQuote;
     try {
-      quote = await this.quote(inputMint, outputMint, amount, leg.maxSlippageBps);
+      quote = await this.quote(inputMint, outputMint, amount, swapSlippageBps(leg));
     } catch (err) {
       // Young pump.fun coins trade only on their bonding curve, which Jupiter may not route yet.
       const curve = this.o.pumpFun ? await this.o.pumpFun.curve(t.mint).catch(() => null) : null;
@@ -666,7 +666,7 @@ export class JupiterVenue implements SpotVenueAdapter {
   private async curveSwap(leg: SwapLeg, t: TokenInfo, curve: PumpCurve, owner: PublicKey, amount: bigint, tip: number, ctx: ExecContext, paidSolPx = 0): Promise<ExecResult> {
     const pump = this.o.pumpFun!;
     if (curve.quote === "other") throw new VenueError(`${t.symbol}'s curve is priced in another coin, which Fren can't trade yet.`);
-    const slippagePct = leg.maxSlippageBps / 100;
+    const slippagePct = swapSlippageBps(leg) / 100;
     const user = owner.toBase58();
 
     if (leg.side === "buy") {

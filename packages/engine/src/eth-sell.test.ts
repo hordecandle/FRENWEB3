@@ -1,4 +1,5 @@
 import { checkEvmTransaction, createSigner, generateKeys, nativeValueLeavesReserve, type EvmTxRequest, type SignerApi } from "@fren/signer";
+import { swapSlippageBps } from "@fren/core";
 import { describe, expect, it } from "vitest";
 import { BASE_DOG, buildTestFren } from "./testing.js";
 import { NATIVE_ETH, NATIVE_SELL_GAS_ALLOWANCE_WEI } from "./venues/relay.js";
@@ -236,5 +237,31 @@ describe("selling an ERC-20, live", () => {
     const approval = sent.find((s) => s.data.startsWith("0x095ea7b3"));
     expect(approval).toBeDefined();
     expect(BigInt("0x" + approval!.data.slice(-64))).toBe(HELD_TOKENS);
+  });
+});
+
+describe("slippage set up front (chat 22.11: an ARB sale reverted at 1%, went through at 3%)", () => {
+  it("a Relay sale allows 3% when the plan doesn't name one", async () => {
+    const { t, run } = await live({ "arbitrum:native": HELD });
+    await run(sellEth("arbitrum", { type: "fraction", fraction: 0.5 }));
+    expect(t.fake.relayQuotes.at(-1)).toMatchObject({ slippageTolerance: "300" });
+  });
+
+  it("the owner's own number wins, tighter or looser", async () => {
+    const { t, run } = await live({ "arbitrum:native": HELD });
+    const plan = (bps: number) => ({ request: "sell eth", steps: [{ leg: { kind: "swap", venue: "relay", chain: "arbitrum", side: "sell", token: "ETH", amount: { type: "fraction", fraction: 0.1 }, maxSlippageBps: bps } }] });
+    await run(plan(50));
+    expect(t.fake.relayQuotes.at(-1)).toMatchObject({ slippageTolerance: "50" });
+    await run(plan(500));
+    expect(t.fake.relayQuotes.at(-1)).toMatchObject({ slippageTolerance: "500" });
+  });
+
+  it("Jupiter keeps 1% by default; the plan schema still refuses over 50%", async () => {
+    const t = buildTestFren();
+    expect(swapSlippageBps({ venue: "jupiter" })).toBe(100);
+    expect(swapSlippageBps({ venue: "relay" })).toBe(300);
+    expect(swapSlippageBps({ venue: "jupiter", maxSlippageBps: 20 })).toBe(20);
+    const bad = await t.fren.submit({ request: "x", steps: [{ leg: { kind: "swap", venue: "relay", chain: "arbitrum", side: "sell", token: "ETH", amount: { type: "fraction", fraction: 1 }, maxSlippageBps: 9000 } }] });
+    expect(bad.verdict).toBe("invalid");
   });
 });

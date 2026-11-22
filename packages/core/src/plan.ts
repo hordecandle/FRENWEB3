@@ -97,9 +97,22 @@ export const SwapLeg = z.object({
   amount: SwapLegAmount.describe(
     'Buys: {type:"usd"} spends that much USDC. Sells: {type:"tokens", tokens} for a number of tokens ("sell 1.5 SOL" is tokens 1.5), {type:"fraction"} of the balance, or {type:"usd"} only when the user names a dollar amount ("sell $50 of SOL").',
   ),
-  maxSlippageBps: z.number().int().min(1).max(5000).default(100),
+  /** Leave out unless the owner names one: each venue has its own sensible default (swapSlippageBps). */
+  maxSlippageBps: z.number().int().min(1).max(5000).optional().describe("Most price slip to accept, in basis points (100 = 1%). Leave out unless the user names one."),
 });
 export type SwapLeg = z.infer<typeof SwapLeg>;
+
+/**
+ * Slippage a swap allows when the plan doesn't say. Jupiter re-quotes and
+ * lands in one Solana transaction, so 1% is enough. Relay on an EVM chain
+ * signs the approval first and the swap after it, from a quote made before
+ * both, and at 1% a small ARB sale reverted on 22.11 and went through at 3%.
+ */
+export const DEFAULT_SLIPPAGE_BPS = { jupiter: 100, relay: 300 } as const;
+
+export function swapSlippageBps(leg: Pick<SwapLeg, "venue" | "maxSlippageBps">): number {
+  return leg.maxSlippageBps ?? DEFAULT_SLIPPAGE_BPS[leg.venue];
+}
 
 /**
  * Buy an option on Derive, or sell one Fren already holds. Fren never writes
