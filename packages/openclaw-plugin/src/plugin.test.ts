@@ -182,14 +182,17 @@ describe("Bee's ANT long, from the chat tools down, with only USDC on Solana", (
     expect((await reg.commands.get("fren_snapshots").handler({ senderIsOwner: true, args: "nope" })).text).toMatch(/Fren error: .*on.*off/);
   });
 
-  it("/ok after a code: the receipt is in the chat already, so the reply is one line", async () => {
+  it("/ok after a code: the reply says what was done (not just \"receipt above\"), the receipt has the details", async () => {
     t.store.setLimits({ ...t.store.getLimits(), autoApproveUsd: 0 });
     t.fake.hlFreeDefault = 1_000_000;
     const out = await run("fren_trade", { plan: { request: "short BTC $20 2x", steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "BTC", side: "short", sizing: { type: "margin", usd: 20 }, leverage: 2 } }] } });
     expect(out).toMatch(/code/);
     const code = /\/ok ([A-Z0-9]{6})/.exec(t.notifier.sent.at(-1) ?? "")![1];
     const before = t.notifier.receipts.length;
-    expect((await reg.commands.get("ok").handler({ senderIsOwner: true, args: code })).text).toBe("✅ Approved. Your receipt is just above.");
+    const reply = (await reg.commands.get("ok").handler({ senderIsOwner: true, args: code })).text;
+    expect(reply).toMatch(/^✅ Bet on BTC going down: /m);
+    expect(reply).toMatch(/Details and links are in the receipt I sent just before this\.$/);
+    expect(reply).not.toMatch(/just above/);
     expect(t.notifier.receipts).toHaveLength(before + 1);
     expect(t.notifier.receipts.at(-1)!.html).toMatch(/Bet on BTC going down/);
   });

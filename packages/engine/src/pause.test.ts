@@ -84,7 +84,7 @@ describe("pause (/fren_stop)", () => {
     expect(await t.fren.approve("")).toMatch(/Limits updated|updated|✅/);
     await t.fren.changeLimits("maxTradeUsd=6000");
     await t.fren.changeLimits("maxLeverage=40");
-    expect(await t.fren.approve("")).toMatch(/Send \/ok followed by the code/);
+    expect(await t.fren.approve("")).toMatch(/More than one request is waiting for your OK/);
   });
 });
 

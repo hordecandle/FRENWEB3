@@ -120,7 +120,9 @@ export class OpenClawChat implements ChatBridge {
     const run = this.exec(this.bin, args, 10 * 60_000)
       .catch((err: Error) => ({ code: 1, stdout: "", stderr: String(err?.message ?? err) }))
       .finally(() => this.running--);
-    const early = await Promise.race([run, new Promise<null>((r) => setTimeout(r, this.acceptMs).unref?.())]);
+    const early = await Promise.race([run, new Promise<null>((r) => {
+        setTimeout(() => r(null), this.acceptMs).unref?.();
+      })]);
     if (early && early.code !== 0) throw new Error(sendFailure(early));
     if (!early)
       void run.then((r) => {

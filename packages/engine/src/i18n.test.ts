@@ -70,6 +70,34 @@ describe("humanError", () => {
 
 import { buildTestFren } from "./testing.js";
 
+describe("what the owner saw in English on 22.11", () => {
+  it("result lines with links, practice lines and the /ok plan text come out in Russian", () => {
+    const ru = localize("✅ Moved $20.00 USDC from your Solana wallet into Hyperliquid through Relay · https://solscan.io/tx/abc", "ru");
+    expect(ru).toMatch(/^✅ /);
+    expect(ru).toContain("https://solscan.io/tx/abc");
+    expect(ru).not.toMatch(/Moved|wallet/);
+    expect(localize("The plan and its code are in my message just above. Reply /ok <code> to go ahead.", "ru")).toMatch(/^План и код/);
+    expect(localize("More than one request is waiting for your OK, so add its code: /ok <code> from the message with that plan.", "ru")).toMatch(/^Подтверждения ждут/);
+    expect(localize("Sent you a login link for your dashboard in a separate message. It works once, for 10 minutes.", "ru")).toMatch(/^Ссылку на дашборд/);
+    expect(localize("The dashboard isn't running on this machine. Restart Fren, or set FREN_DASHBOARD=on.", "uk")).toMatch(/^Дашборд/);
+  });
+
+  it("venue errors: a reverted tx, the Hyperliquid $10 minimum, Solana 3012", () => {
+    const rev = humanError("Transaction reverted: 0x5f2a9c0b1d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0", "ru");
+    expect(rev).toMatch(/^Сеть отклонила транзакцию/);
+    const min = humanError("Order must have minimum value of $10. asset=0", "ru");
+    expect(min).toMatch(/\$10/);
+    expect(min).not.toMatch(/asset=|Order must/);
+    const c = humanError('Simulation failed: {"InstructionError":[2,{"Custom":3012}]}', "ru");
+    expect(c).not.toMatch(/3012|Custom|\{/);
+  });
+
+  it("a signer refusal that names a contract stays as it is", () => {
+    const own = "The contract 0x1111111111111111111111111111111111111111 is not on the signer's allow list.";
+    expect(humanError(own, "en")).toBe(own);
+  });
+});
+
 describe("the owner's language through the engine", () => {
   const lend = { request: "lend", steps: [{ leg: { kind: "earn", venue: "yield", action: "deposit", amount: { type: "usd", usd: 5 } } }] };
   it("the confirmation message is entirely Russian for a Russian owner, English otherwise", async () => {
@@ -105,6 +133,12 @@ describe("the owner's language through the engine", () => {
       expect(all).toContain(want);
       expect(all).not.toMatch(/InstructionError|3012|Earns about|Доходность/);
     }
+  });
+  it("the language survives a restart: it lives in the store, not in memory", () => {
+    const t = buildTestFren();
+    t.fren.setOwnerLang("ru");
+    expect(t.store.getKv("owner_lang")).toBe("ru");
+    expect(t.fren.localize("🔑 Your Fren dashboard:")).toBe("🔑 Твой дашборд Fren:");
   });
   it("a bad language value keeps the last good one", () => {
     const t = buildTestFren({ live: true });

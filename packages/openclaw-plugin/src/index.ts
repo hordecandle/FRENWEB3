@@ -1,4 +1,7 @@
 import { Type, type TSchema } from "typebox";
+import { readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { definePluginEntry, type OpenClawPluginApi, type OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 import { EngineClient, setClientLang, type OwnerResult } from "./client.js";
 import { LoopGuard, type ToolContext, type TurnContext } from "./guard.js";
@@ -112,18 +115,54 @@ async function deliverOwnerCode(res: OwnerResult, ctx: OpenClawPluginToolContext
  * /fren_stop skips the model, so the engine needs it to write the pause message in the
  * owner's language. Null until the owner has written something.
  */
-let lastLang: "en" | "ru" | "uk" | null = null;
+type Lang = "en" | "ru" | "uk";
+/** Kept next to the engine's token, so a gateway restart doesn't switch a Russian owner to English. */
+const langFile = () => join(process.env.FREN_HOME ?? join(homedir(), ".fren"), "owner-lang");
+// Tests (vitest) never touch the real owner's file.
+const keepLang = !process.env.VITEST;
+function savedLang(): Lang | null {
+  if (!keepLang) return null;
+  try {
+    const l = readFileSync(langFile(), "utf8").trim();
+    return l === "en" || l === "ru" || l === "uk" ? l : null;
+  } catch {
+    return null;
+  }
+}
+let lastLang: Lang | null = savedLang();
+setClientLang(lastLang);
 export function noteLang(body: unknown) {
   const text = typeof body === "string" ? body : "";
   if (text.trim().startsWith("/")) return;
   const letters = text.match(/\p{L}/gu) ?? [];
   if (letters.length < 3) return;
   const cyr = letters.filter((c) => /[\u0400-\u04FF]/.test(c)).length;
-  lastLang = cyr / letters.length < 0.5 ? "en" : /[іїєґІЇЄҐ]/.test(text) ? "uk" : "ru";
+  const l: Lang = cyr / letters.length < 0.5 ? "en" : /[іїєґІЇЄҐ]/.test(text) ? "uk" : "ru";
+  if (l !== lastLang && keepLang)
+    try {
+      writeFileSync(langFile(), l, { mode: 0o600 });
+    } catch {
+      /* the next message tries again */
+    }
+  lastLang = l;
   setClientLang(lastLang);
 }
-/** The short line after /ok when the receipt is already in the chat. */
-const APPROVED = { en: "✅ Approved. Your receipt is just above.", ru: "✅ Подтверждено. Чек выше.", uk: "✅ Підтверджено. Чек вище." };
+/** Under what was done after /ok, when the receipt with the details is already in the chat. */
+const OK_NOTE = { en: "Details and links are in the receipt I sent just before this.", ru: "Детали и ссылки в чеке, который я прислал перед этим сообщением.", uk: "Деталі й посилання в чеку, який я надіслав перед цим повідомленням." };
+const APPROVED = { en: "✅ Done.", ru: "✅ Готово.", uk: "✅ Готово." };
+/**
+ * The reply to /ok: what was done, with the sum and the link (the result lines of the
+ * engine's text, already in the owner's language), then where the details are. Never just
+ * "receipt above": the owner must see from this message alone what happened.
+ */
+export function approvedReply(text: string, lang: Lang | null): string {
+  const done = text
+    .split("\n")
+    .filter((l) => /^\s*(?:✅|❌|📝|⚡|👀|⏳)/u.test(l))
+    .slice(0, 4)
+    .map((l) => l.trim());
+  return `${done.length ? done.join("\n") : APPROVED[lang ?? "en"]}\n${OK_NOTE[lang ?? "en"]}`;
+}
 const langBody = () => (lastLang ? { lang: lastLang } : {});
 
 export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; screenshotHelper?: string } = {}): ToolSpec[] {
@@ -459,8 +498,8 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
       guard(isOwner(ctx), async () => {
         const code = (ctx.args ?? "").trim();
         const res = await client.call<OwnerResult>("POST", "/approve", { code });
-        // The receipt with the numbers and links is already in the chat, just above this reply.
-        return res.receiptSent ? APPROVED[lastLang ?? "en"] : res.text;
+        // The receipt with the numbers and links is already in the chat; this reply still says what was done.
+        return res.receiptSent ? approvedReply(res.text, lastLang) : res.text;
       }),
   });
 

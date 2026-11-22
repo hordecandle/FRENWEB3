@@ -109,7 +109,7 @@ describe("close all", () => {
     await t.fren.submit(antLong);
     holdAnt(t);
     t.notifier.receipts.length = 0;
-    expect((await t.fren.requestCloseAll()).text).toMatch(/confirmation code privately/);
+    expect((await t.fren.requestCloseAll()).text).toMatch(/its code are in my message just above/);
     expect(t.notifier.sent.at(-1)).toMatch(/Close xyz:ANT now at market/);
     const code = /\/ok ([A-Z0-9]+)/.exec(t.notifier.sent.at(-1) ?? "")?.[1];
     const r = await t.fren.approveWithReceipt(code!);

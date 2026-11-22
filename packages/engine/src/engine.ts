@@ -487,18 +487,37 @@ export class Fren {
     this.d.store.putPending({ code, kind, payload, expiresAt: new Date(Date.now() + ttl).toISOString() });
     const minutes = Math.round(ttl / 60_000);
     const sent = await this.d.notifier.sendPrivate(`🔐 ${this.say(privateText)}\n\n${this.say(`Reply /ok ${code} within ${minutes} min.`)}`).catch(() => false);
-    if (sent) return { text: this.say(`I sent you a confirmation code privately. Reply /ok <code> to go ahead.`), codeSentPrivately: true };
+    if (sent) return { text: this.say(`The plan and its code are in my message just above. Reply /ok <code> to go ahead.`), codeSentPrivately: true };
     return { text: this.say(`Reply /ok <code> with the code I just sent you to go ahead.`), codeSentPrivately: false, ownerCode: code };
   }
 
   /** Wrong /ok codes in a row; see approve(). */
   private wrongCodes = 0;
-  /** Language of the owner's last chat message, for texts that skip the model (pause). */
-  private ownerLang: Lang = "en";
+  /**
+   * Language of the owner's last chat message, for texts that skip the model (pause,
+   * receipts, codes). Kept in the store: a restart must not switch a Russian owner to English.
+   */
+  private get ownerLang(): Lang {
+    const l = this.d.store.getKv("owner_lang");
+    return l === "ru" || l === "uk" ? l : "en";
+  }
+  private set ownerLang(l: Lang) {
+    if (this.d.store.getKv("owner_lang") !== l) this.d.store.setKv("owner_lang", l);
+  }
 
   /** The owner's language, from the plugin's request header; only a known language changes it. */
   setOwnerLang(l: unknown): void {
     if (l === "en" || l === "ru" || l === "uk") this.ownerLang = l;
+  }
+
+  /** An owner-facing English text in the owner's language, for the dashboard and such (see i18n.ts). */
+  localize(text: string): string {
+    return this.say(text);
+  }
+
+  /** The language Fren writes to the owner in (the dashboard link and such use it too). */
+  get lang(): Lang {
+    return this.ownerLang;
   }
 
   /** An owner-facing text in the owner's language (see i18n.ts). */
@@ -527,7 +546,7 @@ export class Fren {
       // A tap on the /ok link in the bot's message sends no code. Only the owner can send /ok,
       // and the message they tapped it in showed what the code is for, so one waiting code is enough.
       const sole = this.d.store.soleLivePending();
-      if (!sole) return "Send /ok followed by the code I sent you privately.";
+      if (!sole) return "More than one request is waiting for your OK, so add its code: /ok <code> from the message with that plan.";
       entered = sole.code;
     }
     const p = this.d.store.takePending(entered);
@@ -536,7 +555,7 @@ export class Fren {
         this.wrongCodes = 0;
         this.d.store.dropAllPending();
         await this.d.notifier
-          .sendPrivate(`⚠️ ${WRONG_CODE_LIMIT} wrong /ok codes in a row. To be safe I cancelled every request that was waiting for a code. If that wasn't you, send /fren_stop.`)
+          .sendPrivate(this.say(`⚠️ ${WRONG_CODE_LIMIT} wrong /ok codes in a row. To be safe I cancelled every request that was waiting for a code. If that wasn't you, send /fren_stop.`))
           .catch(() => false);
         return "Too many wrong codes. Every request waiting for a code was cancelled; ask again for a new one.";
       }

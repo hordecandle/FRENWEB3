@@ -26,10 +26,21 @@ const rules: Rule[] = [
   { re: /^Send (\$[\d.,]+) USDC from Arbitrum to your (.+) account at (\S+)\?$/, ru: (a, v, t) => `Отправить ${a} USDC из Arbitrum на твой счёт ${v} (${t})?`, uk: (a, v, t) => `Надіслати ${a} USDC з Arbitrum на твій рахунок ${v} (${t})?` },
   { re: /^Turn Fren back on\?$/, ru: () => "Снова включить Fren?", uk: () => "Знову ввімкнути Fren?" },
   { re: /^Reply \/ok (\S+) within (\d+) min\.$/, ru: (c, m) => `Ответь /ok ${c} в течение ${m} мин.`, uk: (c, m) => `Відповідай /ok ${c} протягом ${m} хв.` },
-  { re: /^I sent you a confirmation code privately\. Reply \/ok <code> to go ahead\.$/, ru: () => "Код подтверждения я отправил тебе в личку. Ответь /ok <код>, чтобы продолжить.", uk: () => "Код підтвердження я надіслав тобі в особисті. Відповідай /ok <код>, щоб продовжити." },
+  { re: /^The plan and its code are in my message just above\. Reply \/ok <code> to go ahead\.$/, ru: () => "План и код в моём сообщении чуть выше. Ответь /ok и этот код, чтобы продолжить.", uk: () => "План і код у моєму повідомленні трохи вище. Відповідай /ok і цей код, щоб продовжити." },
   { re: /^Reply \/ok <code> with the code I just sent you to go ahead\.$/, ru: () => "Ответь /ok <код> с кодом, который я только что прислал.", uk: () => "Відповідай /ok <код> з кодом, який я щойно надіслав." },
   { re: /^That code is wrong or expired\.$/, ru: () => "Код неверный или просрочен.", uk: () => "Код неправильний або прострочений." },
-  { re: /^Send \/ok followed by the code I sent you privately\.$/, ru: () => "Отправь /ok и код, который я прислал в личку.", uk: () => "Надішли /ok і код, який я надіслав в особисті." },
+  { re: /^More than one request is waiting for your OK, so add its code: \/ok <code> from the message with that plan\.$/, ru: () => "Подтверждения ждут несколько запросов, поэтому добавь код: /ok и код из сообщения с нужным планом.", uk: () => "Підтвердження чекають кілька запитів, тож додай код: /ok і код із повідомлення з потрібним планом." },
+  { re: /^⚠️ (\d+) wrong \/ok codes in a row\. To be safe I cancelled every request that was waiting for a code\. If that wasn't you, send \/fren_stop\.$/, ru: (n) => `⚠️ ${n} неверных кодов /ok подряд. На всякий случай я отменил все запросы, которые ждали кода. Если это был не ты, отправь /fren_stop.`, uk: (n) => `⚠️ ${n} неправильних кодів /ok поспіль. Про всяк випадок я скасував усі запити, що чекали коду. Якщо це був не ти, надішли /fren_stop.` },
+  { re: /^Too many wrong codes\. Every request waiting for a code was cancelled; ask again for a new one\.$/, ru: () => "Слишком много неверных кодов. Все запросы, ждавшие кода, отменены; попроси заново, придёт новый код.", uk: () => "Забагато неправильних кодів. Усі запити, що чекали коду, скасовано; попроси знову, прийде новий код." },
+  // dashboard
+  { re: /^Sent you a login link for your dashboard in a separate message\. It works once, for 10 minutes\.$/, ru: () => "Ссылку на дашборд прислал отдельным сообщением. Она одноразовая и работает 10 минут.", uk: () => "Посилання на дашборд надіслав окремим повідомленням. Воно одноразове і працює 10 хвилин." },
+  { re: /^Here's your dashboard login link\. It works once, for 10 minutes\. Don't share it\.$/, ru: () => "Вот ссылка на дашборд. Она одноразовая, работает 10 минут. Никому не пересылай.", uk: () => "Ось посилання на дашборд. Воно одноразове, працює 10 хвилин. Нікому не пересилай." },
+  { re: /^🔑 Your Fren dashboard:$/, ru: () => "🔑 Твой дашборд Fren:", uk: () => "🔑 Твій дашборд Fren:" },
+  { re: /^Works once, for 10 minutes\. Don't share it\.$/, ru: () => "Работает один раз, 10 минут. Никому не пересылай.", uk: () => "Працює один раз, 10 хвилин. Нікому не пересилай." },
+  { re: /^🖥 Your Fren dashboard is ready: your balance in dollars, your history, and a short tour\.$/, ru: () => "🖥 Твой дашборд Fren готов: баланс в долларах, история и короткое обучение.", uk: () => "🖥 Твій дашборд Fren готовий: баланс у доларах, історія і коротке навчання." },
+  { re: /^(Open it on this computer\. )?The link works once, for 10 minutes\. Later, send \/fren_dashboard for a new one\.$/, ru: (here) => `${here ? "Открой её на этом компьютере. " : ""}Ссылка одноразовая, работает 10 минут. Потом отправь /fren_dashboard, пришлю новую.`, uk: (here) => `${here ? "Відкрий його на цьому комп'ютері. " : ""}Посилання одноразове, працює 10 хвилин. Потім надішли /fren_dashboard, надішлю нове.` },
+  { re: /^🖥 You, from the dashboard:$/, ru: () => "🖥 Ты, из дашборда:", uk: () => "🖥 Ти, з дашборда:" },
+  { re: /^The dashboard isn't running on this machine\. Restart Fren, or set FREN_DASHBOARD=on\.$/, ru: () => "Дашборд на этом компьютере не запущен. Перезапусти Fren или включи его настройкой FREN_DASHBOARD=on.", uk: () => "Дашборд на цьому комп'ютері не запущено. Перезапусти Fren або ввімкни його налаштуванням FREN_DASHBOARD=on." },
   { re: /^That plan is no longer waiting for approval\.$/, ru: () => "Этот план больше не ждёт подтверждения.", uk: () => "Цей план більше не чекає підтвердження." },
   { re: /^Not doing this:$/, ru: () => "Не буду это делать:", uk: () => "Не робитиму цього:" },
   { re: /^Not doing this after all:$/, ru: () => "Всё же не буду это делать:", uk: () => "Все ж не робитиму цього:" },
@@ -68,6 +79,14 @@ const rules: Rule[] = [
   { re: /^Lent (\$[\d.,]+) USDC on (.+?)(?: at ([\d.]+%) a year)?$/, ru: (a, w, r) => `Положено ${a} USDC в ${w}${r ? `, ${r} годовых` : ""}`, uk: (a, w, r) => `Покладено ${a} USDC у ${w}${r ? `, ${r} річних` : ""}` },
   { re: /^Took (\$[\d.,]+) USDC back from (.+)$/, ru: (a, w) => `Забрано ${a} USDC из ${w}`, uk: (a, w) => `Забрано ${a} USDC з ${w}` },
   { re: /^(Bought|Sold) ([\d.,]+) (\S+) on (.+?) for (\$[\d.,]+)(?: at (\$[\d.,]+))?$/, ru: (v, n, t, w, a, p) => `${v === "Bought" ? "Куплено" : "Продано"} ${n} ${t} на ${a}${p ? ` по ${p}` : ""} (${w})`, uk: (v, n, t, w, a, p) => `${v === "Bought" ? "Куплено" : "Продано"} ${n} ${t} на ${a}${p ? ` за ${p}` : ""} (${w})` },
+  { re: /^Moved (\$[\d.,]+) USDC from your Solana wallet into Hyperliquid through Relay(?: \(about (\$[\d.,]+) after Relay's fee\))?$/,
+    ru: (a, b) => `Переведено ${a} USDC из кошелька Solana на Hyperliquid через Relay${b ? ` (дойдёт около ${b} после комиссии Relay)` : ""}`,
+    uk: (a, b) => `Переведено ${a} USDC з гаманця Solana на Hyperliquid через Relay${b ? ` (дійде близько ${b} після комісії Relay)` : ""}` },
+  { re: /^Moved (\$[\d.,]+) USDC from Arbitrum into Hyperliquid$/, ru: (a) => `Переведено ${a} USDC из Arbitrum на Hyperliquid`, uk: (a) => `Переведено ${a} USDC з Arbitrum на Hyperliquid` },
+  { re: /^Moved (\$[\d.,]+) USDC to Hyperliquid's (\S+) market$/, ru: (a, d) => `Переведено ${a} USDC на рынок ${d} Hyperliquid`, uk: (a, d) => `Переведено ${a} USDC на ринок ${d} Hyperliquid` },
+  { re: /^Bet on (\S+) going (up|down)(?:: ([\d.,]+) \S+ at (\$[\d.,]+) \(moves like (\$[\d.,]+) of \S+\)(.*))?$/,
+    ru: (n, d, sz, px, usd, tail) => `Ставка, что ${n} ${d === "up" ? "вырастет" : "упадёт"}${sz ? `: ${sz} ${n} по ${px} (движется как ${usd} в ${n})${exits(tail ?? "", "ru")}` : ""}`,
+    uk: (n, d, sz, px, usd, tail) => `Ставка, що ${n} ${d === "up" ? "зросте" : "впаде"}${sz ? `: ${sz} ${n} за ${px} (рухається як ${usd} у ${n})${exits(tail ?? "", "uk")}` : ""}` },
   { re: /^Watching: (.+)$/, ru: (x) => `Слежу: ${x}`, uk: (x) => `Стежу: ${x}` },
   { re: /^Chart on (.+)$/, ru: (x) => `График на ${x}`, uk: (x) => `Графік на ${x}` },
 ];
@@ -93,9 +112,24 @@ function exits(tail: string, lang: "ru" | "uk"): string {
 function line(l: string, lang: "ru" | "uk"): string {
   const step = /^Step (\d+): (.+)$/.exec(l);
   if (step) return `${lang === "ru" ? "Шаг" : "Крок"} ${step[1]}: ${line(step[2]!, lang)}`;
+  // A failed step: "❌ <what>: <why>". The why is already in the owner's language
+  // (humanError); translate the what on its own, so it doesn't swallow the why.
+  if (/^\s*❌ /u.test(l))
+    for (let i = l.indexOf(": "); i > 0; i = l.indexOf(": ", i + 2)) {
+      const what = l.slice(0, i);
+      const done = line(what, lang);
+      if (done !== what) return `${done}: ${l.slice(i + 2)}`;
+    }
   for (const r of rules) {
     const m = r.re.exec(l);
     if (m) return r[lang](...(m.slice(1) as string[]));
+  }
+  // A result line wraps a known one: "✅ Lent $5.00 USDC on … · https://solscan.io/tx/…".
+  const wrapped = /^(\s*)(✅ |❌ |⚡ |👀 |⏳ |📝 Practice: )(.+?)((?: · https?:\/\/\S+)*)$/u.exec(l);
+  if (wrapped) {
+    const [, pad, icon, core, links] = wrapped as unknown as string[];
+    const inner = line(core!, lang);
+    if (inner !== core) return `${pad}${icon === "📝 Practice: " ? (lang === "ru" ? "📝 Тренировка: " : "📝 Тренування: ") : icon}${inner}${links}`;
   }
   return l;
 }
@@ -160,7 +194,7 @@ const t = (en: string, ru: string, uk: string) => ({ en, ru, uk });
 const REFUSALS: Refusal[] = [
   // Hyperliquid
   { re: /insufficient margin|not enough margin|Insufficient (?:spot )?balance/i, safe: true, say: () => t("Not enough money on Hyperliquid for this trade.", "На Hyperliquid не хватает денег для этой сделки.", "На Hyperliquid не вистачає грошей для цієї угоди.") },
-  { re: /minimum value of \$?(\d+)|must have minimum value|below the smallest/i, safe: true, say: (m) => t("The trade is smaller than the exchange's minimum. Try a bigger amount.", "Сделка меньше минимума биржи. Попробуй сумму побольше.", "Угода менша за мінімум біржі. Спробуй більшу суму.") },
+  { re: /minimum value(?: of \$?(\d+))?|below the smallest/i, safe: true, say: (n) => (n ? t(`The trade is smaller than the exchange's $${n} minimum. Try $${n} or more.`, `Сделка меньше минимума биржи в $${n}. Попробуй от $${n}.`, `Угода менша за мінімум біржі в $${n}. Спробуй від $${n}.`) : t("The trade is smaller than the exchange's minimum. Try a bigger amount.", "Сделка меньше минимума биржи. Попробуй сумму побольше.", "Угода менша за мінімум біржі. Спробуй більшу суму.")) },
   { re: /price too far from (?:oracle|the oracle)|too far from the mark|oracle/i, safe: true, say: () => t("The price moved too far from the market price, so the exchange said no. Ask again for a fresh price.", "Цена ушла слишком далеко от рыночной, и биржа отказала. Попроси сделку заново по свежей цене.", "Ціна пішла надто далеко від ринкової, і біржа відмовила. Попроси угоду знову за свіжою ціною.") },
   { re: /could not immediately match|did not fill immediately|Nothing filled|Order could not|No liquidity/i, safe: true, say: () => t("Nobody took the other side at that price, so nothing was bought or sold. Try again in a moment.", "Никто не взял другую сторону по этой цене, поэтому ничего не куплено и не продано. Попробуй ещё раз чуть позже.", "Ніхто не взяв іншу сторону за цією ціною, тому нічого не куплено й не продано. Спробуй ще раз трохи згодом.") },
   { re: /reduce only|would increase position/i, safe: true, say: () => t("There's no open bet to close that way.", "Нет открытой ставки, которую так можно закрыть.", "Немає відкритої ставки, яку так можна закрити.") },
@@ -205,7 +239,8 @@ const REFUSALS: Refusal[] = [
   { re: /doesn't know the token/i, safe: true, say: () => t("That coin isn't known to the exchange yet, or isn't trading.", "Эта монета бирже пока не известна или ещё не торгуется.", "Ця монета біржі поки не відома або ще не торгується.") },
 ];
 
-const looksRawText = (raw: string) => /\{\s*"|InstructionError|^\w*Error: |\bat \w+\.\w+\s*\(/.test(raw);
+// Exchange and network wording counts as raw too: a tx hash, "Order must have minimum value … asset=0", "Transaction reverted".
+const looksRawText = (raw: string) => /\{\s*"|InstructionError|^\w*Error: |\bat \w+\.\w+\s*\(|\basset=\d|Order must have|reverted/i.test(raw);
 
 /**
  * A failure as one plain sentence in the owner's language: what happened and, when it

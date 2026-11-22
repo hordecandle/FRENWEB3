@@ -107,16 +107,17 @@ export class Dashboard {
     if (kv.getKv("dash_welcome")) return;
     const link = this.newLink();
     const where = this.local ? "Open it on this computer. " : "";
-    const sent = await this.fren.tellOwner(`🖥 Your Fren dashboard is ready: your balance in dollars, your history, and a short tour.\n${link}\n\n${where}The link works once, for 10 minutes. Later, send /fren_dashboard for a new one.`);
+    const sent = await this.fren.tellOwner(this.fren.localize(`🖥 Your Fren dashboard is ready: your balance in dollars, your history, and a short tour.\n${link}\n\n${where}The link works once, for 10 minutes. Later, send /fren_dashboard for a new one.`));
     if (sent) kv.setKv("dash_welcome", String(this.now()));
   }
 
   /** Makes a link and sends it to the owner privately. Falls back to returning it. */
   async sendLink(): Promise<{ text: string; link?: string }> {
     const link = this.newLink();
-    const sent = await this.fren.tellOwner(`🔑 Your Fren dashboard:\n${link}\n\nWorks once, for 10 minutes. Don't share it.`);
-    if (sent) return { text: "I sent you a login link for your dashboard in a private message. It works once, for 10 minutes." };
-    return { text: "Here's your dashboard login link. It works once, for 10 minutes. Don't share it.", link };
+    const say = (t: string) => this.fren.localize(t);
+    const sent = await this.fren.tellOwner(say(`🔑 Your Fren dashboard:\n${link}\n\nWorks once, for 10 minutes. Don't share it.`));
+    if (sent) return { text: say("Sent you a login link for your dashboard in a separate message. It works once, for 10 minutes.") };
+    return { text: say("Here's your dashboard login link. It works once, for 10 minutes. Don't share it."), link };
   }
 
   private sweep() {
@@ -296,7 +297,7 @@ export class Dashboard {
               return json(200, { hint: "Commands like /ok go in your Telegram chat with Fren, where the code arrives. Here, use the buttons: Pause Fren and Close all positions." });
             await this.chat.send(text);
             // The chat app sees what was asked here, so both read as one conversation.
-            void this.fren.tellOwner(`🖥 You, from the dashboard:\n${text}`);
+            void this.fren.tellOwner(`${this.fren.localize("🖥 You, from the dashboard:")}\n${text}`);
             return json(200, { ok: true });
           }
           case "/api/sign-in/email":

@@ -32,7 +32,7 @@ describe("owner dashboard", () => {
     const { dash, notifier } = await start();
     const r = await dash.sendLink();
     expect(r.link).toBeUndefined();
-    expect(r.text).toMatch(/private message/);
+    expect(r.text).toMatch(/separate message/);
     expect(notifier.sent.at(-1)).toMatch(/^🔑 Your Fren dashboard:\nhttps:\/\/1-2-3-4\.sslip\.io\/login\?t=[\w-]{30,}/);
   });
 
