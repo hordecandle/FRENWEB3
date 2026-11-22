@@ -94,8 +94,8 @@ const rules: Rule[] = [
 function betExits(tail: string, lang: "ru" | "uk"): string {
   const ru = lang === "ru";
   return tail
-    .replace(/\. Stop: if (\S+) (falls|rises) ~([\d.]+%), Fren closes it and you lose about (\$[\d.,]+)/g, (_m, mk, dir, pc, usd) => (ru ? `. Стоп: если ${mk} ${dir === "falls" ? "упадёт" : "вырастет"} примерно на ${pc}, Fren закроет, и вы потеряете около ${usd}` : `. Стоп: якщо ${mk} ${dir === "falls" ? "впаде" : "зросте"} приблизно на ${pc}, Fren закриє, і ви втратите близько ${usd}`))
-    .replace(/\. Take profit: if (\S+) (rises|falls) ~([\d.]+%), Fren closes it and you win about (\$[\d.,]+)/g, (_m, mk, dir, pc, usd) => (ru ? `. Тейк-профит: если ${mk} ${dir === "rises" ? "вырастет" : "упадёт"} примерно на ${pc}, Fren закроет, и вы выиграете около ${usd}` : `. Тейк-профіт: якщо ${mk} ${dir === "rises" ? "зросте" : "впаде"} приблизно на ${pc}, Fren закриє, і ви виграєте близько ${usd}`))
+    .replace(/\. Stop: if (\S+) (falls|rises) ~([\d.]+%), Fren closes it and you lose about (\$[\d.,]+)(?: \(-([\d.]+)% of what you put in\))?/g, (_m, mk, dir, pc, usd, roe) => (ru ? `. Стоп: если ${mk} ${dir === "falls" ? "упадёт" : "вырастет"} примерно на ${pc}, Fren закроет, и ты потеряешь около ${usd}${roe ? ` (−${roe}% от вложенного)` : ""}` : `. Стоп: якщо ${mk} ${dir === "falls" ? "впаде" : "зросте"} приблизно на ${pc}, Fren закриє, і ти втратиш близько ${usd}${roe ? ` (−${roe}% від вкладеного)` : ""}`))
+    .replace(/\. Take profit: if (\S+) (rises|falls) ~([\d.]+%), Fren closes it and you win about (\$[\d.,]+)/g, (_m, mk, dir, pc, usd) => (ru ? `. Тейк-профит: если ${mk} ${dir === "rises" ? "вырастет" : "упадёт"} примерно на ${pc}, Fren закроет, и ты выиграешь около ${usd}` : `. Тейк-профіт: якщо ${mk} ${dir === "rises" ? "зросте" : "впаде"} приблизно на ${pc}, Fren закриє, і ти виграєте близько ${usd}`))
     .replace(/\. No stop: nothing closes it for you/g, ru ? ". Без стопа: само не закроется" : ". Без стопу: саме не закриється");
 }
 
@@ -117,6 +117,7 @@ function line(l: string, lang: "ru" | "uk"): string {
   if (/^\s*❌ /u.test(l))
     for (let i = l.indexOf(": "); i > 0; i = l.indexOf(": ", i + 2)) {
       const what = l.slice(0, i);
+      if (/(?:Stop|Take profit)$/.test(what)) continue; // "Stop: if BTC falls…" is part of the what
       const done = line(what, lang);
       if (done !== what) return `${done}: ${l.slice(i + 2)}`;
     }

@@ -57,7 +57,7 @@ export function perpParts(leg: Extract<Leg, { kind: "perp_open" }>, resolved?: P
   const head = `Bet ${usd(margin)} that ${market} goes ${up ? "up" : "down"}, ${leg.leverage}× boost on ${where}`;
   const exits: string[] = [];
   if (leg.stopLossPct !== undefined) {
-    exits.push(`Stop: if ${market} ${up ? "falls" : "rises"} ~${pctMove(leg.stopLossPct / leg.leverage)}, Fren closes it and you lose about ${about((margin * leg.stopLossPct) / 100)}`);
+    exits.push(`Stop: if ${market} ${up ? "falls" : "rises"} ~${pctMove(leg.stopLossPct / leg.leverage)}, Fren closes it and you lose about ${about((margin * leg.stopLossPct) / 100)} (-${leg.stopLossPct}% of what you put in)`);
   } else if (leg.stopLossUsd !== undefined) {
     exits.push(`Stop: Fren closes it once you're down about ${about(leg.stopLossUsd)}`);
   }

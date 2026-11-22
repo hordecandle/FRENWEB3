@@ -82,6 +82,13 @@ describe("what the owner saw in English on 22.11", () => {
     expect(localize("The dashboard isn't running on this machine. Restart Fren, or set FREN_DASHBOARD=on.", "uk")).toMatch(/^Дашборд/);
   });
 
+  it("the stop is explained the same way in the plan and the bet: price move, dollars and % of what you put in", () => {
+    const ru = localize("❌ Bet $5.00 that BTC goes up, 2× boost on Hyperliquid. Stop: if BTC falls ~10%, Fren closes it and you lose about $1.00 (-20% of what you put in)", "ru");
+    expect(ru).toContain("Стоп: если BTC упадёт примерно на 10%, Fren закроет, и ты потеряешь около $1.00 (−20% от вложенного)");
+    const failed = localize("❌ Bet $5.00 that BTC goes up, 2× boost on Hyperliquid. Stop: if BTC falls ~10%, Fren closes it and you lose about $1.00 (-20% of what you put in): Сделка меньше минимума биржи в $10. Попробуй от $10.", "ru");
+    expect(failed).toBe("❌ Ставка $5.00, что BTC вырастет, усиление ×2 на Hyperliquid. Стоп: если BTC упадёт примерно на 10%, Fren закроет, и ты потеряешь около $1.00 (−20% от вложенного): Сделка меньше минимума биржи в $10. Попробуй от $10.");
+  });
+
   it("venue errors: a reverted tx, the Hyperliquid $10 minimum, Solana 3012", () => {
     const rev = humanError("Transaction reverted: 0x5f2a9c0b1d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0", "ru");
     expect(rev).toMatch(/^Сеть отклонила транзакцию/);
