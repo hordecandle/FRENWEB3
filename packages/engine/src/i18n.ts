@@ -72,7 +72,7 @@ const rules: Rule[] = [
   { re: /^🔑 Your Fren dashboard:$/, ru: () => "🔑 Твой дашборд Fren:", uk: () => "🔑 Твій дашборд Fren:" },
   { re: /^Works once, for 10 minutes\. Don't share it\.$/, ru: () => "Работает один раз, 10 минут. Никому не пересылай.", uk: () => "Працює один раз, 10 хвилин. Нікому не пересилай." },
   { re: /^🖥 Your Fren dashboard is ready: your balance in dollars, your history, and a short tour\.$/, ru: () => "🖥 Твой дашборд Fren готов: баланс в долларах, история и короткое обучение.", uk: () => "🖥 Твій дашборд Fren готовий: баланс у доларах, історія і коротке навчання." },
-  { re: /^(Open it on this computer\. )?The link works once, for 10 minutes\. Later, send \/fren_dashboard for a new one\.$/, ru: (here) => `${here ? "Открой её на этом компьютере. " : ""}Ссылка одноразовая, работает 10 минут. Потом отправь /fren_dashboard, пришлю новую.`, uk: (here) => `${here ? "Відкрий його на цьому комп'ютері. " : ""}Посилання одноразове, працює 10 хвилин. Потім надішли /fren_dashboard, надішлю нове.` },
+  { re: /^(Open it on this computer\. )?The link works once, for 10 minutes\. Later, send \/fren_dashboard for a new one\.$/, ru: (here) => `${here ? "Открой ссылку на этом компьютере. " : ""}Ссылка одноразовая, работает 10 минут. Потом отправь /fren_dashboard, пришлю новую.`, uk: (here) => `${here ? "Відкрий посилання на цьому комп'ютері. " : ""}Посилання одноразове, працює 10 хвилин. Потім надішли /fren_dashboard, надішлю нове.` },
   { re: /^🖥 You, from the dashboard:$/, ru: () => "🖥 Ты, из дашборда:", uk: () => "🖥 Ти, з дашборда:" },
   { re: /^🖥 You approved it from the dashboard: (.+)$/, ru: (x) => `🖥 Ты одобрил из дашборда: ${x}`, uk: (x) => `🖥 Ти схвалив з дашборда: ${x}` },
   { re: /^🖥 You cancelled it from the dashboard: (.+)$/, ru: (x) => `🖥 Ты отменил из дашборда: ${x}`, uk: (x) => `🖥 Ти скасував з дашборда: ${x}` },
@@ -84,6 +84,27 @@ const rules: Rule[] = [
   { re: /^Not doing this after all:$/, ru: () => "Всё же не буду это делать:", uk: () => "Все ж не робитиму цього:" },
   { re: /^Couldn't run it after all:$/, ru: () => "Всё же не получилось выполнить:", uk: () => "Все ж не вдалося виконати:" },
   { re: /^Couldn't set that up:$/, ru: () => "Не получилось это подготовить:", uk: () => "Не вдалося це підготувати:" },
+  // policy refusals and warnings (core/policy.ts); "• " and "❌ " in front stay as they are
+  { re: /^(\s*(?:• |❌ )?)Spends (\$[\d.,]+), over your per-trade cap of (\$[\d.,]+)\.$/u, ru: (p, a, c) => `${p}Это ${a}, больше твоего лимита на сделку ${c}.`, uk: (p, a, c) => `${p}Це ${a}, більше за твій ліміт на угоду ${c}.` },
+  { re: /^(\s*(?:• |❌ )?)Would bring today's spend to (\$[\d.,]+), over your daily cap of (\$[\d.,]+)\.$/u, ru: (p, a, c) => `${p}За сегодня вышло бы ${a}, больше дневного лимита ${c}.`, uk: (p, a, c) => `${p}За сьогодні вийшло б ${a}, більше за денний ліміт ${c}.` },
+  { re: /^(\s*(?:• |❌ )?)A (\d+)× boost is over your limit of (\d+)×\.$/u, ru: (p, a, c) => `${p}Усиление ${a}× больше твоего лимита ${c}×.`, uk: (p, a, c) => `${p}Підсилення ${a}× більше за твій ліміт ${c}×.` },
+  { re: /^(\s*(?:• |❌ )?)(.+) allows at most a (\d+)× boost on (\S+)\.$/u, ru: (p, m, a, v) => `${p}${m} на ${v} разрешает усиление не больше ${a}×.`, uk: (p, m, a, v) => `${p}${m} на ${v} дозволяє підсилення не більше ${a}×.` },
+  { re: /^(\s*(?:• |❌ )?)(\S+) is not on your allowed venues\.$/u, ru: (p, v) => `${p}${v} нет в списке разрешённых площадок.`, uk: (p, v) => `${p}${v} немає в списку дозволених майданчиків.` },
+  { re: /^(\s*(?:• |❌ )?)Would open (\d+) more position\(s\); your cap is (\d+) open\.$/u, ru: (p, n, c) => `${p}Открылось бы ещё ${n}, а твой лимит ${c} открытых позиций.`, uk: (p, n, c) => `${p}Відкрилося б ще ${n}, а твій ліміт ${c} відкритих позицій.` },
+  { re: /^(\s*(?:• |⚠️ )?)This stop \(lose ([\d.]+)% of what you put in\) is past the point where the exchange closes the bet by itself, so that will likely happen first\.$/u, ru: (p, x) => `${p}Этот стоп (минус ${x}% вложенного) дальше точки, где биржа сама закроет ставку, так что скорее сработает она.`, uk: (p, x) => `${p}Цей стоп (мінус ${x}% вкладеного) далі точки, де біржа сама закриє ставку, тож швидше спрацює вона.` },
+  { re: /^(\s*(?:• |⚠️ )?)No stop with a (\d+)× boost: if the price moves ([\d.]+)% the wrong way, you lose everything you put in\.$/u, ru: (p, a, x) => `${p}Без стопа с усилением ${a}×: если цена пойдёт на ${x}% не туда, потеряешь всё вложенное.`, uk: (p, a, x) => `${p}Без стопу з підсиленням ${a}×: якщо ціна піде на ${x}% не туди, втратиш усе вкладене.` },
+  { re: /^(\s*(?:• |⚠️ )?)Launch snipe: buys at whatever the price is when it starts trading, with up to ([\d.]+)% slippage\. Bots usually get the first block\.$/u, ru: (p, x) => `${p}Покупка на запуске: по той цене, что будет в момент старта торгов, с проскальзыванием до ${x}%. Первый блок обычно забирают боты.`, uk: (p, x) => `${p}Купівля на запуску: за тією ціною, що буде в момент старту торгів, з прослизанням до ${x}%. Перший блок зазвичай забирають боти.` },
+  // venue refusals while setting a plan up (Step N: …)
+  { re: /^(\S+) doesn't exist on Solana yet, so I can't tell how its amounts work and won't guess\. I can snipe pump\.fun addresses \(ending in "pump"\) before launch; for this one, send it again once the token is created\.$/, ru: (m) => `Монеты ${m} на Solana пока нет, не могу понять её суммы и гадать не буду. Адреса pump.fun (кончаются на «pump») могу купить на запуске; этот пришли ещё раз, когда монету создадут.`, uk: (m) => `Монети ${m} на Solana поки немає, не можу зрозуміти її суми й гадати не буду. Адреси pump.fun (закінчуються на «pump») можу купити на запуску; цю надішли ще раз, коли монету створять.` },
+  { re: /^No Solana token found for (\S+)\. Send me the contract address\.$/, ru: (x) => `Не нашёл на Solana монету ${x}. Пришли адрес её контракта.`, uk: (x) => `Не знайшов на Solana монету ${x}. Надішли адресу її контракту.` },
+  { re: /^Polymarket has no market "([^"]+)"\.(?: Use the slug .*)?$/, ru: (x) => `На Polymarket нет рынка «${x}».`, uk: (x) => `На Polymarket немає ринку «${x}».` },
+  // bet quote (bets.ts)
+  { re: /^(\S+) (above|below) (\$[\d.,]+) by (.+), with (\$[\d.,]+)\.$/, ru: (a, d, p, by, b) => `${a} ${d === "above" ? "выше" : "ниже"} ${p} к ${dateT(by)}, на ${b}.`, uk: (a, d, p, by, b) => `${a} ${d === "above" ? "вище" : "нижче"} ${p} до ${dateT(by)}, на ${b}.` },
+  { re: /^1\) Option on Derive: nothing to buy for (\S+) near (\$[\d.,]+) around that date(?:: (.+))?\.$/, ru: (a, p, w) => `1) Опцион на Derive: для ${a} около ${p} к этой дате купить нечего${w ? `: ${deriveWhy(w, "ru")}` : ""}.`, uk: (a, p, w) => `1) Опціон на Derive: для ${a} біля ${p} до цієї дати купити нічого${w ? `: ${deriveWhy(w, "uk")}` : ""}.` },
+  { re: /^I couldn't confirm the price data for (\S+) right now \(Jupiter and the Solana RPC didn't answer\), so I won't trade it\. Try again in a minute\.$/, ru: (m) => `Не смог проверить данные о цене ${m}: Jupiter и сеть Solana не ответили, так что торговать не буду. Попробуй через минуту.`, uk: (m) => `Не зміг перевірити дані про ціну ${m}: Jupiter і мережа Solana не відповіли, тож торгувати не буду. Спробуй за хвилину.` },
+  { re: /^2\) Polymarket: no open market on (\S+) (reaching|falling to) (\$[\d.,]+) around that date\.$/, ru: (a, d, p) => `2) Polymarket: нет открытого рынка на то, что ${a} ${d === "reaching" ? "дойдёт до" : "упадёт до"} ${p} к этой дате.`, uk: (a, d, p) => `2) Polymarket: немає відкритого ринку на те, що ${a} ${d === "reaching" ? "дійде до" : "впаде до"} ${p} до цієї дати.` },
+  { re: /^2\) Polymarket didn't answer\. Try again in a minute\.$/, ru: () => "2) Polymarket не ответил. Попробуй через минуту.", uk: () => "2) Polymarket не відповів. Спробуй за хвилину." },
+  { re: /^Say which one and I'll set it up\.$/, ru: () => "Скажи, какой из них, и я подготовлю.", uk: () => "Скажи, який із них, і я підготую." },
   { re: /^✅ Limits updated\.$/, ru: () => "✅ Лимиты обновлены.", uk: () => "✅ Ліміти оновлено." },
   { re: /^✅ Fren is back on\. The watcher is running again\.$/, ru: () => "✅ Fren снова включён. Наблюдение работает.", uk: () => "✅ Fren знову ввімкнено. Спостереження працює." },
   { re: /^📝 Paper mode$/, ru: () => "📝 Тестовый режим (paper)", uk: () => "📝 Тестовий режим (paper)" },
@@ -212,6 +233,23 @@ function dateT(x: string): string {
   return x
     .replace(/\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), (\d\d) (\w{3}) (\d{4}) (\d\d:\d\d):\d\d GMT\b/g, (m, d, mo, y, hm) => (MONTHS.includes(mo) ? `${d}.${two(MONTHS.indexOf(mo) + 1)}.${y} ${hm} UTC` : m))
     .replace(/\b(\w{3}) (\d{1,2}), (\d{4})\b/g, (m, mo, d, y) => (MONTHS.includes(mo) ? `${two(Number(d))}.${two(MONTHS.indexOf(mo) + 1)}.${y}` : m));
+}
+
+/** Why Derive has no option to offer (venues/derive.ts bestOptionOrWhy), without the final dot. */
+function deriveWhy(w: string, lang: "ru" | "uk"): string {
+  const ru = lang === "ru";
+  const near = (n: string) => {
+    const m = /^the (.+) (calls?|puts?) expiring (.+)$/.exec(n);
+    return m ? `${ru ? "опционы" : "опціони"} ${m[1]} ${ru ? "с датой" : "з датою"} ${dateT(m[3]!)}` : n;
+  };
+  let m: RegExpExecArray | null;
+  if (/^Derive didn't answer$/.test(w)) return ru ? "Derive не ответил" : "Derive не відповів";
+  if ((m = /^nobody is selling (.+) right now$/.exec(w))) return `${near(m[1]!)} ${ru ? "сейчас никто не продаёт" : "зараз ніхто не продає"}`;
+  if ((m = /^Derive lists no (\S+) (calls|puts)$/.exec(w))) return ru ? `на Derive нет опционов на ${m[1]}` : `на Derive немає опціонів на ${m[1]}`;
+  if ((m = /^nothing on (\S+) expires near that date$/.exec(w))) return ru ? `ничего по ${m[1]} не истекает около этой даты` : `нічого по ${m[1]} не спливає біля цієї дати`;
+  if ((m = /^the smallest order Derive takes on (.+) costs about (\$[\d.,]+), more than (\$[\d.,]+)$/.exec(w))) return ru ? `самый маленький заказ на ${near(m[1]!)} стоит около ${m[2]}, больше ${m[3]}` : `найменше замовлення на ${near(m[1]!)} коштує близько ${m[2]}, більше за ${m[3]}`;
+  if ((m = /^(.+) couldn't be priced right now$/.exec(w))) return ru ? `${near(m[1]!)} сейчас не удалось оценить` : `${near(m[1]!)} зараз не вдалося оцінити`;
+  return w;
 }
 
 /** An amount from a plan step: "$5.00", "$2.00 of USDC", "all your USDC", "30% of your USDC". */
@@ -443,6 +481,8 @@ const t = (en: string, ru: string, uk: string) => ({ en, ru, uk });
  * trades on. Matched against the raw error text (JSON and all); first hit wins.
  */
 const REFUSALS: Refusal[] = [
+  // the network itself: no connection, DNS, timeouts (nothing reached the venue)
+  { re: /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ECONNRESET|ENETUNREACH|socket hang up|aborted due to timeout|UND_ERR|network is unreachable/i, safe: true, say: () => t("Can't reach the service right now, the connection dropped. Nothing was sent. Try again in a minute.", "Не могу достучаться до сервиса, связь пропала. Ничего не отправлено. Попробуй через минуту.", "Не можу достукатися до сервісу, зв'язок зник. Нічого не надіслано. Спробуй за хвилину.") },
   // Hyperliquid
   { re: /insufficient margin|not enough margin|Insufficient (?:spot )?balance/i, safe: true, say: () => t("Not enough money on Hyperliquid for this trade.", "На Hyperliquid не хватает денег для этой сделки.", "На Hyperliquid не вистачає грошей для цієї угоди.") },
   { re: /minimum value(?: of \$?(\d+))?|below the smallest/i, safe: true, say: (n) => (n ? t(`The trade is smaller than the exchange's $${n} minimum. Try $${n} or more.`, `Сделка меньше минимума биржи в $${n}. Попробуй от $${n}.`, `Угода менша за мінімум біржі в $${n}. Спробуй від $${n}.`) : t("The trade is smaller than the exchange's minimum. Try a bigger amount.", "Сделка меньше минимума биржи. Попробуй сумму побольше.", "Угода менша за мінімум біржі. Спробуй більшу суму.")) },
@@ -491,7 +531,8 @@ const REFUSALS: Refusal[] = [
 ];
 
 // Exchange and network wording counts as raw too: a tx hash, "Order must have minimum value … asset=0", "Transaction reverted".
-const looksRawText = (raw: string) => /\{\s*"|InstructionError|^\w*Error: |\bat \w+\.\w+\s*\(|\basset=\d|Order must have|reverted/i.test(raw);
+const looksRawText = (raw: string) =>
+  /\{\s*"|InstructionError|^\w*Error: |\bat \w+\.\w+\s*\(|\basset=\d|Order must have|reverted|^(?:GET|POST|PUT|DELETE) https?:\/\/|fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ECONNRESET|ENETUNREACH|socket hang up|aborted due to timeout|UND_ERR/i.test(raw);
 
 /**
  * A failure as one plain sentence in the owner's language: what happened and, when it

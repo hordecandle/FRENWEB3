@@ -488,7 +488,7 @@ Make your bot with @BotFather (takes a minute):
 
   const owner = await findTelegramOwner(deps, token, bot);
   io.say("Linking your bot to OpenClaw, about a minute, keep this window open…");
-  const line = await configureTelegram(deps, token, owner.id);
+  const line = await configureTelegram(deps, token, owner.id, owner.lang);
   rememberOwnerLang(deps, owner.lang);
   io.say(`✓ Telegram linked: only ${owner.name} can use @${bot}`);
   return line;
@@ -509,7 +509,7 @@ Waiting for you to press Create (up to 15 minutes)…`);
       const bot = await telegramBot(deps.fetchFn, r.token);
       if (!bot) throw new Error("Telegram didn't accept the new bot's token");
       io.say(`Got it: @${bot}. Linking it to OpenClaw, about a minute, keep this window open…`);
-      const line = await configureTelegram(deps, r.token, r.owner.id);
+      const line = await configureTelegram(deps, r.token, r.owner.id, r.owner.lang);
       rememberOwnerLang(deps, r.owner.lang);
       io.say(`✓ Telegram linked: only ${r.owner.name} can use @${bot}. Open it and press Start.`);
       return line;
@@ -520,14 +520,14 @@ Waiting for you to press Create (up to 15 minutes)…`);
 }
 
 /** You are the only one who can talk to the bot, and the owner for /ok, /stop and /limits. */
-export async function configureTelegram(deps: Pick<SetupDeps, "run" | "openclawBin" | "fetchFn">, token: string, ownerId: string) {
+export async function configureTelegram(deps: Pick<SetupDeps, "run" | "openclawBin" | "fetchFn">, token: string, ownerId: string, lang?: string) {
   await setConfig(deps, "channels.telegram.allowFrom", JSON.stringify([ownerId]));
   await setConfig(deps, "channels.telegram.dmPolicy", "allowlist");
   await setConfig(deps, "commands.ownerAllowFrom", JSON.stringify([`telegram:${ownerId}`]));
   await setConfig(deps, "agents.defaults.typingMode", JSON.stringify("instant")); // "typing…" right away, not after the model's first token
   for (const [path, value] of LOOP_GUARD_CHANNEL.telegram) await setConfig(deps, path, value);
   await mustRun(deps, deps.openclawBin, ["channels", "add", "--channel", "telegram", "--token", token], "add the Telegram channel");
-  await telegram(deps.fetchFn, token, "sendMessage", { chat_id: ownerId, text: "✅ Fren found you. Setup is finishing; I'll be ready in a minute." });
+  await telegram(deps.fetchFn, token, "sendMessage", { chat_id: ownerId, text: FOUND_YOU[langOf(lang)] });
   return { telegram: { botToken: token, ownerChatId: ownerId } };
 }
 
@@ -562,11 +562,18 @@ export interface TgCandidate {
  * itself (the dashboard link, /status) aren't English for a Russian owner. Only until they
  * write to Fren: the plugin learns it from their words then, and this never overwrites that.
  */
+const langOf = (code: string | undefined): "en" | "ru" | "uk" => (/^uk/i.test(code ?? "") ? "uk" : /^(?:ru|be)/i.test(code ?? "") ? "ru" : "en");
+const FOUND_YOU = {
+  en: "✅ Fren found you. Setup is finishing; I'll be ready in a minute.",
+  ru: "✅ Fren тебя нашёл. Настройка заканчивается, через минуту буду готов.",
+  uk: "✅ Fren тебе знайшов. Налаштування завершується, за хвилину буду готовий.",
+};
+
 export function rememberOwnerLang(deps: Pick<SetupDeps, "exists" | "writeFile" | "paths">, code: string | undefined): void {
   if (!code) return;
   const file = join(deps.paths.home, "owner-lang");
   if (deps.exists(file)) return;
-  deps.writeFile(file, /^uk/i.test(code) ? "uk" : /^(?:ru|be)/i.test(code) ? "ru" : "en");
+  deps.writeFile(file, langOf(code));
 }
 
 function tgName(from: { first_name: string; last_name?: string; username?: string }): string {

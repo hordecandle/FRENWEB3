@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { frenPaths } from "./config.js";
-import { applyLoopGuard, findTelegramOwner, guardExisting, rememberOwnerLang, runSetup, systemdUnit, type Prompt, type Runner, type SetupDeps } from "./setup.js";
+import { applyLoopGuard, configureTelegram, findTelegramOwner, guardExisting, rememberOwnerLang, runSetup, systemdUnit, type Prompt, type Runner, type SetupDeps } from "./setup.js";
 
 const TOKEN = "123456789:AAtesttokentesttokentesttokentest";
 
@@ -265,6 +265,14 @@ describe("rememberOwnerLang", () => {
     const msg = { update_id: 3, message: { chat: { type: "private" }, from: { id: 42, is_bot: false, first_name: "Тим", language_code: "uk" } } };
     const owner = await findTelegramOwner({ io: scriptedIo(["y"]), fetchFn: fakeTelegram([msg]).fetchFn, sleep: async () => {} }, TOKEN, "b");
     expect(owner.lang).toBe("uk");
+  });
+  it("the first message in the chat is already in the owner's language", async () => {
+    const run: Runner = async () => ({ code: 0, stdout: "", stderr: "" });
+    for (const [lang, want] of [["ru", /нашёл/], ["uk", /знайшов/], [undefined, /found you/]] as const) {
+      const tg = fakeTelegram([]);
+      await configureTelegram({ run, openclawBin: "openclaw", fetchFn: tg.fetchFn }, TOKEN, "42", lang);
+      expect(String(tg.calls.find((c) => c.method === "sendMessage")?.body.text)).toMatch(want);
+    }
   });
 });
 

@@ -55,7 +55,9 @@ export class SdkPolymarketData implements PolymarketData {
     try {
       return toMarket(await this.client.fetchMarket({ slug }));
     } catch {
-      return this.fallback ? this.fallback.market(slug).catch(() => null) : null;
+      // The fallback reaching the market list and not finding the slug means "no such market";
+      // the fallback not reaching it at all is a dead network, and says so instead.
+      return this.fallback ? this.fallback.market(slug) : null;
     }
   }
 

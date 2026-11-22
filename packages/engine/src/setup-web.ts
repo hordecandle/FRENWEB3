@@ -123,7 +123,7 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       const bot = await telegramBot(deps.fetchFn, r.token);
       if (!bot) throw new UserError("Telegram didn't accept the new bot's token. Press Create my bot again.");
       state.telegram = { token: r.token, bot, offset: 0, candidates: [] };
-      state.line = await configureTelegram(deps, r.token, r.owner.id);
+      state.line = await configureTelegram(deps, r.token, r.owner.id, r.owner.lang);
       rememberOwnerLang(deps, r.owner.lang);
       state.channel = "telegram";
       return { ready: true, bot, owner: r.owner.name };
@@ -145,8 +145,9 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       const id = String(b.id ?? "").trim();
       if (!/^\d{1,15}$/.test(id)) throw new UserError("Use the number @userinfobot shows as Id, digits only.");
       await ackTelegram(deps.fetchFn, tg.token, tg.offset);
-      state.line = await configureTelegram(deps, tg.token, id);
-      rememberOwnerLang(deps, tg.candidates.find((c) => c.id === id)?.lang);
+      const lang = tg.candidates.find((c) => c.id === id)?.lang;
+      state.line = await configureTelegram(deps, tg.token, id, lang);
+      rememberOwnerLang(deps, lang);
       state.channel = "telegram";
       return { ok: true };
     },

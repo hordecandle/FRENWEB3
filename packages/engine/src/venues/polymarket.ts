@@ -339,11 +339,16 @@ export class PolymarketVenue implements VenueAdapter {
    */
   async bestMarket(q: { assetNames: string[]; target: number; direction: "above" | "below"; by: Date; budgetUsd: number }): Promise<PredictionQuote | null> {
     const seen = new Map<string, PolyMarket>();
+    let answered = false;
+    let lastErr: unknown;
     for (const name of q.assetNames) {
       for (const query of [`${name} ${q.target}`, `${name} price`]) {
-        for (const m of await this.o.data.search(query).catch(() => [])) seen.set(m.slug, m);
+        const found = await this.o.data.search(query).then((r) => ((answered = true), r), (e) => ((lastErr = e), [] as PolyMarket[]));
+        for (const m of found) seen.set(m.slug, m);
       }
     }
+    // Not one search got through: Polymarket is down or unreachable, not "no such market".
+    if (!answered && lastErr) throw lastErr;
     const targetForms = numberForms(q.target);
     const words = q.direction === "above" ? /\b(reach|hit|above|over|exceed|high|at least|≥|>)/i : /\b(dip|drop|fall|below|under|low|≤|<)/i;
     const candidates = [...seen.values()].filter(

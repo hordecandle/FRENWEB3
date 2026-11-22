@@ -217,7 +217,7 @@ export class Fren {
           r.step = { ...r.step, when: await this.canonicalConditions(r.step.when) };
           resolved.push(r);
         } catch (err) {
-          errors.push(`Step ${i + 1}: ${(err as Error).message}`);
+          errors.push(`Step ${i + 1}: ${humanError((err as Error).message, this.ownerLang)}`);
         }
       }),
     );
@@ -1205,7 +1205,8 @@ export class Fren {
 
   /** Quote a price-target bet both ways: an option on Derive and a Polymarket market. */
   async quoteBet(q: BetQuery, request = ""): Promise<BetQuote> {
-    return quoteBet({ derive: this.d.derive, polymarket: this.d.polymarket }, q, request || `${q.asset} ${q.direction} ${q.target} by ${q.by} with $${q.budgetUsd}`);
+    const quote = await quoteBet({ derive: this.d.derive, polymarket: this.d.polymarket }, q, request || `${q.asset} ${q.direction} ${q.target} by ${q.by} with $${q.budgetUsd}`);
+    return { ...quote, text: this.localize(quote.text) };
   }
 
   /**

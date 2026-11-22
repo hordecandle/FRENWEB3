@@ -156,3 +156,31 @@ describe("the owner's language through the engine", () => {
     expect((t.fren as unknown as { ownerLang: string }).ownerLang).toBe("ru");
   });
 });
+
+describe("refusals that come back without money moving (PLAN 22.11 п. 9)", () => {
+  const CASES = [
+    "Step 1: 4k3Dyj…kX6Z doesn't exist on Solana yet, so I can't tell how its amounts work and won't guess. I can snipe pump.fun addresses (ending in \"pump\") before launch; for this one, send it again once the token is created.",
+    "Step 1: No Solana token found for NOTAMINT123. Send me the contract address.",
+    'Step 1: Polymarket has no market "will-fren-land-on-mars". Use the slug from fren_bet_quote or fren_markets.',
+    "   • Spends $900,000, over your per-trade cap of $100.",
+    "❌ Would bring today's spend to $900,000, over your daily cap of $300.",
+    "1) Option on Derive: nothing to buy for BTC near $10,000,000 around that date: nobody is selling the $80,000, $75,000 calls expiring Nov 23, 2026 right now.",
+    "1) Option on Derive: nothing to buy for BTC near $10,000,000 around that date: Derive didn't answer.",
+    "2) Polymarket: no open market on BTC reaching $10,000,000 around that date.",
+    "BTC above $10,000,000 by Nov 23, 2026, with $20.00.",
+    "Step 1: I couldn't confirm the price data for 4k3Dyj…kX6Z right now (Jupiter and the Solana RPC didn't answer), so I won't trade it. Try again in a minute.",
+  ];
+  const english = /\b(?:the|and|your|over|nothing|doesn't|couldn't|found|has|no|right now|Step|Option|above|Nov)\b/;
+  for (const lang of ["ru", "uk"] as const)
+    it(`every one reads in ${lang}`, () => {
+      for (const c of CASES) expect(localize(c, lang), c).not.toMatch(english);
+    });
+  it("raw HTTP and network failures become one plain sentence, never a URL or a code", () => {
+    for (const raw of ["GET https://lite-api.jup.ag/tokens/v2/search?query=x → 429", "fetch failed", "TypeError: fetch failed (connect ECONNREFUSED)", "getaddrinfo ENOTFOUND api.hyperliquid.xyz"])
+      for (const lang of ["en", "ru", "uk"] as const) {
+        const s = humanError(raw, lang);
+        expect(s).not.toMatch(/https?:|\b429\b|ECONN|ENOTFOUND|fetch failed/);
+        expect(s.split(/(?<=[.!?])\s/).length).toBeLessThanOrEqual(3);
+      }
+  });
+});
