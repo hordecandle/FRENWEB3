@@ -134,7 +134,7 @@ details summary .n{font-weight:400;color:var(--muted);margin-left:auto;font-size
 .addr-row+.addr{margin-top:10px}
 .camt{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;margin-top:16px}
 .camt label{font-size:13px;color:var(--muted)}
-.camt__in{display:flex;align-items:center;gap:6px;height:48px;padding:0 14px;border:1px solid var(--line);border-radius:var(--r-sm);background:#fff;font-size:22px;font-weight:500;letter-spacing:-.02em;transition:border-color .15s}
+.camt__in{display:flex;align-items:center;gap:6px;height:44px;padding:0 14px;border:1px solid var(--line);border-radius:var(--r-sm);background:#fff;font-size:22px;font-weight:500;letter-spacing:-.02em;transition:border-color .15s}
 .camt__in:focus-within{border-color:var(--ink)}
 .camt__in span{color:var(--muted)}
 .camt__in input{border:0;outline:0;width:100%;min-width:0;background:transparent;font-size:22px;font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums;padding:0}
@@ -686,7 +686,7 @@ ${ICONS}
       const body = el("div");
       body.append(el("p", "lbl-l", plain(x.label)));
       if (x.request) body.append(el("p", "muted", when(x.at) + " · you asked: " + plain(x.request)));
-      for (const s of x.steps || []) body.append(el("p", null, plain(s)));
+      for (const s of x.steps || []) if (plain(s) !== plain(x.label)) body.append(el("p", null, plain(s)));
       if (x.maxLoss) body.append(el("p", "loss", plain(x.maxLoss)));
       const row = el("div", "row");
       const ok = iconBtn("i-check", "Approve", "btn btn--ok");
