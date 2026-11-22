@@ -21,8 +21,9 @@ button,input,select,textarea{font:inherit;color:inherit}
 .lg{width:20px;height:20px;flex:none;display:block}
 .top{position:sticky;top:0;z-index:5;background:rgba(255,255,255,.88);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
 .top__in{max-width:1280px;margin:0 auto;padding:0 28px;height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px}
-.brand{display:flex;align-items:baseline;gap:9px;font-weight:600;font-size:21px;letter-spacing:-.03em}
-.brand small{font-weight:400;font-size:13px;color:var(--muted);letter-spacing:0}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink)}
+.brand__logo{width:84px;height:20px;display:block;flex:none}
+.brand small{font-weight:400;font-size:13px;color:var(--muted);letter-spacing:0;line-height:1;margin-top:3px}
 .top__r{display:flex;align-items:center;gap:12px}
 .demo{background:var(--blue-2);color:var(--ink);font-size:13px;padding:6px 16px;border-bottom:1px solid var(--blue-3);display:flex;align-items:center;justify-content:center;gap:8px}
 .demo .ic{width:15px;height:15px}
@@ -91,6 +92,7 @@ td.sym{font-weight:500}
 .msg:empty{display:none}
 .center{max-width:520px;margin:12vh auto;padding:0 20px;text-align:center}
 .center p{margin-top:12px}
+.center .brand{justify-content:center}
 [hidden]{display:none!important}
 details summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:15px;font-weight:500;padding:16px 0;margin-top:20px;border-top:1px solid var(--line);user-select:none}
 details summary::-webkit-details-marker{display:none}
@@ -233,7 +235,7 @@ details summary .n{font-weight:400;color:var(--muted);margin-left:auto;font-size
 
 /** Icons. UI: Lucide (ISC), 24x24 stroke icons, currentColor. Logos of networks and coins: web3icons branded set (MIT), in colour. Telegram: simple-icons. Inlined at build time: nothing is fetched at run time. No emoji outside the chat bubbles. */
 const ICONS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" /> <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" /></symbol>
+  <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M17 14h.01" /> <path d="M7 7h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14" /></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="M8 12h8" /> <path d="M12 8v8" /></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <polyline points="12 6 12 12 16 14" /></symbol>
   <symbol id="i-chart" viewBox="0 0 24 24"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17" /> <polyline points="16 7 22 7 22 13" /></symbol>
@@ -247,12 +249,13 @@ const ICONS = `<svg width="0" height="0" style="position:absolute" aria-hidden="
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18" /> <path d="m6 6 12 12" /></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <line x1="12" x2="12" y1="8" y2="12" /> <line x1="12" x2="12.01" y1="16" y2="16" /></symbol>
-  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <line x1="22" x2="18" y1="12" y2="12" /> <line x1="6" x2="2" y1="12" y2="12" /> <line x1="12" x2="12" y1="6" y2="2" /> <line x1="12" x2="12" y1="22" y2="18" /></symbol>
+  <symbol id="i-compass" viewBox="0 0 24 24"><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z" /> <circle cx="12" cy="12" r="10" /></symbol>
+  <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /></symbol>
   <symbol id="i-card" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5" rx="2" /> <line x1="2" x2="22" y1="10" y2="10" /></symbol>
   <symbol id="i-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2" /> <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></symbol>
   <symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="4" width="4" height="16" rx="1" /> <rect x="6" y="4" width="4" height="16" rx="1" /></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3" /></symbol>
-  <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z" /> <path d="m21.854 2.147-10.94 10.939" /></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M3.714 3.048a.498.498 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627a.498.498 0 0 0 .682.627l18-8.5a.5.5 0 0 0 0-.904z" /> <path d="M6 12h16" /></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" /> <circle cx="12" cy="12" r="3" /></symbol>
   <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" /> <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" /> <path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" /> <path d="m2 2 20 20" /></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /> <path d="M7 11V7a5 5 0 0 1 10 0v4" /></symbol>
@@ -263,7 +266,7 @@ const ICONS = `<svg width="0" height="0" style="position:absolute" aria-hidden="
   <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
   <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="m4.9 4.9 14.2 14.2" /></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></symbol>
-  <symbol id="i-list" viewBox="0 0 24 24"><path d="m3 10 2.5-2.5L3 5" /> <path d="m3 19 2.5-2.5L3 14" /> <path d="M10 6h11" /> <path d="M10 12h11" /> <path d="M10 18h11" /></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6" /></symbol>
   <symbol id="i-tg" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></symbol>
   <symbol id="l-sol" viewBox="0 0 24 24"><path fill="url(#solana__a)" d="M18.413 7.902a.62.62 0 0 1-.411.163H3.58c-.512 0-.77-.585-.416-.928l2.369-2.284a.6.6 0 0 1 .41-.169H20.42c.517 0 .77.59.41.935z"/> <path fill="url(#solana__b)" d="M18.413 19.158a.62.62 0 0 1-.411.158H3.58c-.512 0-.77-.58-.416-.923l2.369-2.29a.6.6 0 0 1 .41-.163H20.42c.517 0 .77.586.41.928z"/> <path fill="url(#solana__c)" d="M18.413 10.473a.62.62 0 0 0-.411-.158H3.58c-.512 0-.77.58-.416.923l2.369 2.29c.111.103.257.16.41.163H20.42c.517 0 .77-.586.41-.928z"/> <defs> <linearGradient id="solana__a" x1="3.001" x2="21.459" y1="55.041" y2="54.871" gradientUnits="userSpaceOnUse"> <stop stop-color="#599DB0"/> <stop offset="1" stop-color="#47F8C3"/> </linearGradient> <linearGradient id="solana__b" x1="3.001" x2="21.341" y1="9.168" y2="9.027" gradientUnits="userSpaceOnUse"> <stop stop-color="#C44FE2"/> <stop offset="1" stop-color="#73B0D0"/> </linearGradient> <linearGradient id="solana__c" x1="4.036" x2="20.303" y1="12.003" y2="12.003" gradientUnits="userSpaceOnUse"> <stop stop-color="#778CBF"/> <stop offset="1" stop-color="#5DCDC9"/> </linearGradient> </defs></symbol>
   <symbol id="l-base" viewBox="0 0 24 24"><path fill="#00F" d="M3 4.706c0-.585 0-.877.11-1.101.106-.215.28-.39.496-.495C3.83 3 4.122 3 4.706 3h14.588c.585 0 .876 0 1.101.11.215.105.389.28.494.495.111.225.111.517.111 1.101v14.588c0 .585 0 .876-.11 1.101-.106.215-.28.389-.495.494-.225.111-.517.111-1.101.111H4.706c-.585 0-.876 0-1.101-.11a1.08 1.08 0 0 1-.494-.495C3 20.17 3 19.878 3 19.294z"/></symbol>
@@ -273,13 +276,15 @@ const ICONS = `<svg width="0" height="0" style="position:absolute" aria-hidden="
   <symbol id="l-usdc" viewBox="0 0 24 24"><path fill="#0B53BF" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18"/> <path fill="#fff" d="M13.62 5.45v1.159a5.64 5.64 0 0 1 4.005 5.394 5.64 5.64 0 0 1-4.005 5.394v1.16a6.74 6.74 0 0 0 5.13-6.554 6.74 6.74 0 0 0-5.13-6.553m-7.245 6.553a5.64 5.64 0 0 1 4.005-5.394V5.45a6.74 6.74 0 0 0-5.13 6.553 6.74 6.74 0 0 0 5.13 6.553v-1.159a5.63 5.63 0 0 1-4.005-5.394"/> <path fill="#fff" d="M14.419 13.258c0-2.301-3.606-1.356-3.606-2.627 0-.456.366-.748 1.063-.748.833 0 1.12.405 1.21.95h1.147c-.102-1.024-.69-1.67-1.67-1.863v-.904h-1.125v.872c-1.075.137-1.75.762-1.75 1.693 0 2.312 3.611 1.445 3.611 2.694 0 .472-.455.787-1.226.787-1.007 0-1.339-.444-1.462-1.057H9.49c.073 1.122.764 1.823 1.947 1.999v.886h1.125v-.875c1.153-.149 1.856-.82 1.856-1.807"/></symbol>
 </svg>`;
 
+/** Official Fren logo (head + wordmark), same file as the site header: site/public/assets/fren-logo-black.svg. */
+const BRAND = `<div class="brand"><svg class="brand__logo" viewBox="0 0 336 80" role="img" aria-label="Fren"><path fill="currentColor" d="M76 0C98.0914 0 116 17.9086 116 40C116 62.0914 98.0914 80 76 80H52C47.0684 80 42.5304 77.306 40.1689 72.9766L32 58H44C44 58 48 58 48 54C48 50 44 50 44 50H37.0586C31.4386 49.9998 26.2304 47.0506 23.3389 42.2314L16 30H44C44 30 48 30 48 26C48 22 44 22 44 22H21.498C15.6432 22 10.2559 18.802 7.45215 13.6621L0 0H76ZM84 24C75.1634 24 68 31.1634 68 40C68 48.8366 75.1634 56 84 56C92.8366 56 100 48.8366 100 40C100 31.1634 92.8366 24 84 24Z"/><circle cx="92" cy="40" r="8" fill="currentColor"/><path fill="currentColor" d="M254.516 22.8878C258.804 22.8878 262.628 23.6605 265.988 25.2045C269.348 26.7164 272.116 28.8394 274.292 31.5736C276.5 34.2757 278.021 37.4761 278.853 41.1754C279.685 44.8425 279.717 48.8316 278.949 53.142H242.179C242.211 55.0719 242.787 56.761 243.907 58.2084C245.027 59.6559 246.563 60.7972 248.515 61.6335C250.467 62.4376 252.739 62.8399 255.331 62.84C258.211 62.84 260.948 62.4705 263.54 61.7307C266.132 60.9587 268.612 59.7846 270.98 58.2084L275.925 68.9195C274.421 70.0775 272.468 71.1231 270.068 72.056C267.7 72.9566 265.172 73.6646 262.484 74.1793C259.828 74.7262 257.284 75 254.852 75C249.475 75 244.755 73.9216 240.691 71.7664C236.627 69.579 233.458 66.5396 231.186 62.6476C228.914 58.7231 227.778 54.1386 227.778 48.8953C227.778 45.0996 228.434 41.6092 229.746 38.4247C231.09 35.2402 232.946 32.4898 235.314 30.1738C237.714 27.8578 240.531 26.0722 243.763 24.8177C247.027 23.5311 250.612 22.8878 254.516 22.8878ZM184.259 20.6201H155.937V34.5648H181.283V48.6057H155.937V73.552H140V6H184.259V20.6201ZM222.44 22.7916C223.528 22.7916 224.504 22.8563 225.368 22.9849C226.232 23.1136 227.081 23.258 227.912 23.4188L226.04 39.6793C224.952 39.2934 223.8 38.9876 222.584 38.7624C221.368 38.5052 220.152 38.3766 218.936 38.3766C215.96 38.3766 213.496 39.2452 211.544 40.982C209.624 42.6869 208.663 45.1963 208.663 48.5095V73.552H192.919V24.3357H208.663V30.0776C210.135 27.5364 212.088 25.6872 214.52 24.5291C216.952 23.3711 219.592 22.7916 222.44 22.7916ZM315.887 22.8878C320.496 22.8878 324.288 23.8049 327.264 25.6384C330.24 27.4397 332.432 29.7881 333.84 32.6829C335.28 35.5458 336 38.5859 336 41.8027V73.552H320.255V46.7729C320.255 43.8136 319.471 41.4814 317.903 39.7765C316.367 38.0716 314.095 37.2192 311.086 37.2192C309.166 37.2193 307.486 37.6365 306.046 38.4728C304.638 39.3092 303.534 40.5002 302.734 42.0442C301.934 43.556 301.534 45.2928 301.534 47.2549V73.552H285.789V24.3357H301.534V29.5465C303.358 27.2305 305.519 25.5415 308.015 24.48C310.511 23.4186 313.135 22.8878 315.887 22.8878ZM254.083 34.3233C251.043 34.3234 248.515 35.0632 246.499 36.5429C244.515 38.0225 243.395 40.0013 243.139 42.4781H263.972C263.908 40.0012 262.996 38.0226 261.236 36.5429C259.476 35.0633 257.091 34.3233 254.083 34.3233Z"/></svg><small>dashboard</small></div>`;
 const ic = (name: string) => `<svg class="ic"><use href="#${name}"/></svg>`;
 const lg = (name: string) => `<svg class="lg"><use href="#${name}"/></svg>`;
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 export const LOGIN_PAGE = (message: string) => `<!doctype html><html lang="en"><head>${HEAD}<title>Fren dashboard</title></head>
-<body><div class="center"><div class="brand">Fren<small>dashboard</small></div><p class="muted">${esc(message)}</p></div></body></html>`;
+<body><div class="center">${BRAND}<p class="muted">${esc(message)}</p></div></body></html>`;
 
 const COMMON_JS = `
   const $ = (id) => document.getElementById(id);
@@ -341,7 +346,7 @@ export interface SignInMethods {
 export const SIGNIN_PAGE = (m: SignInMethods) => `<!doctype html><html lang="en"><head>${HEAD}<title>Log in · Fren</title></head>
 <body>
 ${ICONS}
-<header class="top"><div class="top__in"><div class="brand">Fren<small>dashboard</small></div></div></header>
+<header class="top"><div class="top__in">${BRAND}</div></header>
 <main class="signin">
   <p class="kicker">Your Fren</p>
   <h1>Log in to your dashboard</h1>
@@ -406,8 +411,8 @@ ${ICONS}
 export const DASHBOARD_PAGE = `<!doctype html><html lang="en"><head>${HEAD}<title>Fren dashboard</title></head>
 <body>
 ${ICONS}
-<header class="top"><div class="top__in"><div class="brand">Fren<small>dashboard</small></div>
-  <div class="top__r"><span class="pill" id="pill"><i></i><span id="pill-t">Loading…</span></span><button class="btn btn--2 btn--sm" id="tour-open" aria-label="Show me around">${ic("i-target")}<span>Tour</span></button><button class="link" id="logout">Log out</button></div></div>
+<header class="top"><div class="top__in">${BRAND}
+  <div class="top__r"><span class="pill" id="pill"><i></i><span id="pill-t">Loading…</span></span><button class="btn btn--2 btn--sm" id="tour-open" aria-label="Show me around">${ic("i-compass")}<span>Tour</span></button><button class="link" id="logout">Log out</button></div></div>
 <div class="demo" id="demo-bar" hidden>${ic("i-flag")}<span>Demo: pretend money and a pretend chat. Nothing here is real.</span></div></header>
 <main class="layout">
  <div class="col">
@@ -452,7 +457,7 @@ ${ICONS}
     <div class="card__h"><span class="ico">${ic("i-history")}</span><div><p class="kicker">History</p><h2>What Fren did</h2></div></div>
     <ul class="hist" id="hist"></ul>
     <p class="muted" id="hist-empty" style="margin-top:4px"></p>
-    <div class="row hist-more" id="hist-more-row" hidden><button class="btn btn--2 btn--sm" type="button" id="hist-more">${ic("i-list")}<span>Show all</span></button></div>
+    <div class="row hist-more" id="hist-more-row" hidden><button class="btn btn--2 btn--sm" type="button" id="hist-more">${ic("i-down")}<span>Show all</span></button></div>
     <details><summary>Everything else Fren noted</summary><ul class="ev" id="events"></ul></details>
   </section>
 
@@ -740,7 +745,7 @@ ${ICONS}
     const st = { done: ["Done", "tag--ok", "i-check"], failed: ["Didn't go through", "tag--bad", "i-x"], cancelled: ["Cancelled", "", "i-x"], active: ["Watching the price", "tag--wait", "i-clock"], rejected: ["Blocked by your limits", "tag--bad", "i-shield"] };
     const more = d.history.length - HIST_SHORT;
     $("hist-more-row").hidden = more <= 0;
-    setBtn($("hist-more"), histAll ? "i-list" : "i-down", histAll ? "Show fewer" : "Show all " + d.history.length);
+    setBtn($("hist-more"), histAll ? "i-up" : "i-down", histAll ? "Show fewer" : "Show all " + d.history.length);
     for (const h of histAll ? d.history : d.history.slice(0, HIST_SHORT)) {
       const li = el("li");
       const top = el("div", "when", when(h.at) + (h.mode === "paper" ? " · practice" : " · real money"));
@@ -932,7 +937,7 @@ ${ICONS}
     const hole = $("tour-hole"), tip = $("tour-tip");
     const target = () => document.querySelector('[data-tour="' + STEPS[i].k + '"]');
     const tall = () => Boolean(STEPS[i].bottom) && target().getBoundingClientRect().height > innerHeight * 0.45;
-    const tryLine = (s, ok) => { const t = $("tour-try"); t.className = "try" + (ok ? " done" : ""); t.replaceChildren(icon(ok ? "i-check" : "i-target"), el("span", null, (ok ? "Done. " : "Try it: ") + s.t)); };
+    const tryLine = (s, ok) => { const t = $("tour-try"); t.className = "try" + (ok ? " done" : ""); t.replaceChildren(icon(ok ? "i-check" : "i-circle"), el("span", null, (ok ? "Done. " : "Try it: ") + s.t)); };
     function place() {
       if (i < 0) return;
       const t = target();
