@@ -189,6 +189,8 @@ details summary .n{font-weight:400;color:var(--muted);margin-left:auto;font-size
 .m--you .bub{background:var(--blue);border-radius:18px 18px 4px 18px}
 .m--fren .bub{background:#fff;border:1px solid var(--line);border-radius:18px 18px 18px 4px}
 .m time{font-size:11px;color:var(--muted);margin-top:5px;padding:0 4px}
+.bub code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;padding:1px 5px;border-radius:5px;background:rgba(127,127,127,.14)}
+.m--you .bub code{background:rgba(255,255,255,.22)}
 .bub.typing{color:var(--muted);background:var(--line-2);border:0}
 .typing .dots{display:inline-flex;gap:3px;margin-left:6px;vertical-align:middle}
 .typing .dots i{width:5px;height:5px;border-radius:50%;background:currentColor;animation:fren-dot 1.2s infinite ease-in-out}
@@ -312,11 +314,16 @@ const COMMON_JS = `
   function setBtn(b, name, label) { b.replaceChildren(icon(name), el("span", null, label)); }
   /** Bot text shown as part of the page (history, receipts) loses its emoji: the page has its own icons. The chat keeps them. */
   const plain = (s) => String(s == null ? "" : s).replace(/[\\u{1F000}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2B00}-\\u{2BFF}\\u{FE0F}\\u{200D}]/gu, "").replace(/^[ \\t]+/gm, "").replace(/[ \\t]{2,}/g, " ");
-  /** A chat bubble: the bot writes Telegram-style **bold**; show it bold here too, never as raw stars. Text still goes in with textContent. */
+  /** A chat bubble: the bot writes Telegram-style **bold** and inline code in backticks; show them as bold and code here too, never as raw stars or backticks. Text still goes in with textContent. */
   function bubble(text) {
-    const b = el("div", "bub"); const parts = String(text == null ? "" : text).split("**");
-    if (parts.length < 3) { b.textContent = parts.join("**"); return b; }
-    parts.forEach((t, i) => { if (!t) return; b.append(i % 2 && i < parts.length - 1 ? el("b", null, t) : document.createTextNode(i % 2 ? "**" + t : t)); });
+    const b = el("div", "bub"); const s = String(text == null ? "" : text);
+    const re = /\\*\\*([^*\\n]+?)\\*\\*|\\u0060([^\\u0060\\n]+)\\u0060/g; let last = 0, m;
+    while ((m = re.exec(s))) {
+      if (m.index > last) b.append(document.createTextNode(s.slice(last, m.index)));
+      b.append(m[1] != null ? el("b", null, m[1]) : el("code", null, m[2]));
+      last = re.lastIndex;
+    }
+    if (last < s.length) b.append(document.createTextNode(s.slice(last)));
     return b;
   }
   async function post(path, body) {

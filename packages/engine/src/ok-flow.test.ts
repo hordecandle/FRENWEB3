@@ -146,8 +146,8 @@ describe("/ok all", () => {
     await t.fren.changeLimits("maxTradeUsd=5000");
     await t.fren.approve("all");
     await t.fren.stop();
-    expect(await t.fren.approve("all")).toBe("Nothing is waiting for your OK right now.");
-    expect(await t.fren.approve("")).toBe("Nothing is waiting for your OK right now.");
+    expect(await t.fren.approve("all")).toMatch(/^Nothing is waiting for your OK: the last request was cancelled \(\d\d:\d\d\):\n• /);
+    expect(await t.fren.approve("")).toMatch(/^Nothing is waiting for your OK: the last request was cancelled/);
     expect(t.store.paperPositions()).toHaveLength(0);
     expect(t.fren.limits().maxTradeUsd).not.toBe(5000);
   });
@@ -160,7 +160,7 @@ describe("a request that ran out", () => {
     await t.fren.submit(goldLong(100));
     expect(await t.fren.status()).toMatch(/Waiting for your OK \(reply \/ok\):\n• Bet \$100 that GOLD goes up/);
     vi.setSystemTime(Date.now() + 11 * 60_000);
-    expect(await t.fren.approve("")).toMatch(/^Nothing is waiting for your OK now: that request ran out/);
+    expect(await t.fren.approve("")).toMatch(/^Nothing is waiting for your OK: this request ran out at \d\d:\d\d .*\n• Bet \$100 that GOLD goes up[^\n]*\nWant it again\?/);
     expect(await t.fren.status()).not.toMatch(/Waiting for your OK|\/ok/);
     expect(t.store.plansWithStatus("pending_confirm")).toHaveLength(0);
     expect(t.store.paperPositions()).toHaveLength(0);
@@ -252,5 +252,63 @@ describe("store", () => {
     expect(s.livePending().map((p) => p.code)).toEqual(["ABCDEF"]);
     s.putPending({ code: "GHJKMN", kind: "limits", payload: "{}", expiresAt: new Date(Date.now() + 60_000).toISOString(), label: "Loosen your limits", usd: 5 });
     expect(s.livePending()[1]).toMatchObject({ label: "Loosen your limits", usd: 5 });
+  });
+});
+
+/**
+ * 22.11 18:24–18:55, the owner: asked to withdraw from Kamino, tapped Approve on the
+ * dashboard, later typed "ок" and heard a bare "nothing is waiting", while the model kept
+ * saying the withdrawal still waited. Now /ok names how the last request ended, and the
+ * model hears the engine's live state before every answer.
+ */
+describe("how the last request ended", () => {
+  it("went through: /ok says it already went through, with the time and the proof link when there is one", async () => {
+    const t = setup();
+    await t.fren.submit(goldLong(100));
+    await t.fren.approve("");
+    const out = await t.fren.approve("");
+    expect(out).toMatch(/^Nothing is waiting for your OK: the last request already went through \(\d\d:\d\d\):\n• Bet \$100 that GOLD goes up/);
+    expect(out).not.toMatch(/Want it again/);
+    expect(localize(out, "ru")).toMatch(/^Сейчас ничего не ждёт твоего ок: последний запрос уже выполнен \(\d\d:\d\d\):/);
+  });
+
+  it("went through with an explorer link: the link is shown and given to the model", async () => {
+    const t = setup();
+    t.store.setKv("ok_last", JSON.stringify({ label: "Withdraw all from Kamino to USDC", outcome: "done", at: new Date().toISOString(), link: "https://solscan.io/tx/abc" }));
+    const out = await t.fren.approve("");
+    expect(out).toMatch(/• Withdraw all from Kamino to USDC\n🔗 https:\/\/solscan\.io\/tx\/abc$/);
+    expect(t.fren.agentContext()).toMatch(/Last request: Withdraw all from Kamino to USDC\. It already went through.*proof: https:\/\/solscan\.io\/tx\/abc/);
+  });
+
+  it("ran out: /ok says when and offers to prepare it anew, and never runs it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t = setup();
+    await t.fren.submit(goldLong(100));
+    vi.setSystemTime(Date.now() + 11 * 60_000);
+    const out = await t.fren.approve("");
+    expect(out).toMatch(/ran out at \d\d:\d\d/);
+    expect(localize(out, "ru")).toMatch(/истёк в \d\d:\d\d .*\n• [^\n]+\nПовторить\? Напиши, и я подготовлю заново\.$/s);
+    expect(await t.fren.approve("all")).toMatch(/ran out/);
+    expect(t.store.paperPositions()).toHaveLength(0);
+  });
+
+  it("an old outcome (over a day) is forgotten: plain \"nothing is waiting\"", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t = setup();
+    await t.fren.submit(goldLong(100));
+    await t.fren.approve("");
+    vi.setSystemTime(Date.now() + 25 * 3600_000);
+    expect(await t.fren.approve("")).toBe("Nothing is waiting for your OK right now.");
+  });
+
+  it("the model hears the live state: nothing waiting is said plainly, a waiting request is named", async () => {
+    const t = setup();
+    expect(t.fren.agentContext()).toMatch(/Nothing is waiting for the owner's \/ok\. Never say that something waits for \/ok\./);
+    await t.fren.submit(goldLong(100));
+    expect(t.fren.agentContext()).toMatch(/Waiting for the owner's \/ok \(or the Approve button on the dashboard\): Bet \$100 that GOLD goes up/);
+    await t.fren.approve("");
+    const ctx = t.fren.agentContext();
+    expect(ctx).toMatch(/Nothing is waiting for the owner's \/ok/);
+    expect(ctx).toMatch(/Last request: Bet \$100 that GOLD goes up.*already went through/);
   });
 });

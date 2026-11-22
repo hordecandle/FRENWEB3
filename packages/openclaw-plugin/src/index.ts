@@ -672,6 +672,27 @@ export function registerLoopGuard(api: Pick<OpenClawPluginApi, "on">, guard: Loo
 }
 
 /**
+ * Before every answer the model gets the engine's live state: what waits for /ok and how
+ * the last request ended. Its memory of the chat goes stale (the dashboard's Approve button
+ * and expiry happen outside the chat), and it used to say a request "still waits" after it
+ * had run. Best effort: a slow or missing engine just leaves the turn as it was.
+ */
+export function registerStateContext(api: Pick<OpenClawPluginApi, "on">, client: Pick<EngineClient, "call">, waitMs = 3000) {
+  if (typeof api.on !== "function") return;
+  api.on("before_prompt_build", async () => {
+    try {
+      const r = await Promise.race([
+        client.call<{ text?: string }>("GET", "/agent/context"),
+        new Promise<null>((res) => setTimeout(() => res(null), waitMs).unref?.()),
+      ]);
+      return r?.text ? { prependContext: r.text } : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+}
+
+/**
  * Tells the engine the gateway is up, so the setup page says "live" only when
  * the bot can answer. The engine may still be starting, so try for a minute.
  */
@@ -710,6 +731,7 @@ export default definePluginEntry({
       registerCommands(api, client);
       registerLoopGuard(api, new LoopGuard(client), client);
       registerReadySignal(api, client);
+      registerStateContext(api, client);
     }
   },
 });

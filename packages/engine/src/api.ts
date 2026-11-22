@@ -36,6 +36,7 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     "GET /agent/guard": async () => (budget ? { guard: budget.limits(), usedToday: budget.usedToday() } : { guard: null }),
     "POST /agent/turn": async () => (budget ? budget.take() : { allow: true, used: 0, limit: 0 }),
     "POST /plans": async (b) => fren.submit(b.plan),
+    "GET /agent/context": async () => ({ text: fren.agentContext() }),
     "POST /approve": async (b) => fren.approveWithReceipt(String(b.code ?? "")),
     "POST /limits": async (b) => fren.changeLimits(String(b.args ?? "")),
     "POST /resume": async () => fren.requestResume(),

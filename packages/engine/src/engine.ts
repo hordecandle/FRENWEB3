@@ -133,6 +133,31 @@ function planLabel(resolved: ResolvedStep[]): { label: string; usd?: number } {
 /** How long a code that ran out is still recognised as "ran out" rather than "wrong". */
 const EXPIRED_MEMORY_MS = 30 * 60_000;
 
+/** How long "/ok" with nothing waiting, and the model, still hear how the last request ended. */
+const LAST_OUTCOME_MS = 24 * 3600_000;
+const LAST_OUTCOME_KEY = "ok_last";
+type Outcome = "done" | "expired" | "failed" | "cancelled";
+export interface LastOutcome {
+  label: string;
+  outcome: Outcome;
+  at: string;
+  /** Proof on an explorer when it went through and the venue gave one. */
+  link?: string;
+}
+const hhmm = (d: Date) => d.toTimeString().slice(0, 5);
+const NOTHING_SINCE: Record<Outcome, (t: string) => string> = {
+  done: (t) => `Nothing is waiting for your OK: the last request already went through (${t}):`,
+  expired: (t) => `Nothing is waiting for your OK: this request ran out at ${t} (requests last 10 minutes) and wasn't done:`,
+  failed: (t) => `Nothing is waiting for your OK: the last request didn't go through (${t}):`,
+  cancelled: (t) => `Nothing is waiting for your OK: the last request was cancelled (${t}):`,
+};
+const OUTCOME_FOR_MODEL: Record<Outcome, string> = {
+  done: "already went through (the owner approved it, in Telegram or with the Approve button on the dashboard)",
+  expired: "ran out without being done; nothing will happen unless the owner asks again, then prepare it anew",
+  failed: "was approved but didn't go through",
+  cancelled: "was cancelled",
+};
+
 function nothingWaiting(ranOut: boolean): string {
   if (ranOut) return "Nothing is waiting for your OK now: that request ran out (codes last 10 minutes). Ask me again if you still want it.";
   return "Nothing is waiting for your OK right now.";
@@ -589,7 +614,7 @@ export class Fren {
     if (!entered) {
       // A tap on /ok, or the owner typing it: only the owner can send /ok, and the
       // message they answer says what it is for, so one waiting request is enough.
-      if (live.length === 0) return nothingWaiting(expired.length > 0 || this.expiredLately());
+      if (live.length === 0) return this.nothingNow(expired.length > 0 || this.expiredLately());
       if (live.length > 1) return this.okMenu(live, "pick");
       p = this.d.store.takePending(live[0]!.code);
     } else if (/^\d{1,2}$/.test(entered)) {
@@ -597,7 +622,7 @@ export class Fren {
       // place then, so a request that ran out never shifts the next one into its number.
       const shown = this.shownMenu();
       const at = shown?.codes[Number(entered) - 1];
-      if (!at) return live.length ? this.okMenu(live, "pick") : nothingWaiting(expired.length > 0 || this.expiredLately());
+      if (!at) return live.length ? this.okMenu(live, "pick") : this.nothingNow(expired.length > 0 || this.expiredLately());
       p = this.d.store.takePending(at);
       if (!p) return live.length ? this.okMenu(live, "gone") : "That request already ran out. Ask me again if you still want it.";
     } else {
@@ -626,6 +651,8 @@ export class Fren {
     const gone = this.d.store.takeExpiredPending();
     const now = Date.now();
     for (const [c, at] of this.expiredCodes) if (now - at > EXPIRED_MEMORY_MS) this.expiredCodes.delete(c);
+    const last = gone[gone.length - 1];
+    if (last) this.noteOutcome({ label: last.label ?? KIND_LABEL[last.kind], outcome: "expired", at: new Date(now).toISOString() });
     for (const p of gone) {
       this.expiredCodes.set(p.code, now);
       if (p.kind !== "plan") continue;
@@ -643,6 +670,75 @@ export class Fren {
   private expiredLately(): boolean {
     const now = Date.now();
     return [...this.expiredCodes.values()].some((at) => now - at <= EXPIRED_MEMORY_MS);
+  }
+
+  private noteOutcome(o: LastOutcome): void {
+    this.d.store.setKv(LAST_OUTCOME_KEY, JSON.stringify(o));
+  }
+
+  /**
+   * How the owner's last request ended (went through, ran out, failed, cancelled), for a day.
+   * "/ok" with nothing waiting says it, and the model hears it before every answer, so
+   * neither claims a request still waits after the Approve button ran it or it ran out.
+   * Plans are read from their own record too (covers ones settled before this was kept).
+   */
+  lastOutcome(): LastOutcome | null {
+    const since = new Date(Date.now() - LAST_OUTCOME_MS).toISOString();
+    let best: LastOutcome | null = null;
+    try {
+      const k = JSON.parse(this.d.store.getKv(LAST_OUTCOME_KEY) ?? "null") as LastOutcome | null;
+      if (k && k.at > since) best = k;
+    } catch {
+      /* a broken note is just no note */
+    }
+    const rec = this.d.store.recentPlans(1)[0];
+    if (rec) {
+      const steps = this.d.store.getSteps(rec.id);
+      const at = steps.reduce((m, s) => (s.updatedAt > m ? s.updatedAt : m), rec.createdAt);
+      if (at > since && (!best || at > best.at)) {
+        const outcome: Outcome =
+          rec.status === "done" || rec.status === "active"
+            ? "done"
+            : steps.some((s) => s.status === "expired" && s.result === "Code ran out")
+              ? "expired"
+              : rec.status === "rejected"
+                ? "failed"
+                : "cancelled";
+        const label = steps.map((s) => (rec.plan.steps[s.idx] ? describeStep(rec.plan.steps[s.idx]!, s.resolved ?? undefined) : "")).filter(Boolean).join(" + ");
+        const link = outcome === "done" ? proofLinks(steps.map((s) => s.result ?? "").join("\n"))[0]?.url : undefined;
+        best = { label: label || KIND_LABEL.plan, outcome, at, ...(link ? { link } : {}) };
+      }
+    }
+    return best;
+  }
+
+  /** "Nothing is waiting", and how the last request ended when that was today. */
+  private nothingNow(ranOut: boolean): string {
+    const last = this.lastOutcome();
+    if (!last) return nothingWaiting(ranOut);
+    const lines = [NOTHING_SINCE[last.outcome](hhmm(new Date(last.at))), `• ${last.label}`];
+    if (last.link) lines.push(`🔗 ${last.link}`);
+    if (last.outcome !== "done") lines.push("Want it again? Ask me and I'll prepare it anew.");
+    return lines.join("\n");
+  }
+
+  /**
+   * What the model hears before every answer: what waits for /ok right now and how the
+   * last request ended. Its own memory of the chat goes stale (the dashboard's Approve
+   * button and expiry happen outside it), so this is the truth it answers from.
+   */
+  agentContext(): string {
+    this.sweepExpired();
+    const live = this.d.store.livePending();
+    const lines = [`[Fren engine, live state at ${hhmm(new Date())}. This is the truth and overrides anything said earlier in this chat.]`];
+    lines.push(
+      live.length
+        ? `Waiting for the owner's /ok (or the Approve button on the dashboard): ${live.map((p) => p.label ?? KIND_LABEL[p.kind]).join("; ")}.`
+        : "Nothing is waiting for the owner's /ok. Never say that something waits for /ok.",
+    );
+    const last = this.lastOutcome();
+    if (last) lines.push(`Last request: ${last.label}. It ${OUTCOME_FOR_MODEL[last.outcome]} (at ${hhmm(new Date(last.at))})${last.link ? `, proof: ${last.link}` : ""}.`);
+    return lines.join("\n");
   }
 
   /** The list a bare /ok shows when several requests wait; the numbers in it are kept for /ok N and /ok all. */
@@ -689,7 +785,7 @@ export class Fren {
    */
   private async approveAll(): Promise<string | OwnerRequestResult> {
     const live = this.d.store.livePending();
-    if (live.length === 0) return nothingWaiting(false);
+    if (live.length === 0) return this.nothingNow(false);
     if (live.length === 1) return this.runApproved(this.d.store.takePending(live[0]!.code)!);
     const shown = this.shownMenu();
     const same = shown && shown.codes.length === live.length && live.every((p) => shown.codes.includes(p.code));
@@ -710,7 +806,18 @@ export class Fren {
     return { text: out.join("\n") };
   }
 
+  /** Runs an approved request and keeps how it ended (see lastOutcome). */
   private async runApproved(p: PendingAction): Promise<string | OwnerRequestResult> {
+    const r = await this.runApprovedInner(p);
+    const text = (typeof r === "string" ? r : r.text).trim();
+    const plan = p.kind === "plan" ? this.d.store.getPlan(p.payload) : null;
+    const went = plan ? plan.status === "done" || plan.status === "active" : !/^(❌|Couldn't|Not doing)/u.test(text);
+    const link = went ? proofLinks(text)[0]?.url : undefined;
+    this.noteOutcome({ label: p.label ?? KIND_LABEL[p.kind], outcome: went ? "done" : "failed", at: new Date().toISOString(), ...(link ? { link } : {}) });
+    return r;
+  }
+
+  private async runApprovedInner(p: PendingAction): Promise<string | OwnerRequestResult> {
     this.wrongCodes = 0;
     if (p.kind === "limits") {
       // Only the fields the owner asked to change, laid over the limits as they
