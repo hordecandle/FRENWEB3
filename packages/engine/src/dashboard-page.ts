@@ -247,6 +247,13 @@ const COMMON_JS = `
   function setBtn(b, name, label) { b.replaceChildren(icon(name), el("span", null, label)); }
   /** Bot text shown as part of the page (history, receipts) loses its emoji: the page has its own icons. The chat keeps them. */
   const plain = (s) => String(s == null ? "" : s).replace(/[\\u{1F000}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2B00}-\\u{2BFF}\\u{FE0F}\\u{200D}]/gu, "").replace(/^[ \\t]+/gm, "").replace(/[ \\t]{2,}/g, " ");
+  /** A chat bubble: the bot writes Telegram-style **bold**; show it bold here too, never as raw stars. Text still goes in with textContent. */
+  function bubble(text) {
+    const b = el("div", "bub"); const parts = String(text == null ? "" : text).split("**");
+    if (parts.length < 3) { b.textContent = parts.join("**"); return b; }
+    parts.forEach((t, i) => { if (!t) return; b.append(i % 2 && i < parts.length - 1 ? el("b", null, t) : document.createTextNode(i % 2 ? "**" + t : t)); });
+    return b;
+  }
   async function post(path, body) {
     const res = await fetch(path, { method: "POST", headers: { "content-type": "application/json", "x-fren": "1" }, body: JSON.stringify(body || {}) });
     const data = await res.json().catch(() => ({}));
@@ -684,7 +691,7 @@ ${ICONS}
     if (!s.messages.length) list.append(el("p", "muted", "No messages yet. Say hi."));
     for (const m of s.messages) {
       const w = el("div", "m m--" + m.from);
-      w.append(el("div", "bub", m.text), el("time", null, (m.from === "you" ? "You · " : "Fren · ") + when(new Date(m.at).toISOString())));
+      w.append(bubble(m.text), el("time", null, (m.from === "you" ? "You · " : "Fren · ") + when(new Date(m.at).toISOString())));
       list.append(w);
     }
     if (s.thinking) { const w = el("div", "m m--fren"); w.append(el("div", "bub typing", "Fren is thinking…")); list.append(w); }
