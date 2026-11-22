@@ -209,4 +209,11 @@ describe("Bee's ANT long, from the chat tools down, with only USDC on Solana", (
     expect(t.notifier.sent.at(-1)).toMatch(/Withdraw everything free \(\$12\.50\) USDC from Hyperliquid/);
     expect(t.fake.exchange.some((b) => (b.action as { type: string }).type === "withdraw3")).toBe(false);
   });
+
+  it("\"Polymarket, Fed in December, $5 on Yes\": fren_markets lists the bet and quotes it", async () => {
+    t.poly.addMarket({ slug: "fed-no-dissent-dec", question: "Will no one dissent the December Fed decision?", endDate: "2026-12-10T04:59:00Z", yesAsk: 0.61 });
+    const out = await run("fren_markets", { query: "Fed December polymarket", betUsd: 5 });
+    expect(out).toMatch(/market "fed-no-dissent-dec"/);
+    expect(out).toMatch(/\$5\.00 on Yes buys 8\.2 shares/);
+  });
 });

@@ -379,6 +379,48 @@ export class PolymarketVenue implements VenueAdapter {
   async flatten(): Promise<string[]> {
     return [];
   }
+
+  /**
+   * Open markets for free words ("bitcoin", "Fed December"), best word match
+   * first, as lines for fren_markets. With a budget, also what that buys on
+   * the first outcome ("Yes" when there is one), walking the real book.
+   * Throws when Polymarket can't be reached, so the caller can say so.
+   */
+  async searchLines(query: string, budgetUsd?: number, limit = 6): Promise<string[]> {
+    const q = query.replace(/\b(on\s+)?poly\s?markets?\b/gi, " ").replace(/\s+/g, " ").trim() || query.trim();
+    if (!q) return [];
+    const found = await this.o.data.search(q);
+    const words = q.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+    const hits = (m: PolyMarket) => words.filter((w) => m.question.toLowerCase().includes(w)).length;
+    const seen = new Set<string>();
+    const open = found
+      .filter((m) => !m.closed && m.acceptingOrders && !m.resolved && m.outcomes.length > 0 && !seen.has(m.slug) && Boolean(seen.add(m.slug)))
+      .map((m, i) => ({ m, i, h: hits(m) }))
+      .sort((a, b) => b.h - a.h || a.i - b.i)
+      .slice(0, limit)
+      .map((x) => x.m);
+    const lines: string[] = [];
+    for (const [i, m] of open.entries()) {
+      const prices = m.outcomes.map((o) => `${o.label} ${o.price != null ? cents(o.price) : "?"}`).join(" / ");
+      const end = m.endDate ? `, ends ${shortDate(new Date(m.endDate))}` : "";
+      lines.push(`• ${m.question}: ${prices}${end}. market "${m.slug}"`);
+      if (!budgetUsd || !(budgetUsd > 0) || i >= 3) continue;
+      const out = m.outcomes.find((o) => o.label.toLowerCase() === "yes") ?? m.outcomes[0]!;
+      const book = await this.o.data.book(out.assetId).catch(() => null);
+      const fill = book ? walkBook(book.asks, { usd: budgetUsd }, 0.99, "buy") : null;
+      if (!book || !fill || fill.shares <= 0) {
+        lines.push(`  ${fmtUsd(budgetUsd)} on ${out.label}: no sellers right now.`);
+      } else if (fill.shares < book.minOrderSize) {
+        lines.push(`  ${fmtUsd(budgetUsd)} on ${out.label}: too small, Polymarket's minimum here is ${fmtShares(book.minOrderSize)} shares.`);
+      } else {
+        const short = fill.usd < budgetUsd - 0.01 ? ` (only ${fmtUsd(fill.usd)} is for sale under 99¢)` : "";
+        lines.push(
+          `  ${fmtUsd(fill.usd)} on ${out.label} buys ${fmtShares(fill.shares)} shares at about ${cents(fill.avgPrice)}, pays ${fmtUsd(fill.shares)} if ${out.label}, else $0${short}.`,
+        );
+      }
+    }
+    return lines;
+  }
 }
 
 export function marketKind(question: string): PredictionQuote["kind"] {

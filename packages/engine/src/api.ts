@@ -25,7 +25,10 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     "GET /health": async () => ({ ok: true }),
     "GET /wallet": async () => fren.wallet(),
     "GET /status": async () => ({ text: await fren.status() }),
-    "GET /markets": async (_b, url) => ({ text: await fren.searchMarkets(url.searchParams.get("q") ?? "") }),
+    "GET /markets": async (_b, url) => {
+      const bet = Number(url.searchParams.get("bet"));
+      return { text: await fren.searchMarkets(url.searchParams.get("q") ?? "", Number.isFinite(bet) && bet > 0 ? Math.min(bet, 1_000_000) : undefined) };
+    },
     "GET /yield": async () => ({ text: await fren.yieldRates() }),
     "GET /limits": async () => ({ limits: fren.limits(), text: describeLimits(fren.limits()) }),
     "GET /events": async (_b, url) => ({ events: fren.recentEvents(Number(url.searchParams.get("since") ?? 0)) }),

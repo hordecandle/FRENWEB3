@@ -1239,11 +1239,12 @@ It shows up as pUSD in your Polymarket wallet ${to}.`;
     this.d.store.setKv(key, String(exits.length ? last : Math.max(since, nowMs - 60_000)));
   }
 
-  async searchMarkets(query: string): Promise<string> {
-    const [perps, tokens, evmTokens] = await Promise.all([
+  async searchMarkets(query: string, betUsd?: number): Promise<string> {
+    const [perps, tokens, evmTokens, poly] = await Promise.all([
       this.d.hyperliquid.markets.search(query).catch(() => []),
       this.d.jupiter.searchTokens(query).catch(() => []),
       Promise.all(EVM_CHAINS.map((c) => this.d.relay.searchTokens(c, query).catch(() => []))).then((l) => l.flat()),
+      this.d.polymarket.searchLines(query, betUsd).catch(() => null),
     ]);
     const lines: string[] = [];
     if (perps.length) {
@@ -1265,6 +1266,12 @@ It shows up as pUSD in your Polymarket wallet ${to}.`;
     if (topEvm.length) {
       lines.push('EVM tokens via Relay (venue "relay", set `chain`, use the address as `token`):');
       for (const t of topEvm) lines.push(`• ${t.symbol} (${t.name}) on ${t.chain}: ${t.address}${t.verified ? " ✔ verified" : " ⚠ unverified"}`);
+    }
+    if (poly?.length) {
+      lines.push('Polymarket bets (venue "polymarket", kind "prediction", the quoted slug as `market`, an outcome as shown):');
+      lines.push(...poly);
+    } else if (poly === null) {
+      lines.push("Polymarket didn't answer from this server just now, so its markets aren't listed. Say so; don't offer a Derive option or another market in their place.");
     }
     return lines.length ? lines.join("\n") : `Nothing found for "${query}".`;
   }

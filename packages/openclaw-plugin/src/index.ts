@@ -184,9 +184,15 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; 
       name: "fren_markets",
       label: "Find a market",
       description:
-        "Search Hyperliquid perps (crypto, gold, stocks, indices), Solana tokens (pump.fun included) and tokens on Base, Robinhood Chain and Arbitrum. Call this before fren_trade whenever you are not sure of the exact symbol, mint or contract address.",
-      parameters: Type.Object({ query: Type.String({ description: 'What the user called it: "gold", "nasdaq", "BTC", "bonk", or a contract address.' }) }),
-      run: async (p) => (await client.call<{ text: string }>("GET", `/markets?q=${encodeURIComponent(String(p.query))}`)).text,
+        "Search Hyperliquid perps (crypto, gold, stocks, indices), Solana tokens (pump.fun included), tokens on Base, Robinhood Chain and Arbitrum, and Polymarket bets on events (\"Fed December\", \"bitcoin November\", elections). Call this before fren_trade whenever you are not sure of the exact symbol, mint, contract address or Polymarket slug. When the user asks for Polymarket, use a Polymarket market from here; never swap in a Derive option.",
+      parameters: Type.Object({
+        query: Type.String({ description: 'What the user called it: "gold", "nasdaq", "BTC", "bonk", a contract address, or event words like "Fed December".' }),
+        betUsd: Type.Optional(Type.Number({ exclusiveMinimum: 0, description: "For Polymarket: quote what this many dollars buys on Yes in the top markets." })),
+      }),
+      run: async (p) => {
+        const bet = typeof p.betUsd === "number" && p.betUsd > 0 ? `&bet=${p.betUsd}` : "";
+        return (await client.call<{ text: string }>("GET", `/markets?q=${encodeURIComponent(String(p.query))}${bet}`)).text;
+      },
     },
     {
       name: "fren_trade",
