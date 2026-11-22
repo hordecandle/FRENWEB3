@@ -47,6 +47,8 @@ export interface OpenClawChatOptions {
   sessionKey?: string;
   exec?: ExecOut;
   now?: () => number;
+  /** Default 4 s. */
+  acceptMs?: number;
 }
 
 /** Text out of an OpenClaw transcript entry: a string or a list of parts. */
@@ -66,12 +68,17 @@ export class OpenClawChat implements ChatBridge {
   private readonly now: () => number;
   /** Sends still running, so the page can say "Fren is thinking". */
   private running = 0;
+  /** How long a send may take to be turned down before the page says "Sent". */
+  private readonly acceptMs: number;
+  /** The last message that was accepted but then never reached Fren. */
+  private failed: { text: string; at: number; why: string } | null = null;
 
   constructor(o: OpenClawChatOptions = {}) {
     this.bin = o.bin ?? "openclaw";
     this.sessionKey = o.sessionKey ?? "agent:main:main";
     this.exec = o.exec ?? execOut;
     this.now = o.now ?? Date.now;
+    this.acceptMs = o.acceptMs ?? 4_000;
   }
 
   async history(limit = 40): Promise<ChatState> {
@@ -93,6 +100,11 @@ export class OpenClawChat implements ChatBridge {
       const at = typeof m.timestamp === "number" ? m.timestamp : Date.parse(String(m.timestamp ?? "")) || this.now();
       messages.push({ id: String(m.id ?? m.messageId ?? `${at}-${i}`), from: m.role === "user" ? "you" : "fren", text, at });
     });
+    // A message from here that never reached Fren shows up in the chat, not silently gone.
+    if (this.failed) {
+      const f = this.failed;
+      messages.push({ id: `failed-${f.at}`, from: "you", text: f.text, at: f.at }, { id: `failed-${f.at}-why`, from: "fren", text: `⚠️ ${f.why}`, at: f.at });
+    }
     const ch = data.sessionInfo?.channel ?? data.sessionInfo?.lastChannel;
     return { messages, thinking: this.running > 0, channel: typeof ch === "string" ? ch : null };
   }
@@ -101,11 +113,36 @@ export class OpenClawChat implements ChatBridge {
     // `--message=` keeps a message that starts with "-" from reading as a flag.
     const args = ["agent", "--session-key", this.sessionKey, `--message=${text}`, "--deliver", "--json"];
     this.running++;
+    this.failed = null;
     // The answer can take a while (tools, trades); the page polls the history meanwhile.
-    void this.exec(this.bin, args, 10 * 60_000)
-      .catch(() => null)
+    // A send that never reached Fren (gateway restarting, no chat to deliver to) fails
+    // within seconds: wait that long, so the page says so instead of "Sent".
+    const run = this.exec(this.bin, args, 10 * 60_000)
+      .catch((err: Error) => ({ code: 1, stdout: "", stderr: String(err?.message ?? err) }))
       .finally(() => this.running--);
+    const early = await Promise.race([run, new Promise<null>((r) => setTimeout(r, this.acceptMs).unref?.())]);
+    if (early && early.code !== 0) throw new Error(sendFailure(early));
+    if (!early)
+      void run.then((r) => {
+        if (r.code !== 0) this.failed = { text, at: this.now(), why: sendFailure(r) };
+      });
   }
+}
+
+/** Plain words for a send the gateway turned down. */
+export function sendFailure(r: { stdout: string; stderr: string }): string {
+  let msg = "";
+  try {
+    msg = String((JSON.parse(r.stdout) as { error?: { message?: unknown } }).error?.message ?? "");
+  } catch {
+    /* not JSON */
+  }
+  const all = `${msg} ${r.stderr}`;
+  if (/requires target|no (delivery|route)|not paired/i.test(all))
+    return "Fren couldn't find your Telegram chat to answer in. Send Fren any message in Telegram once, then try again here.";
+  if (/ECONNREFUSED|gateway|timed? ?out|unreachable|ENOENT/i.test(all))
+    return "Fren didn't get that: it's restarting or not running right now. Try again in a minute.";
+  return "Fren didn't get that message. Try again in a minute, or write in Telegram.";
 }
 
 /**

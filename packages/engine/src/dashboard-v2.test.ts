@@ -183,6 +183,44 @@ describe("dashboard v2", () => {
     expect(calls[1]).toEqual(["agent", "--session-key", "agent:main:main", "--message=-rf hi", "--deliver", "--json"]);
   });
 
+  it("chat send: a send the gateway turns down says so, on the page and later in the chat", async () => {
+    const history = { code: 0, stderr: "", stdout: JSON.stringify({ messages: [] }) };
+    const refused = { code: 1, stderr: "[openclaw] The CLI command failed.", stdout: JSON.stringify({ ok: false, error: { message: "Delivering to Telegram requires target <chatId>" } }) };
+    // Turned down at once: the page gets an error, not "Sent".
+    const fast = new OpenClawChat({ exec: async (_f, a) => (a[0] === "agent" ? refused : history), acceptMs: 50 });
+    await expect(fast.send("hi")).rejects.toThrow(/couldn't find your Telegram chat/);
+    // Gateway down while Fren restarts.
+    const down = new OpenClawChat({ exec: async () => ({ code: 1, stdout: "", stderr: "Error: connect ECONNREFUSED 127.0.0.1:18789" }), acceptMs: 50 });
+    await expect(down.send("hi")).rejects.toThrow(/restarting/);
+    // Turned down after the page already said "Sent": the chat shows it.
+    let finish: (r: typeof refused) => void = () => {};
+    const slow = new OpenClawChat({ exec: (_f, a) => (a[0] === "agent" ? new Promise((r) => (finish = r)) : Promise.resolve(history)), acceptMs: 20, now: () => 5 });
+    await slow.send("what do I hold?");
+    finish({ code: 1, stdout: "", stderr: "something else" });
+    await new Promise((r) => setTimeout(r, 5));
+    const h = await slow.history();
+    expect(h.messages.map((m) => [m.from, m.text])).toEqual([
+      ["you", "what do I hold?"],
+      ["fren", "⚠️ Fren didn't get that message. Try again in a minute, or write in Telegram."],
+    ]);
+    // The next good send clears it.
+    const ok = slow.send("again");
+    finish({ code: 0, stdout: "{}", stderr: "" });
+    await ok;
+    expect((await slow.history()).messages).toEqual([]);
+  });
+
+  it("chat send from the page: a refused send is an error the page shows, and Telegram isn't told", async () => {
+    const chat = new OpenClawChat({ exec: async () => ({ code: 1, stdout: "", stderr: "connect ECONNREFUSED" }), acceptMs: 50 });
+    const s = await start({ chat });
+    const cookie = await s.login();
+    const before = s.notifier.sent.length;
+    const r = await s.post("/api/chat", { text: "hi" }, cookie);
+    expect(r.status).toBe(500);
+    expect((await r.json()).error).toMatch(/restarting/);
+    expect(s.notifier.sent.length).toBe(before);
+  });
+
   it("keys: locked without a vault; with one, a code from the chat, 3 tries", async () => {
     let s = await start();
     let cookie = await s.login();
