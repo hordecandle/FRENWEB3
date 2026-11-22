@@ -37,6 +37,8 @@ export interface DashboardOptions {
   keys?: KeyVault | null;
   /** The demo stand: plain-http cookie, a one-click login, codes shown on the page. Never on a real install. */
   demo?: boolean;
+  /** A dashboard on the owner's own computer: plain http on 127.0.0.1, so the cookie can't be Secure. */
+  local?: boolean;
 }
 
 /** What the owner can copy out to keep a backup of the wallets. */
@@ -58,6 +60,7 @@ export class Dashboard {
   private readonly chat: ChatBridge | null;
   private readonly keys: KeyVault | null;
   private readonly demo: boolean;
+  private readonly local: boolean;
   /** The last code sent for showing keys (demo: also shown on the page). */
   private keyCode: { code: string; exp: number; tries: number } | null = null;
   private authHits: number[] = [];
@@ -73,6 +76,7 @@ export class Dashboard {
     this.chat = opts.chat ?? null;
     this.keys = opts.keys ?? null;
     this.demo = opts.demo ?? false;
+    this.local = opts.local ?? false;
     this.auth = new DashboardAuth(fren.store, opts.mailer ?? null, this.now);
   }
 
@@ -89,6 +93,22 @@ export class Dashboard {
     const t = randomBytes(24).toString("base64url");
     this.links.set(t, this.now() + LINK_TTL_MS);
     return `${this.publicUrl}/login?t=${t}`;
+  }
+
+  /** The dashboard link in the owner's own terminal (`fren dashboard`), not in a chat. */
+  directLink(): { text: string; link: string } {
+    const link = this.newLink();
+    return { text: `Your dashboard: ${link}\nIt works once, for 10 minutes.`, link };
+  }
+
+  /** The first time the chat comes up: a login link in the chat, so the install ends in the dashboard. */
+  async welcomeLink(): Promise<void> {
+    const kv = this.fren.store;
+    if (kv.getKv("dash_welcome")) return;
+    const link = this.newLink();
+    const where = this.local ? "Open it on this computer. " : "";
+    const sent = await this.fren.tellOwner(`🖥 Your Fren dashboard is ready: your balance in dollars, your history, and a short tour.\n${link}\n\n${where}The link works once, for 10 minutes. Later, send /fren_dashboard for a new one.`);
+    if (sent) kv.setKv("dash_welcome", String(this.now()));
   }
 
   /** Makes a link and sends it to the owner privately. Falls back to returning it. */
@@ -199,7 +219,7 @@ export class Dashboard {
         // Public on purpose: the setup page polls it after "Start Fren" to say
         // "live" only once the bot can answer. It reveals one boolean.
         if (req.method === "GET" && url.pathname === "/ready") return json(200, { ready: this.chatUpAt !== null });
-        const cookie = () => `fren_dash=${this.newSession()}; Path=/; HttpOnly;${this.demo ? "" : " Secure;"} SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`;
+        const cookie = () => `fren_dash=${this.newSession()}; Path=/; HttpOnly;${this.demo || this.local ? "" : " Secure;"} SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`;
         if (req.method === "GET" && url.pathname === "/login") {
           const t = url.searchParams.get("t") ?? "";
           if (!this.takeLink(t)) return html(403, LOGIN_PAGE("That link has expired or was already used. Send /fren_dashboard to your bot for a new one."));
@@ -291,7 +311,7 @@ export class Dashboard {
             if (!this.keys)
               return json(200, {
                 locked: true,
-                text: "On this install the keys stay locked inside the signer, a separate program the dashboard and the AI can't read. Ask Fren's team how to back them up.",
+                text: "Your keys stay locked inside the signer, a separate program that neither this page nor the AI can read, so they can't be shown here. To see them, open Terminal on the computer where Fren is installed and run: fren keys",
               });
             const code = String(randomBytes(4).readUInt32BE() % 1_000_000).padStart(6, "0");
             this.keyCode = { code, exp: this.now() + KEY_CODE_TTL_MS, tries: 0 };

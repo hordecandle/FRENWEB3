@@ -181,25 +181,34 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
   const dashUrl = dashboardUrl();
   // The page's chat is the owner's own OpenClaw conversation; email login needs a Resend key.
   const mailKey = process.env.FREN_RESEND_API_KEY;
-  const dashboard = dashUrl
+  // On the owner's own computer the dashboard listens on 127.0.0.1 only, plain http (FREN_DASHBOARD=off turns it off).
+  const dashPort = Number(process.env.FREN_DASHBOARD_PORT ?? 7422);
+  const localDash = !dashUrl && process.env.FREN_DASHBOARD !== "off";
+  const dashboard = dashUrl || localDash
     ? new Dashboard(fren, {
-        publicUrl: dashUrl,
+        publicUrl: dashUrl ?? `http://127.0.0.1:${dashPort}`,
+        local: !dashUrl,
         chat: new OpenClawChat({ bin: process.env.OPENCLAW_BIN ?? "openclaw" }),
         mailer: mailKey ? new ResendMailer(mailKey, process.env.FREN_MAIL_FROM ?? "Fren <login@getfren.xyz>") : null,
       })
     : null;
   const dashServer = dashboard?.server() ?? null;
   if (dashServer) {
-    const port = Number(process.env.FREN_DASHBOARD_PORT ?? 7422);
-    await new Promise<void>((res) => dashServer.listen(port, "127.0.0.1", res));
-    console.log(`dashboard on http://127.0.0.1:${port}, public at ${dashUrl}`);
+    await new Promise<void>((res, rej) => {
+      dashServer.once("error", rej);
+      dashServer.listen(dashPort, "127.0.0.1", res);
+    }).catch((err: Error) => console.error(`dashboard: ${err.message}`));
+    console.log(`dashboard on http://127.0.0.1:${dashPort}${dashUrl ? `, public at ${dashUrl}` : " (this computer only)"}`);
   }
   const updater = new Updater(paths.home);
   // /fren_update: say how it went as soon as the result lands and the chat line is up.
   const updates = new UpdateReporter(updater, (text) => fren.tellOwner(text));
   const checkUpdates = () => void updates.check().catch(() => {});
   setInterval(checkUpdates, 20_000).unref();
-  const server = createApi(fren, token, budget, { dashboard, updater, onGatewayUp: () => setTimeout(checkUpdates, 5000) });
+  const server = createApi(fren, token, budget, { dashboard, updater, onGatewayUp: () => {
+      setTimeout(checkUpdates, 5000);
+      setTimeout(() => void dashboard?.welcomeLink().catch(() => {}), 8000);
+    } });
   await new Promise<void>((res) => server.listen(config.api.port, config.api.host, res));
 
   const timer = setInterval(() => {

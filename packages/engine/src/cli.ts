@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { createInterface } from "node:readline/promises";
 import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { readKeystoreAddresses } from "@fren/signer";
+import { readKeystore, readKeystoreAddresses } from "@fren/signer";
 import { frenPaths, initFren, loadConfig, parseNotify } from "./config.js";
 import { startDaemon } from "./daemon.js";
 import { ENGINE_USER, isolate, isolatedEngineUnit } from "./isolate.js";
@@ -45,6 +46,10 @@ const HELP = `fren: self-hosted on-chain trading agent backend
       then restart the OpenClaw gateway. Setup does it for new installs.
   fren wallet
       Print wallet addresses.
+  fren dashboard
+      Print a one-time login link for the web dashboard and open it in your browser.
+  fren keys
+      Show your wallet keys here in the terminal, after you confirm. Nothing else can see them.
   fren status
       Ask the running engine for positions and watched conditions.
   sudo fren isolate [--agent-user U] [--service] [--undo]
@@ -194,12 +199,52 @@ Next: \`fren start\`, then install the OpenClaw plugin (see README), or run \`fr
       console.log(`Solana: ${a.solana}\nEVM:    ${a.evm}\nAgent:  ${a.hlAgent}`);
       return;
     }
+    case "dashboard": {
+      const r = await postEngine(paths, "/dashboard/open");
+      console.log(r.text);
+      if (r.link) openInBrowser(r.link);
+      return;
+    }
+    case "keys": {
+      await showKeys(paths);
+      return;
+    }
     case "status":
       console.log(await askEngine(paths, "/status"));
       return;
     default:
       console.log(HELP);
   }
+}
+
+async function postEngine(paths: ReturnType<typeof frenPaths>, route: string): Promise<{ text: string; link?: string }> {
+  const cfg = loadConfig(paths);
+  const token = readFileSync(paths.apiToken, "utf8").trim();
+  const res = await fetch(`http://${cfg.api.host}:${cfg.api.port}${route}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: "{}" });
+  return (await res.json()) as { text: string; link?: string };
+}
+
+function openInBrowser(url: string) {
+  const cmd = process.platform === "darwin" ? "open" : "xdg-open";
+  try {
+    spawn(cmd, [url], { stdio: "ignore", detached: true }).on("error", () => {}).unref();
+  } catch {}
+}
+
+/** The owner reads their own keys in their own terminal: the dashboard and the AI never get them. */
+async function showKeys(paths: ReturnType<typeof frenPaths>) {
+  if (isolatedMarker(paths)) throw new Error("On an isolated install the keys belong to another user. Run this as root: sudo fren keys");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await rl.question("These keys control all your money. Anyone who sees them can take it. Nobody from Fren will ever ask for them.\nType SHOW to print them here: ");
+  rl.close();
+  if (answer.trim() !== "SHOW") {
+    console.log("Cancelled. Nothing was shown.");
+    return;
+  }
+  const pass = existsSync(paths.passphrase) ? readFileSync(paths.passphrase, "utf8").trim() : process.env.FREN_PASSPHRASE;
+  if (!pass) throw new Error("Can't find the keystore passphrase.");
+  const k = readKeystore(paths.keystore, pass);
+  console.log(`\nSolana wallet key (base64):\n${k.solanaSecret}\n\nEVM wallet key (Base, Arbitrum, Polygon):\n${k.evmMaster}\n\nHyperliquid trading key (can trade, can't withdraw):\n${k.hlAgent}\n\nWrite them down somewhere offline, then clear this terminal.`);
 }
 
 async function askEngine(paths: ReturnType<typeof frenPaths>, route: string): Promise<string> {

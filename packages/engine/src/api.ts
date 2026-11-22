@@ -77,7 +77,9 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     /** /fren_update: asks the server's root updater to install the latest Fren in place. */
     "POST /update": async () => (opts.updater ? opts.updater.request() : { text: "Updates aren't set up on this machine." }),
     "POST /dashboard/link": async () =>
-      opts.dashboard ? opts.dashboard.sendLink() : { text: "The dashboard isn't set up on this machine. It comes with the VPS install (install.sh --server --web)." },
+      opts.dashboard ? opts.dashboard.sendLink() : { text: "The dashboard isn't running on this machine. Restart Fren, or set FREN_DASHBOARD=on." },
+    /** `fren dashboard`: the link comes back to the terminal that asked, not to the chat. */
+    "POST /dashboard/open": async () => (opts.dashboard ? opts.dashboard.directLink() : { text: "The dashboard isn't running on this machine." }),
     "POST /fund": async (b) => {
       const venue = String(b.venue);
       if (venue !== "derive" && venue !== "polymarket") throw new Error('venue must be "derive" or "polymarket".');

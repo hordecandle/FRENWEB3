@@ -62,7 +62,12 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 @media (max-width:520px){.layout{padding:16px 14px 48px;gap:16px}.col{gap:16px}.card{padding:18px;border-radius:16px;box-shadow:3px 4px 0 var(--ink)}.big{font-size:40px}.top__in{padding:0 14px}.brand small{display:none}}
 .total{font-size:52px;font-weight:600;letter-spacing:-.04em;line-height:1.05;margin-top:6px;font-variant-numeric:tabular-nums}
 .sub{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:15px}
-.parts{list-style:none;margin:18px 0 0;padding:0;border-top:1px solid var(--line)}
+.more{margin-top:16px;border-top:1px solid var(--line)}
+.more summary{cursor:pointer;list-style:none;padding:13px 0 4px;font-size:14px;color:var(--muted);display:flex;justify-content:space-between}
+.more summary::-webkit-details-marker{display:none}
+.more summary::after{content:"▾";transition:transform .15s}
+.more[open] summary::after{transform:rotate(180deg)}
+.parts{list-style:none;margin:6px 0 0;padding:0;border-top:1px solid var(--line)}
 .parts li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:11px 0;border-bottom:1px solid var(--line);font-size:15px}
 .parts .amt{color:var(--muted);font-size:13px;font-weight:300}
 .parts .usd{text-align:right;font-variant-numeric:tabular-nums;font-weight:500}
@@ -261,7 +266,7 @@ export const DASHBOARD_PAGE = `<!doctype html><html lang="en"><head>${HEAD}<titl
     <p class="kicker" id="bal-k">All your money</p>
     <div class="total" id="total">…</div>
     <div class="sub"><span id="pnl"></span><span class="muted" id="bal-note"></span></div>
-    <ul class="parts" id="parts" data-tour="breakdown"></ul>
+    <details class="more" id="more" data-tour="breakdown"><summary id="more-s">Where it sits</summary><ul class="parts" id="parts"></ul></details>
   </section>
 
   <section class="card" data-tour="topup" id="topup">
@@ -424,6 +429,7 @@ export const DASHBOARD_PAGE = `<!doctype html><html lang="en"><head>${HEAD}<titl
         ul.append(li);
       }
     }
+    $("more-s").textContent = nets.length > 1 ? "Where it sits · " + nets.length + " networks" : "Where it sits";
     if (!b.parts.length) ul.append(el("li", "muted", "Nothing here yet. Top up below to start."));
   }
 
@@ -661,7 +667,7 @@ export const DASHBOARD_PAGE = `<!doctype html><html lang="en"><head>${HEAD}<titl
     { k: "chat", bottom: true, h: "Talk to Fren", p: "This is your Telegram chat with Fren, right here. Ask what you hold or what to do; before any trade Fren says the most you can lose.", t: "Send Fren a message, e.g. \\"what do I hold?\\"", act: true },
     { k: "history", h: "Check every trade", p: "Everything Fren did, with a link to the public record. You don't have to trust us: click and see.", t: "Open one of the links." },
     { k: "stop", h: "Stop anytime", p: "Pause works at once and stops new trades. Turning back on needs the code from your chat, so nobody else can.", t: "You don't have to press it now. Just know it's here." },
-    { k: "keys", h: "Your keys stay hidden", p: "A key is the password to a wallet. It's hidden; to see it you confirm twice, and it hides itself again.", t: "Press Show keys to see how it works.", act: true },
+    { k: "keys", h: "Your keys stay hidden", p: "A key is the password to a wallet. Fren keeps them locked away where neither this page nor the AI can read them. To see them yourself, open Terminal on the computer Fren runs on and type: fren keys", t: "Press Show keys to see where to look.", act: true },
   ];
   const tour = (() => {
     let i = -1;
@@ -693,6 +699,7 @@ export const DASHBOARD_PAGE = `<!doctype html><html lang="en"><head>${HEAD}<titl
       const t = $("tour-try"); t.textContent = (done.has(s.k) ? "✓ Done. " : "Try it: ") + s.t; t.className = "try" + (done.has(s.k) ? " done" : "");
       $("tour-back").disabled = i === 0;
       $("tour-next").textContent = i === STEPS.length - 1 ? "Finish" : "Next";
+      if (s.k === "breakdown") $("more").open = true;
       const el = target();
       // Phones: the tooltip sits at the bottom, over the page. A tall block
       // (the chat) goes to the bottom instead, with the tooltip on top, so its
