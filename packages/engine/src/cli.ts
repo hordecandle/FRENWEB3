@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -200,9 +200,9 @@ Next: \`fren start\`, then install the OpenClaw plugin (see README), or run \`fr
       return;
     }
     case "dashboard": {
+      // The engine opens the browser itself or sends the link to the owner's chat; it never prints it.
       const r = await postEngine(paths, "/dashboard/open");
       console.log(r.text);
-      if (r.link) openInBrowser(r.link);
       return;
     }
     case "keys": {
@@ -222,13 +222,6 @@ async function postEngine(paths: ReturnType<typeof frenPaths>, route: string): P
   const token = readFileSync(paths.apiToken, "utf8").trim();
   const res = await fetch(`http://${cfg.api.host}:${cfg.api.port}${route}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: "{}" });
   return (await res.json()) as { text: string; link?: string };
-}
-
-function openInBrowser(url: string) {
-  const cmd = process.platform === "darwin" ? "open" : "xdg-open";
-  try {
-    spawn(cmd, [url], { stdio: "ignore", detached: true }).on("error", () => {}).unref();
-  } catch {}
 }
 
 /** The owner reads their own keys in their own terminal: the dashboard and the AI never get them. */

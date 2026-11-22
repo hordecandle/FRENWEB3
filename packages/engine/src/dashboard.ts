@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { describeMaxLoss, describeStep } from "@fren/core";
@@ -40,6 +41,23 @@ export interface DashboardOptions {
   demo?: boolean;
   /** A dashboard on the owner's own computer: plain http on 127.0.0.1, so the cookie can't be Secure. */
   local?: boolean;
+  /** Opens a link in the browser on this machine; true if a browser took it. Default: open / xdg-open. */
+  openBrowser?: (url: string) => Promise<boolean>;
+}
+
+/** open (macOS) or xdg-open (Linux with a screen); false on a headless server or when it fails. */
+export function systemOpenBrowser(url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (process.platform !== "darwin" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) return resolve(false);
+    try {
+      const p = spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { stdio: "ignore" });
+      const t = setTimeout(() => resolve(false), 10_000);
+      p.on("error", () => (clearTimeout(t), resolve(false)));
+      p.on("exit", (code) => (clearTimeout(t), resolve(code === 0)));
+    } catch {
+      resolve(false);
+    }
+  });
 }
 
 /** The rows of the Keys block, in the order the vault returns them. */
@@ -75,6 +93,7 @@ export class Dashboard {
   private readonly keys: KeyVault | null;
   private readonly demo: boolean;
   private readonly local: boolean;
+  private readonly openBrowser: (url: string) => Promise<boolean>;
   /** The last code sent for showing keys (demo: also shown on the page). */
   private keyCode: { code: string; exp: number; tries: number; session: string } | null = null;
   /** The browser session that typed the right code, and until when it may show keys. */
@@ -95,6 +114,7 @@ export class Dashboard {
     this.keys = opts.keys ?? null;
     this.demo = opts.demo ?? false;
     this.local = opts.local ?? false;
+    this.openBrowser = opts.openBrowser ?? systemOpenBrowser;
     this.auth = new DashboardAuth(fren.store, opts.mailer ?? null, this.now);
   }
 
@@ -138,10 +158,17 @@ export class Dashboard {
     return `${this.publicUrl}/login?t=${t}`;
   }
 
-  /** The dashboard link in the owner's own terminal (`fren dashboard`), not in a chat. */
-  directLink(): { text: string; link: string } {
+  /**
+   * `fren dashboard`. The plugin (and so the AI) holds the same API token as the terminal, so
+   * the link never comes back to whoever asked: it opens in the browser on this computer, or
+   * goes to the owner's private chat. An AI that calls this only pops a browser on the owner's screen.
+   */
+  async openForOwner(): Promise<{ text: string }> {
     const link = this.newLink();
-    return { text: `Your dashboard: ${link}\nIt works once, for 10 minutes.`, link };
+    if (this.local && (await this.openBrowser(link))) return { text: "Opened your dashboard in the browser on this computer." };
+    this.links.delete(new URL(link).searchParams.get("t") ?? "");
+    const r = await this.sendLink();
+    return { text: r.link ? "No browser here and no private chat line, so there's no safe place to show the link. Send /fren_dashboard to your bot." : r.text };
   }
 
   /** The first time the chat comes up: a login link in the chat, so the install ends in the dashboard. */

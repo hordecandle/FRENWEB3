@@ -83,8 +83,8 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     "POST /update": async () => (opts.updater ? opts.updater.request() : { text: "Updates aren't set up on this machine." }),
     "POST /dashboard/link": async () =>
       opts.dashboard ? opts.dashboard.sendLink() : { text: fren.localize("The dashboard isn't running on this machine. Restart Fren, or set FREN_DASHBOARD=on.") },
-    /** `fren dashboard`: the link comes back to the terminal that asked, not to the chat. */
-    "POST /dashboard/open": async () => (opts.dashboard ? opts.dashboard.directLink() : { text: "The dashboard isn't running on this machine." }),
+    /** `fren dashboard`: opens the browser here or sends the link to the owner's chat; never returns the link (the AI holds this token too). */
+    "POST /dashboard/open": async () => (opts.dashboard ? opts.dashboard.openForOwner() : { text: fren.localize("The dashboard isn't running on this machine. Restart Fren, or set FREN_DASHBOARD=on.") }),
     "POST /fund": async (b) => {
       const venue = String(b.venue);
       if (venue !== "derive" && venue !== "polymarket") throw new Error('venue must be "derive" or "polymarket".');
