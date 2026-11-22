@@ -437,7 +437,7 @@ ${ICONS}
   </section>
 
   <section class="card" id="wait-card" hidden>
-    <div class="card__h"><span class="ico ico--warn">${ic("i-clock")}</span><div><p class="kicker">Waiting for your OK</p><h2>Fren wants to do this</h2></div></div>
+    <div class="card__h"><span class="ico ico--warn" id="wait-ico">${ic("i-clock")}</span><div><p class="kicker" id="wait-kicker">Waiting for your OK</p><h2 id="wait-title">Fren wants to do this</h2></div></div>
     <div id="waits"></div>
     <div class="msg" id="wait-msg"></div>
   </section>
@@ -679,6 +679,12 @@ ${ICONS}
   function renderWaiting(d) {
     // After Approve or Cancel the request is gone, but its result stays on screen until the next page load.
     $("wait-card").hidden = !d.waiting.length && !$("wait-msg").textContent;
+    // The header says what the card is now: a request to answer, or the answer's result.
+    const done = !d.waiting.length;
+    $("wait-ico").className = "ico " + (done ? "ico--ok" : "ico--warn");
+    $("wait-ico").replaceChildren(icon(done ? "i-check" : "i-clock"));
+    $("wait-kicker").textContent = done ? "Answered" : "Waiting for your OK";
+    $("wait-title").textContent = done ? "Fren got your answer" : "Fren wants to do this";
     const w = $("waits");
     w.replaceChildren();
     for (const x of d.waiting) {
@@ -696,12 +702,12 @@ ${ICONS}
       ok.onclick = async () => {
         if (d.limits && d.limits.mode === "live" && !confirm("Approve with real money?\\n\\n" + plain(x.label))) return;
         ok.disabled = no.disabled = true;
-        try { const r = await call("ok", { ref: x.ref, usd: x.usd }); $("wait-msg").textContent = r.text; } catch (e) { $("wait-msg").textContent = e.message; }
+        try { const r = await call("ok", { ref: x.ref, usd: x.usd }); $("wait-msg").textContent = plain(r.text); } catch (e) { $("wait-msg").textContent = plain(e.message); }
         await load();
       };
       no.onclick = async () => {
         ok.disabled = no.disabled = true;
-        try { const r = await call("cancel", { ref: x.ref }); $("wait-msg").textContent = r.text; } catch (e) { $("wait-msg").textContent = e.message; }
+        try { const r = await call("cancel", { ref: x.ref }); $("wait-msg").textContent = plain(r.text); } catch (e) { $("wait-msg").textContent = plain(e.message); }
         await load();
       };
       body.append(row);
