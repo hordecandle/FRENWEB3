@@ -1,7 +1,7 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Limits, startingLimits, type Plan, type ResolvedStep } from "@fren/core";
+import { DEFAULT_LIMITS, Limits, startingLimits, type Plan, type ResolvedStep } from "@fren/core";
 
 /**
  * Single-file local state (SQLite), so a user's whole setup is one folder they
@@ -83,6 +83,9 @@ export class Store {
 
   constructor(path: string, paperStartingUsd = 10_000) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    // A brand-new install (no database file yet) starts on the safer limits; an
+    // install that already has one keeps what it had, even if it never set limits.
+    const freshInstall = path !== ":memory:" && !existsSync(path);
     this.db = new DatabaseSync(path);
     this.db.exec(`
       PRAGMA journal_mode = WAL;
@@ -117,6 +120,7 @@ export class Store {
     `);
     if (this.getKv("paper_usdc") === null) this.setKv("paper_usdc", String(paperStartingUsd));
     if (this.getKv("paper_start_usd") === null) this.setKv("paper_start_usd", String(paperStartingUsd));
+    if (freshInstall && this.getKv("limits") === null) this.setLimits(startingLimits());
     // Older databases: the pending table had no label or amount (added 22.11 for /ok lists).
     const cols = (this.db.prepare("PRAGMA table_info(pending)").all() as { name: string }[]).map((c) => c.name);
     if (!cols.includes("label")) this.db.exec("ALTER TABLE pending ADD COLUMN label TEXT");
@@ -136,7 +140,7 @@ export class Store {
 
   getLimits(): Limits {
     const raw = this.getKv("limits");
-    return raw ? Limits.parse(JSON.parse(raw)) : startingLimits();
+    return raw ? Limits.parse(JSON.parse(raw)) : DEFAULT_LIMITS;
   }
 
   setLimits(limits: Limits) {

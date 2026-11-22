@@ -11,6 +11,7 @@ import {
   isTightening,
   price as fmtPrice,
   safeParsePlan,
+  withDefaultStops,
   snapshotKey,
   signedUsd,
   tradableKey,
@@ -275,8 +276,8 @@ export class Fren {
         text: `That plan doesn't fit the schema: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
       };
     }
-    const plan = parsed.data;
     const limits = this.limits();
+    const plan = withDefaultStops(parsed.data, limits);
     const mode: Mode = limits.mode;
 
     const { resolved, errors } = await this.resolveAll(plan.steps);
@@ -1563,6 +1564,7 @@ export function describeLimits(l: Limits): string {
     `Max leverage: ${l.maxLeverage}x · Max open positions: ${l.maxOpenPositions}`,
     `Auto-approve up to: ${fmtUsd(l.autoApproveUsd)}`,
     `Venues: ${l.allowedVenues.join(", ")}`,
+    ...(l.defaultStopLossPct > 0 ? [`Automatic stop on bets: -${l.defaultStopLossPct}% of what you put in`] : []),
   ].join("\n");
 }
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Venue } from "./plan.js";
+import { Venue, type Plan } from "./plan.js";
 
 /**
  * The user's own rules. Set in chat, enforced in code. The agent may tighten
@@ -20,15 +20,21 @@ export const Limits = z.object({
   /** Plans spending at or under this run without a confirmation code. */
   autoApproveUsd: z.number().min(0).default(50),
   allowedVenues: z.array(Venue).default(["hyperliquid", "jupiter", "relay", "derive", "polymarket", "yield"]),
+  /**
+   * Stop put on every boosted bet (perp) that comes without one, as % of what the
+   * owner puts in (ROE): 30 at 3x closes after a ~10% move the wrong way. 0 = off.
+   */
+  defaultStopLossPct: z.number().min(0).max(95).default(0),
 });
 export type Limits = z.infer<typeof Limits>;
 
 export const DEFAULT_LIMITS: Limits = Limits.parse({});
 
 /**
- * Safer starting limits for someone new to this (proposal for Bee, off by default):
- * small trades, low boost, every trade confirmed with /ok, no options (Derive).
- * Used for a fresh install when FREN_NOVICE_DEFAULTS=1; the owner can loosen them with /limits.
+ * Safer starting limits for someone new to this (default for fresh installs since 22.11):
+ * small trades, low boost, every trade confirmed with /ok, no options (Derive),
+ * a stop on every bet that comes without one. The owner can loosen them with /limits.
+ * An install that already has a database keeps whatever it had (see Store).
  */
 export const NOVICE_LIMITS: Limits = Limits.parse({
   maxTradeUsd: 100,
@@ -37,11 +43,15 @@ export const NOVICE_LIMITS: Limits = Limits.parse({
   maxOpenPositions: 3,
   autoApproveUsd: 0,
   allowedVenues: ["hyperliquid", "jupiter", "relay", "polymarket", "yield"],
+  defaultStopLossPct: 30,
 });
 
-/** The limits a fresh install starts with. */
+/**
+ * The limits a fresh install starts with: the safer ones, unless the installer
+ * asks for the old wide ones with FREN_NOVICE_DEFAULTS=0.
+ */
 export function startingLimits(env: Record<string, string | undefined> = process.env): Limits {
-  return env.FREN_NOVICE_DEFAULTS === "1" ? NOVICE_LIMITS : DEFAULT_LIMITS;
+  return env.FREN_NOVICE_DEFAULTS === "0" ? DEFAULT_LIMITS : NOVICE_LIMITS;
 }
 
 export type LimitKey = keyof Omit<Limits, "allowedVenues">;
@@ -59,6 +69,8 @@ export function isTightening(current: Limits, next: Limits): boolean {
   if (next.maxOpenPositions > current.maxOpenPositions) return false;
   if (next.autoApproveUsd > current.autoApproveUsd) return false;
   if (next.allowedVenues.some((v) => !current.allowedVenues.includes(v))) return false;
+  // Dropping the automatic stop, or letting it lose more, is loosening.
+  if (current.defaultStopLossPct > 0 && (next.defaultStopLossPct === 0 || next.defaultStopLossPct > current.defaultStopLossPct)) return false;
   return true;
 }
 
@@ -87,4 +99,21 @@ export function applyLimitArgs(current: Limits, args: string): Limits {
     }
   }
   return Limits.parse(next);
+}
+
+/**
+ * Put the owner's automatic stop on every boosted bet that came without one.
+ * A stop the owner (or the model, from the owner's words) set is kept as is.
+ */
+export function withDefaultStops(plan: Plan, limits: Pick<Limits, "defaultStopLossPct">): Plan {
+  const pct = limits.defaultStopLossPct;
+  if (!(pct > 0)) return plan;
+  return {
+    ...plan,
+    steps: plan.steps.map((step) => {
+      const leg = step.leg;
+      if (leg.kind !== "perp_open" || leg.stopLossPct !== undefined || leg.stopPrice !== undefined || leg.stopLossUsd !== undefined) return step;
+      return { ...step, leg: { ...leg, stopLossPct: pct } };
+    }),
+  };
 }

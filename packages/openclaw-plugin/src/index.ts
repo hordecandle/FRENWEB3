@@ -246,7 +246,7 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; 
       name: "fren_limits",
       label: "Limits",
       description:
-        "Change the user's trading limits with key=value pairs: maxTradeUsd, maxDailyUsd, maxLeverage, maxOpenPositions, autoApproveUsd, mode (paper|live). Tightening applies at once; loosening sends the user a code. Pass an empty string to read the current limits.",
+        "Change the user's trading limits with key=value pairs: maxTradeUsd, maxDailyUsd, maxLeverage, maxOpenPositions, autoApproveUsd, defaultStopLossPct (stop put on bets that come without one, % of margin; 0 = off), mode (paper|live). Tightening applies at once; loosening sends the user a code. Pass an empty string to read the current limits.",
       parameters: Type.Object({ args: Type.String({ description: 'e.g. "maxTradeUsd=2000 maxLeverage=40"' }) }),
       run: async (p, ctx) => {
         const args = String(p.args ?? "").trim();
