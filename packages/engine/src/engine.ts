@@ -34,6 +34,7 @@ import type { JupiterVenue } from "./venues/jupiter.js";
 import type { RelayVenue } from "./venues/relay.js";
 import type { DeriveVenue } from "./venues/derive.js";
 import { asLang, pauseMessage, type Lang } from "./pause-text.js";
+import { humanError, localize, localizeReceipt } from "./i18n.js";
 import type { PolymarketVenue } from "./venues/polymarket.js";
 import type { CashChain, YieldVenue } from "./venues/yield.js";
 import { NotTradableYet, VenueError, type PositionView, type SpotVenueAdapter, type VenueAdapter } from "./venues/types.js";
@@ -221,7 +222,7 @@ export class Fren {
     const mode: Mode = limits.mode;
 
     const { resolved, errors } = await this.resolveAll(plan.steps);
-    if (errors.length) return { planId: null, verdict: "rejected", text: `Couldn't set that up:\n${errors.join("\n")}` };
+    if (errors.length) return { planId: null, verdict: "rejected", text: this.say(`Couldn't set that up:\n${errors.join("\n")}`) };
 
     const decision = evaluatePolicy(resolved, limits, this.policyState(mode));
     const id = randomUUID().slice(0, 8);
@@ -229,20 +230,20 @@ export class Fren {
 
     if (decision.verdict === "reject") {
       this.d.store.insertPlan({ id, request: plan.request, plan, status: "rejected", mode }, resolved, () => "rejected");
-      return { planId: id, verdict: "rejected", text: `${header}Not doing this:\n${describeDecision(decision, resolved)}` };
+      return { planId: id, verdict: "rejected", text: this.say(`${header}Not doing this:\n${describeDecision(decision, resolved)}`) };
     }
 
     const canonicalPlan: Plan = { ...plan, steps: resolved.map((r) => r.step) };
     if (decision.verdict === "confirm") {
       this.d.store.insertPlan({ id, request: plan.request, plan: canonicalPlan, status: "pending_confirm", mode }, resolved, () => "pending");
       const owner = await this.issueCode("plan", id, `Confirm this plan:\n${describeDecision(decision, resolved)}`);
-      return { planId: id, verdict: "needs_code", text: `${header}${describeDecision(decision, resolved)}\n\n${owner.text}`, ...pick(owner) };
+      return { planId: id, verdict: "needs_code", text: this.say(`${header}${describeDecision(decision, resolved)}`) + `\n\n${owner.text}`, ...pick(owner) };
     }
 
     this.d.store.insertPlan({ id, request: plan.request, plan: canonicalPlan, status: "active", mode }, resolved, () => "pending");
     const out = await this.run(id, resolved, decision);
     const receiptSent = out.executed ? await this.deliver({ ...(mode === "paper" ? { header: "📝 Paper mode" } : {}), steps: out.steps }) : false;
-    return { planId: id, verdict: "executed", text: `${header}${out.text}`, ...(receiptSent ? { receiptSent } : {}) };
+    return { planId: id, verdict: "executed", text: this.say(`${header}${out.text}`), ...(receiptSent ? { receiptSent } : {}) };
   }
 
   // -- receipts ------------------------------------------------------------
@@ -266,8 +267,10 @@ export class Fren {
    * picture when images are on and the line shows pictures. Never throws; a
    * chart that can't be drawn in time is left out.
    */
-  async deliver(receipt: Receipt, text?: string): Promise<boolean> {
-    if (!this.d.notifier.hasPrivateLine || !receipt.steps.length) return false;
+  async deliver(receiptIn: Receipt, textIn?: string): Promise<boolean> {
+    if (!this.d.notifier.hasPrivateLine || !receiptIn.steps.length) return false;
+    const receipt = localizeReceipt(receiptIn, this.ownerLang);
+    const text = textIn === undefined ? undefined : this.say(textIn);
     let photo: Buffer | null = null;
     const req = receipt.steps.find((s) => s.chart)?.chart;
     if (req && this.d.snapshots && this.d.notifier.showsImages && this.settings().images) {
@@ -384,9 +387,11 @@ export class Fren {
       }
       const out = await this.runStep(planId, r, rec.mode);
       lines.push(out.text);
-      for (const w of warn) lines.push(`   ⚠️ ${w}`);
+      // Notes like "earns about 4%" only belong to a step that happened.
+      const notes = out.receipt?.icon === "❌" ? [] : warn;
+      for (const w of notes) lines.push(`   ⚠️ ${w}`);
       if (out.receipt) {
-        steps.push({ ...out.receipt, rows: [...out.receipt.rows, ...warn.map((w) => ({ text: `⚠️ ${w}` }))] });
+        steps.push({ ...out.receipt, rows: [...out.receipt.rows, ...notes.map((w) => ({ text: `⚠️ ${w}` }))] });
         if (out.filled) executed = true;
       }
     }
@@ -412,9 +417,10 @@ export class Fren {
       return { text, filled: true, receipt: this.stepReceipt(r, res.text, res.receipt, topUp ? topUp.split("\n") : []) };
     } catch (err) {
       if (err instanceof NotTradableYet && r.step.leg.kind === "swap" && r.step.leg.side === "buy") return this.waitForTrading(planId, r, err.message);
-      const msg = `❌ ${describeStep(r.step, r)}: ${(err as Error).message}`;
+      const why = humanError((err as Error).message, this.ownerLang);
+      const msg = `❌ ${describeStep(r.step, r)}: ${why}`;
       this.d.store.setStep(planId, r.index, "failed", msg);
-      return { text: msg, receipt: { icon: "❌", title: describeStep(r.step, r), rows: (err as Error).message.split("\n").map(rowFromText), links: [] } };
+      return { text: msg, receipt: { icon: "❌", title: describeStep(r.step, r), rows: why.split("\n").map(rowFromText), links: [] } };
     }
   }
 
@@ -475,15 +481,25 @@ export class Fren {
     const ttl = this.d.codeTtlMs ?? 10 * 60_000;
     this.d.store.putPending({ code, kind, payload, expiresAt: new Date(Date.now() + ttl).toISOString() });
     const minutes = Math.round(ttl / 60_000);
-    const sent = await this.d.notifier.sendPrivate(`🔐 ${privateText}\n\nReply /ok ${code} within ${minutes} min.`).catch(() => false);
-    if (sent) return { text: `I sent you a confirmation code privately. Reply /ok <code> to go ahead.`, codeSentPrivately: true };
-    return { text: `Reply /ok <code> with the code I just sent you to go ahead.`, codeSentPrivately: false, ownerCode: code };
+    const sent = await this.d.notifier.sendPrivate(`🔐 ${this.say(privateText)}\n\n${this.say(`Reply /ok ${code} within ${minutes} min.`)}`).catch(() => false);
+    if (sent) return { text: this.say(`I sent you a confirmation code privately. Reply /ok <code> to go ahead.`), codeSentPrivately: true };
+    return { text: this.say(`Reply /ok <code> with the code I just sent you to go ahead.`), codeSentPrivately: false, ownerCode: code };
   }
 
   /** Wrong /ok codes in a row; see approve(). */
   private wrongCodes = 0;
   /** Language of the owner's last chat message, for texts that skip the model (pause). */
   private ownerLang: Lang = "en";
+
+  /** The owner's language, from the plugin's request header; only a known language changes it. */
+  setOwnerLang(l: unknown): void {
+    if (l === "en" || l === "ru" || l === "uk") this.ownerLang = l;
+  }
+
+  /** An owner-facing text in the owner's language (see i18n.ts). */
+  private say(text: string): string {
+    return localize(text, this.ownerLang);
+  }
 
   /**
    * The /ok command. Codes only ever reach the owner, so this is the owner speaking.
@@ -497,7 +513,7 @@ export class Fren {
   /** The /ok command, saying whether the result's receipt already went to the owner (so the reply can stay short). */
   async approveWithReceipt(code: string): Promise<OwnerRequestResult> {
     const r = await this.approveInner(code);
-    return typeof r === "string" ? { text: r } : r;
+    return typeof r === "string" ? { text: this.say(r) } : { ...r, text: this.say(r.text) };
   }
 
   private async approveInner(code: string): Promise<string | OwnerRequestResult> {
