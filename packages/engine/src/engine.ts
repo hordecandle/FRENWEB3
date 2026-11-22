@@ -31,7 +31,7 @@ import {
 import { HL_WITHDRAW_FEE_USD as HL_WITHDRAW_FEE, type Addresses, type SignerApi } from "@fren/signer";
 import { quoteBet, type BetQuery, type BetQuote } from "./bets.js";
 import { imageType, type Notifier } from "./notify.js";
-import type { Mode, PendingKind, Store } from "./store.js";
+import type { Mode, PendingAction, PendingKind, Store } from "./store.js";
 import type { HyperliquidVenue } from "./venues/hyperliquid.js";
 import type { JupiterVenue } from "./venues/jupiter.js";
 import type { RelayVenue } from "./venues/relay.js";
@@ -106,6 +106,36 @@ const retryKey = (planId: string, idx: number) => `buy_retry_since:${planId}:${i
 function newCode(): string {
   const bytes = randomBytes(6);
   return Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
+}
+
+/** Words after /ok that approve everything waiting. */
+const ALL_WORDS = new Set(["ALL", "ВСЕ", "ВСЁ", "ВСІ", "УСІ", "НА ВСЕ", "НА ВСЁ"]);
+const OK_MENU_KEY = "ok_menu";
+/** How long the numbers of a shown /ok list stay valid (codes themselves last 10 minutes). */
+const OK_MENU_TTL_MS = 10 * 60_000;
+
+const KIND_LABEL: Record<PendingKind, string> = {
+  plan: "A trade plan",
+  limits: "Loosen your limits",
+  resume: "Turn Fren back on",
+  fund: "Send USDC to a trading account",
+  closeall: "Close every leveraged position",
+  hlwithdraw: "Withdraw USDC from Hyperliquid",
+};
+
+/** One line for the /ok list: what each step does, and the dollars it puts in or moves. */
+function planLabel(resolved: ResolvedStep[]): { label: string; usd?: number } {
+  const label = resolved.map((r) => describeStep(r.step, r)).join(" + ");
+  const usd = resolved.reduce((t, r) => t + (r.spendUsd > 0 ? r.spendUsd : (r.movesUsd ?? 0)), 0);
+  return usd > 0 ? { label, usd } : { label };
+}
+
+/** How long a code that ran out is still recognised as "ran out" rather than "wrong". */
+const EXPIRED_MEMORY_MS = 30 * 60_000;
+
+function nothingWaiting(ranOut: boolean): string {
+  if (ranOut) return "Nothing is waiting for your OK now: that request ran out (codes last 10 minutes). Ask me again if you still want it.";
+  return "Nothing is waiting for your OK right now.";
 }
 
 export class Fren {
@@ -241,7 +271,7 @@ export class Fren {
       this.d.store.insertPlan({ id, request: plan.request, plan: canonicalPlan, status: "pending_confirm", mode }, resolved, () => "pending");
       const loss = describeMaxLoss(resolved);
       const what = `${describeDecision(decision, resolved)}${loss ? `\n\n${loss}` : ""}`;
-      const owner = await this.issueCode("plan", id, `Confirm this plan:\n${what}`);
+      const owner = await this.issueCode("plan", id, `Confirm this plan:\n${what}`, planLabel(resolved));
       return { planId: id, verdict: "needs_code", text: this.say(`${header}${what}`) + `\n\n${owner.text}`, ...pick(owner) };
     }
 
@@ -481,16 +511,26 @@ export class Fren {
 
   // -- owner approvals -----------------------------------------------------
 
-  private async issueCode(kind: PendingKind, payload: string, privateText: string): Promise<OwnerRequestResult> {
+  /**
+   * The owner approves with a bare /ok (one request waiting) or picks from the list a
+   * bare /ok shows (several). The code stays the key underneath: /ok CODE still works,
+   * and only the owner can send /ok at all (plugin command, never the model).
+   */
+  private async issueCode(kind: PendingKind, payload: string, privateText: string, meta: { label: string; usd?: number }): Promise<OwnerRequestResult> {
     const code = newCode();
     const ttl = this.d.codeTtlMs ?? 10 * 60_000;
-    this.d.store.putPending({ code, kind, payload, expiresAt: new Date(Date.now() + ttl).toISOString() });
+    this.sweepExpired();
+    this.d.store.putPending({ code, kind, payload, expiresAt: new Date(Date.now() + ttl).toISOString(), label: meta.label, ...(meta.usd ? { usd: meta.usd } : {}) });
     const minutes = Math.round(ttl / 60_000);
-    const sent = await this.d.notifier.sendPrivate(`🔐 ${this.say(privateText)}\n\n${this.say(`Reply /ok ${code} within ${minutes} min.`)}`).catch(() => false);
-    if (sent) return { text: this.say(`The plan and its code are in my message just above. Reply /ok <code> to go ahead.`), codeSentPrivately: true };
-    return { text: this.say(`Reply /ok <code> with the code I just sent you to go ahead.`), codeSentPrivately: false, ownerCode: code };
+    const others = this.d.store.livePending().length - 1;
+    const how = others > 0 ? `Reply /ok within ${minutes} min. ${others + 1} requests are waiting now: /ok shows them all.` : `Reply /ok within ${minutes} min.`;
+    const sent = await this.d.notifier.sendPrivate(`🔐 ${this.say(privateText)}\n\n${this.say(how)}`).catch(() => false);
+    if (sent) return { text: this.say(`The plan is in my message just above. Reply /ok to go ahead.`), codeSentPrivately: true };
+    return { text: this.say(`Reply /ok to go ahead.`), codeSentPrivately: false, ownerCode: code };
   }
 
+  /** Codes that ran out lately, so typing one says "ran out" and isn't counted as a wrong code. */
+  private readonly expiredCodes = new Map<string, number>();
   /** Wrong /ok codes in a row; see approve(). */
   private wrongCodes = 0;
   /**
@@ -541,15 +581,29 @@ export class Fren {
   }
 
   private async approveInner(code: string): Promise<string | OwnerRequestResult> {
-    let entered = code.trim().toUpperCase();
+    const entered = code.trim().replace(/[.!]+$/, "").toUpperCase();
+    const expired = this.sweepExpired();
+    if (ALL_WORDS.has(entered)) return this.approveAll();
+    const live = this.d.store.livePending();
+    let p: PendingAction | null = null;
     if (!entered) {
-      // A tap on the /ok link in the bot's message sends no code. Only the owner can send /ok,
-      // and the message they tapped it in showed what the code is for, so one waiting code is enough.
-      const sole = this.d.store.soleLivePending();
-      if (!sole) return "More than one request is waiting for your OK, so add its code: /ok <code> from the message with that plan.";
-      entered = sole.code;
+      // A tap on /ok, or the owner typing it: only the owner can send /ok, and the
+      // message they answer says what it is for, so one waiting request is enough.
+      if (live.length === 0) return nothingWaiting(expired.length > 0 || this.expiredLately());
+      if (live.length > 1) return this.okMenu(live, "pick");
+      p = this.d.store.takePending(live[0]!.code);
+    } else if (/^\d{1,2}$/.test(entered)) {
+      // A number from the list a bare /ok showed. It stands for the code that was at that
+      // place then, so a request that ran out never shifts the next one into its number.
+      const shown = this.shownMenu();
+      const at = shown?.codes[Number(entered) - 1];
+      if (!at) return live.length ? this.okMenu(live, "pick") : nothingWaiting(expired.length > 0 || this.expiredLately());
+      p = this.d.store.takePending(at);
+      if (!p) return live.length ? this.okMenu(live, "gone") : "That request already ran out. Ask me again if you still want it.";
+    } else {
+      if (this.expiredCodes.has(entered)) return "That request ran out (codes last 10 minutes). Ask me again if you still want it.";
+      p = this.d.store.takePending(entered);
     }
-    const p = this.d.store.takePending(entered);
     if (!p) {
       if (++this.wrongCodes >= WRONG_CODE_LIMIT) {
         this.wrongCodes = 0;
@@ -559,8 +613,104 @@ export class Fren {
           .catch(() => false);
         return "Too many wrong codes. Every request waiting for a code was cancelled; ask again for a new one.";
       }
-      return "That code is wrong or expired.";
+      return live.length ? this.okMenu(live, "wrong") : "That code is wrong or expired.";
     }
+    return this.runApproved(p);
+  }
+
+  /**
+   * Codes that ran out are deleted, and a plan that only waited for one is closed,
+   * so /status and the agent stop saying it waits for /ok.
+   */
+  private sweepExpired(): PendingAction[] {
+    const gone = this.d.store.takeExpiredPending();
+    const now = Date.now();
+    for (const [c, at] of this.expiredCodes) if (now - at > EXPIRED_MEMORY_MS) this.expiredCodes.delete(c);
+    for (const p of gone) {
+      this.expiredCodes.set(p.code, now);
+      if (p.kind !== "plan") continue;
+      const rec = this.d.store.getPlan(p.payload);
+      if (!rec || rec.status !== "pending_confirm") continue;
+      for (const st of this.d.store.getSteps(rec.id)) {
+        if (st.status === "waiting" || st.status === "pending") this.d.store.setStep(rec.id, st.idx, "expired", "Code ran out");
+      }
+      this.d.store.setPlanStatus(rec.id, "cancelled");
+    }
+    return gone;
+  }
+
+  /** A request ran out in the last half hour, so "nothing is waiting" says why. */
+  private expiredLately(): boolean {
+    const now = Date.now();
+    return [...this.expiredCodes.values()].some((at) => now - at <= EXPIRED_MEMORY_MS);
+  }
+
+  /** The list a bare /ok shows when several requests wait; the numbers in it are kept for /ok N and /ok all. */
+  private okMenu(live: PendingAction[], why: "pick" | "wrong" | "gone" | "confirm_all"): string {
+    if (live.length === 1 && (why === "wrong" || why === "gone")) {
+      return [why === "wrong" ? "That code is wrong or expired." : "That one already ran out.", "Waiting for your OK (reply /ok):", `• ${live[0]!.label ?? KIND_LABEL[live[0]!.kind]}`].join("\n");
+    }
+    this.d.store.setKv(OK_MENU_KEY, JSON.stringify({ codes: live.map((p) => p.code), at: Date.now() }));
+    const total = live.reduce((t, p) => t + (p.usd ?? 0), 0);
+    const head =
+      why === "wrong"
+        ? "That code is wrong or expired. These are waiting for your OK:"
+        : why === "gone"
+          ? "That one already ran out. These are still waiting for your OK:"
+          : why === "confirm_all"
+            ? `Approve all ${live.length}? They are:`
+            : `${live.length} requests are waiting for your OK:`;
+    const lines = [head, ...live.map((p, i) => `${i + 1}. ${p.label ?? KIND_LABEL[p.kind]}`)];
+    if (total > 0) lines.push(`Money they put in or move: ${fmtUsd(total)}`);
+    lines.push(
+      why === "confirm_all"
+        ? "Send /ok all again to go ahead with all of them. Each one is checked against your limits again first."
+        : `Reply /ok 1 for the first one, and so on, or /ok all for all ${live.length}.`,
+    );
+    return lines.join("\n");
+  }
+
+  private shownMenu(): { codes: string[]; at: number } | null {
+    const raw = this.d.store.getKv(OK_MENU_KEY);
+    if (!raw) return null;
+    try {
+      const m = JSON.parse(raw) as { codes: string[]; at: number };
+      return Date.now() - m.at <= OK_MENU_TTL_MS ? m : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * /ok all. The owner must have seen exactly this list (from a bare /ok or a first
+   * /ok all) a moment ago; otherwise it is shown first. Each request then goes through
+   * the same path as its own /ok: plans are resolved and checked against the limits and
+   * the day's budget again, one after another, so a cap reached halfway stops the rest.
+   */
+  private async approveAll(): Promise<string | OwnerRequestResult> {
+    const live = this.d.store.livePending();
+    if (live.length === 0) return nothingWaiting(false);
+    if (live.length === 1) return this.runApproved(this.d.store.takePending(live[0]!.code)!);
+    const shown = this.shownMenu();
+    const same = shown && shown.codes.length === live.length && live.every((p) => shown.codes.includes(p.code));
+    if (!same) return this.okMenu(live, "confirm_all");
+    this.d.store.setKv(OK_MENU_KEY, "");
+    // Turning Fren back on comes first, else the plans behind it would meet a paused Fren.
+    const order = [...live].sort((a, b) => (a.kind === "resume" ? -1 : 0) - (b.kind === "resume" ? -1 : 0));
+    const out: string[] = [];
+    for (const [i, item] of order.entries()) {
+      const p = this.d.store.takePending(item.code);
+      if (!p) {
+        out.push(`${i + 1}. ${item.label ?? KIND_LABEL[item.kind]}`, "❌ Ran out before its turn.");
+        continue;
+      }
+      const r = await this.runApproved(p).catch((err: Error) => `❌ ${err.message}`);
+      out.push(`${i + 1}. ${item.label ?? KIND_LABEL[item.kind]}`, typeof r === "string" ? r : r.text);
+    }
+    return { text: out.join("\n") };
+  }
+
+  private async runApproved(p: PendingAction): Promise<string | OwnerRequestResult> {
     this.wrongCodes = 0;
     if (p.kind === "limits") {
       // Only the fields the owner asked to change, laid over the limits as they
@@ -621,12 +771,12 @@ export class Fren {
       this.d.store.setLimits(next);
       return { text: `✅ Limits updated.\n${describeLimits(next)}` };
     }
-    return this.issueCode("limits", JSON.stringify(changedFields(current, next)), `Loosen your limits to:\n${describeLimits(next)}`);
+    return this.issueCode("limits", JSON.stringify(changedFields(current, next)), `Loosen your limits to:\n${describeLimits(next)}`, { label: "Loosen your limits" });
   }
 
   async requestResume(): Promise<OwnerRequestResult> {
     if (!this.limits().paused) return { text: "Fren isn't stopped." };
-    return this.issueCode("resume", "", "Turn Fren back on?");
+    return this.issueCode("resume", "", "Turn Fren back on?", { label: "Turn Fren back on" });
   }
 
   // -- kill switch -----------------------------------------------------------
@@ -680,7 +830,7 @@ export class Fren {
     const open = await this.d.hyperliquid.positions("live").catch(() => null);
     if (open && open.length === 0) return { text: "No leveraged positions to close." };
     const what = open ? open.map((p) => p.symbol).join(", ") : "every leveraged position";
-    return this.issueCode("closeall", "", `Close ${what} now at market? Spot tokens stay as they are.`);
+    return this.issueCode("closeall", "", `Close ${what} now at market? Spot tokens stay as they are.`, { label: `Close ${what} at market` });
   }
 
   private async closeAllNow(): Promise<{ text: string; receiptSent?: boolean }> {
@@ -955,7 +1105,10 @@ export class Fren {
     if (this.limits().mode === "paper") return { text: `Practice mode trades ${FUND_NAMES[venue]} from your practice balance; nothing to fund. Switch to live first.` };
     if (!(usd >= 10)) return { text: `Send at least $10 to ${FUND_NAMES[venue]}.` };
     const to = await this.fundingAddress(venue);
-    return this.issueCode("fund", JSON.stringify({ venue, usd, to }), `Send ${fmtUsd(usd)} USDC from Arbitrum to your ${FUND_NAMES[venue]} account at ${to}?`);
+    return this.issueCode("fund", JSON.stringify({ venue, usd, to }), `Send ${fmtUsd(usd)} USDC from Arbitrum to your ${FUND_NAMES[venue]} account at ${to}?`, {
+      label: `Send ${fmtUsd(usd)} USDC to your ${FUND_NAMES[venue]} account`,
+      usd,
+    });
   }
 
   /**
@@ -978,6 +1131,7 @@ export class Fren {
       "hlwithdraw",
       JSON.stringify({ usd: usdIn === "all" ? "all" : usd }),
       `Withdraw ${usdIn === "all" ? `everything free (${fmtUsd(usd)})` : fmtUsd(usd)} USDC from Hyperliquid to your own Arbitrum wallet ${evm}? Hyperliquid keeps ${fmtUsd(HL_WITHDRAW_FEE)}, so about ${fmtUsd(usd - HL_WITHDRAW_FEE)} arrives, usually within 5 minutes.`,
+      { label: `Withdraw ${fmtUsd(usd)} USDC from Hyperliquid to your Arbitrum wallet`, usd },
     );
   }
 
@@ -1063,8 +1217,10 @@ It shows up as pUSD in your Polymarket wallet ${to}.`;
       }
     }
     if (waiting.length) lines.push("", "Watching:", ...waiting);
-    const pending = this.d.store.plansWithStatus("pending_confirm");
-    if (pending.length) lines.push("", `Waiting for your /ok code: ${pending.map((p) => p.id).join(", ")}`);
+    this.sweepExpired();
+    const pending = this.d.store.livePending();
+    if (pending.length === 1) lines.push("", "Waiting for your OK (reply /ok):", `• ${pending[0]!.label ?? KIND_LABEL[pending[0]!.kind]}`);
+    else if (pending.length > 1) lines.push("", `Waiting for your OK (/ok shows them, /ok all approves all ${pending.length}):`, ...pending.map((p) => `• ${p.label ?? KIND_LABEL[p.kind]}`));
 
     lines.push("", `Spent today: ${fmtUsd(this.d.store.spentTodayUsd(limits.mode))} of ${fmtUsd(limits.maxDailyUsd)}`);
     return lines.join("\n");

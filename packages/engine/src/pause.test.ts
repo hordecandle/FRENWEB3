@@ -78,13 +78,13 @@ describe("pause (/fren_stop)", () => {
     expect(detectLang("ok")).toBeNull();
   });
 
-  it("a bare /ok approves the one waiting code, and refuses when there are two", async () => {
+  it("a bare /ok approves the one waiting request, and lists them when there are two", async () => {
     const t = buildTestFren({});
     await t.fren.changeLimits("maxTradeUsd=5000");
     expect(await t.fren.approve("")).toMatch(/Limits updated|updated|✅/);
     await t.fren.changeLimits("maxTradeUsd=6000");
     await t.fren.changeLimits("maxLeverage=40");
-    expect(await t.fren.approve("")).toMatch(/More than one request is waiting for your OK/);
+    expect(await t.fren.approve("")).toMatch(/^2 requests are waiting for your OK:\n1\. Loosen your limits\n2\. Loosen your limits\nReply \/ok 1/);
   });
 });
 

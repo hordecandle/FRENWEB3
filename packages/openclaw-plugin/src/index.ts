@@ -110,7 +110,7 @@ async function deliverOwnerCode(res: OwnerResult, ctx: OpenClawPluginToolContext
   if (!res.ownerCode) return withReceiptNote(res);
   const send = ctx.delivery?.send;
   if (send) {
-    await send({ text: `🔐 Your Fren code: ${res.ownerCode}\nReply /ok ${res.ownerCode} to approve. Never share it.` });
+    await send({ text: `🔐 Fren is waiting for your OK. Reply /ok to approve (code ${res.ownerCode}, never share it).` });
     return `${res.text}\n(The code was sent to the user directly; you do not have it and cannot approve on their behalf.)`;
   }
   return `${res.text}\nNo private channel is set up, so ask the user to run /fren_code to see the code.`;
@@ -170,6 +170,8 @@ export function approvedReply(text: string, lang: Lang | null): string {
   return `${done.length ? done.join("\n") : APPROVED[lang ?? "en"]}\n${OK_NOTE[lang ?? "en"]}`;
 }
 const langBody = () => (lastLang ? { lang: lastLang } : {});
+const localizeDashboardHint = () =>
+  lastLang === "ru" ? "Отправь /fren_dashboard, пришлю ссылку на дашборд." : lastLang === "uk" ? "Надішли /fren_dashboard, надішлю посилання на дашборд." : "Send /fren_dashboard and I'll send you the dashboard link.";
 
 export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; screenshotHelper?: string } = {}): ToolSpec[] {
   return [
@@ -511,7 +513,7 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
 
   api.registerCommand({
     name: "ok",
-    description: "Approve a Fren plan or settings change with the code Fren sent you.",
+    description: "Approve what Fren asked you about. Several waiting: /ok lists them, /ok 2 picks one, /ok all approves all.",
     acceptsArgs: true,
     requireAuth: true,
     exposeSenderIsOwner: true,
@@ -598,7 +600,7 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
     exposeSenderIsOwner: true,
     handler: (ctx) =>
       guard(isOwner(ctx), async () => {
-        const r = await client.call<{ text: string; link?: string }>("POST", "/dashboard/link");
+        const r = await client.call<{ text: string; link?: string }>("POST", "/dashboard/link", langBody());
         return r.link ? `${r.text}\n${r.link}` : r.text;
       }),
   });
@@ -632,13 +634,38 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
   });
 }
 
+/**
+ * OpenClaw's own /dashboard (it sits in the Telegram menu and can't be switched off)
+ * asks the AI to build a "session dashboard" with its control-ui skill. The owner means
+ * Fren's dashboard, so that turn gets the Fren login link instead, with no AI call.
+ */
+export function isDashboardRequest(body: unknown): boolean {
+  if (typeof body !== "string") return false;
+  const b = body.trim();
+  if (/^\/dashboard(?:@\w+)?\s*$/i.test(b)) return true;
+  return /Create a dashboard for this session\./.test(b) && /control[-_]ui/i.test(b);
+}
+
 /** Caps on agent turns and tool calls, see guard.ts. Older hosts without api.on just don't get them. */
-export function registerLoopGuard(api: Pick<OpenClawPluginApi, "on">, guard: LoopGuard) {
+export function registerLoopGuard(api: Pick<OpenClawPluginApi, "on">, guard: LoopGuard, client?: Pick<EngineClient, "call">) {
   if (typeof api.on !== "function") return;
   // A hook that throws would let the turn through (claim hooks fail open), so decide inside.
   api.on("before_agent_reply", async (event, ctx) => {
-    noteLang((event as { cleanedBody?: string }).cleanedBody);
-    return guard.beforeReply(ctx as TurnContext);
+    const body = (event as { cleanedBody?: string }).cleanedBody;
+    const turn = ctx as TurnContext;
+    if (client && isDashboardRequest(body) && (!turn.trigger || turn.trigger === "user")) {
+      const gate = await guard.beforeReply(turn);
+      if (gate) return gate;
+      try {
+        // The link itself goes to the owner's private line; the chat only hears where it is.
+        const r = await client.call<{ text: string; link?: string }>("POST", "/dashboard/link", langBody());
+        return { handled: true as const, reply: { text: r.link ? localizeDashboardHint() : r.text }, reason: "fren: /dashboard is the Fren dashboard" };
+      } catch (err) {
+        return { handled: true as const, reply: { text: `Fren error: ${(err as Error).message}` }, reason: "fren: /dashboard failed" };
+      }
+    }
+    noteLang(body);
+    return guard.beforeReply(turn);
   }, { priority: 100 });
   api.on("before_tool_call", async (event, ctx) => guard.beforeTool({ ...(ctx as ToolContext), toolName: event.toolName, runId: event.runId ?? ctx.runId }), { priority: 100 });
   api.on("agent_end", async (_event, ctx) => guard.endRun(ctx));
@@ -681,7 +708,7 @@ export default definePluginEntry({
     const mode = api.registrationMode;
     if (mode !== "cli-metadata" && mode !== "setup-only" && mode !== "tool-discovery") {
       registerCommands(api, client);
-      registerLoopGuard(api, new LoopGuard(client));
+      registerLoopGuard(api, new LoopGuard(client), client);
       registerReadySignal(api, client);
     }
   },

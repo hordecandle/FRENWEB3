@@ -9,10 +9,10 @@ describe("localize", () => {
     expect(localize(plan, undefined)).toBe(plan);
   });
   it("turns a confirmation into one Russian message", () => {
-    const out = localize(`${plan}\n\nReply /ok 5ZER39 within 10 min.`, "ru");
+    const out = localize(`${plan}\n\nReply /ok within 10 min.`, "ru");
     expect(out).toContain("Подтверди план:");
     expect(out).toContain("Положить $3.00 USDC в Jupiter Lend (Solana)");
-    expect(out).toContain("Ответь /ok 5ZER39 в течение 10 мин.");
+    expect(out).toContain("Ответь /ok в течение 10 мин.");
     expect(out).not.toMatch(/Confirm|Lend \$|Reply/);
   });
   it("buy, sell, long lines", () => {
@@ -76,8 +76,8 @@ describe("what the owner saw in English on 22.11", () => {
     expect(ru).toMatch(/^✅ /);
     expect(ru).toContain("https://solscan.io/tx/abc");
     expect(ru).not.toMatch(/Moved|wallet/);
-    expect(localize("The plan and its code are in my message just above. Reply /ok <code> to go ahead.", "ru")).toMatch(/^План и код/);
-    expect(localize("More than one request is waiting for your OK, so add its code: /ok <code> from the message with that plan.", "ru")).toMatch(/^Подтверждения ждут/);
+    expect(localize("The plan is in my message just above. Reply /ok to go ahead.", "ru")).toMatch(/^План в моём сообщении/);
+    expect(localize("2 requests are waiting for your OK:", "ru")).toBe("Твоего ок ждут запросов: 2");
     expect(localize("Sent you a login link for your dashboard in a separate message. It works once, for 10 minutes.", "ru")).toMatch(/^Ссылку на дашборд/);
     expect(localize("The dashboard isn't running on this machine. Restart Fren, or set FREN_DASHBOARD=on.", "uk")).toMatch(/^Дашборд/);
   });
@@ -115,7 +115,8 @@ describe("the owner's language through the engine", () => {
     await ru.fren.submit(lend);
     const sent = ru.notifier.sent.at(-1) ?? "";
     expect(sent).toContain("Подтверди план:");
-    expect(sent).toMatch(/Ответь \/ok [A-Z0-9]{6} в течение 10 мин\./);
+    expect(sent).toMatch(/Ответь \/ok в течение 10 мин\./);
+    expect(sent).not.toMatch(/[A-Z0-9]{6}/);
     expect(sent).not.toMatch(/Confirm|Reply|Earns about/);
     const en = buildTestFren({ live: true });
     en.fake.solanaUsdc = 50;
@@ -134,7 +135,7 @@ describe("the owner's language through the engine", () => {
       venues.yield.execute = async () => {
         throw new Error('Simulation failed: {"InstructionError":[0,{"Custom":3012}]}');
       };
-      const code = /\/ok ([A-Z0-9]{6})/.exec(t.notifier.sent.at(-1) ?? "")![1]!;
+      const code = t.store.livePending().at(-1)!.code;
       const res = await t.fren.approveWithReceipt(code);
       const all = [res.text, ...t.notifier.sent.slice(1)].join("\n");
       expect(all).toContain(want);

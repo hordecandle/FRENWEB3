@@ -87,7 +87,7 @@ describe("OpenClaw plugin against a real engine", () => {
       },
       ctx,
     );
-    const code = /\/ok ([A-Z0-9]{6})/.exec(delivered[0] ?? "")?.[1];
+    const code = /code ([A-Z0-9]{6})/.exec(delivered[0] ?? "")?.[1];
     expect(code).toBeDefined();
     expect(out2).not.toContain(code!);
     expect(out2).toMatch(/you do not have it/);
@@ -187,7 +187,7 @@ describe("Bee's ANT long, from the chat tools down, with only USDC on Solana", (
     t.fake.hlFreeDefault = 1_000_000;
     const out = await run("fren_trade", { plan: { request: "short BTC $20 2x", steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "BTC", side: "short", sizing: { type: "margin", usd: 20 }, leverage: 2 } }] } });
     expect(out).toMatch(/code/);
-    const code = /\/ok ([A-Z0-9]{6})/.exec(t.notifier.sent.at(-1) ?? "")![1];
+    const code = t.store.livePending().at(-1)!.code;
     const before = t.notifier.receipts.length;
     const reply = (await reg.commands.get("ok").handler({ senderIsOwner: true, args: code })).text;
     expect(reply).toMatch(/^✅ Bet on BTC going down: /m);

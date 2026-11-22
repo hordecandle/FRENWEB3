@@ -29,10 +29,36 @@ const rules: Rule[] = [
   { re: /^Send (\$[\d.,]+) USDC from Arbitrum to your (.+) account at (\S+)\?$/, ru: (a, v, t) => `Отправить ${a} USDC из Arbitrum на твой счёт ${v} (${t})?`, uk: (a, v, t) => `Надіслати ${a} USDC з Arbitrum на твій рахунок ${v} (${t})?` },
   { re: /^Turn Fren back on\?$/, ru: () => "Снова включить Fren?", uk: () => "Знову ввімкнути Fren?" },
   { re: /^Reply \/ok (\S+) within (\d+) min\.$/, ru: (c, m) => `Ответь /ok ${c} в течение ${m} мин.`, uk: (c, m) => `Відповідай /ok ${c} протягом ${m} хв.` },
-  { re: /^The plan and its code are in my message just above\. Reply \/ok <code> to go ahead\.$/, ru: () => "План и код в моём сообщении чуть выше. Ответь /ok и этот код, чтобы продолжить.", uk: () => "План і код у моєму повідомленні трохи вище. Відповідай /ok і цей код, щоб продовжити." },
-  { re: /^Reply \/ok <code> with the code I just sent you to go ahead\.$/, ru: () => "Ответь /ok <код> с кодом, который я только что прислал.", uk: () => "Відповідай /ok <код> з кодом, який я щойно надіслав." },
+  { re: /^Reply \/ok within (\d+) min\.$/, ru: (m) => `Ответь /ok в течение ${m} мин.`, uk: (m) => `Відповідай /ok протягом ${m} хв.` },
+  { re: /^Reply \/ok within (\d+) min\. (\d+) requests are waiting now: \/ok shows them all\.$/, ru: (m, n) => `Ответь /ok в течение ${m} мин. Сейчас ждут ${n} запроса: /ok покажет все.`, uk: (m, n) => `Відповідай /ok протягом ${m} хв. Зараз чекають ${n} запити: /ok покаже всі.` },
+  { re: /^The plan is in my message just above\. Reply \/ok to go ahead\.$/, ru: () => "План в моём сообщении чуть выше. Ответь /ok, чтобы продолжить.", uk: () => "План у моєму повідомленні трохи вище. Відповідай /ok, щоб продовжити." },
+  { re: /^Reply \/ok to go ahead\.$/, ru: () => "Ответь /ok, чтобы продолжить.", uk: () => "Відповідай /ok, щоб продовжити." },
   { re: /^That code is wrong or expired\.$/, ru: () => "Код неверный или просрочен.", uk: () => "Код неправильний або прострочений." },
-  { re: /^More than one request is waiting for your OK, so add its code: \/ok <code> from the message with that plan\.$/, ru: () => "Подтверждения ждут несколько запросов, поэтому добавь код: /ok и код из сообщения с нужным планом.", uk: () => "Підтвердження чекають кілька запитів, тож додай код: /ok і код із повідомлення з потрібним планом." },
+  { re: /^Nothing is waiting for your OK right now\.$/, ru: () => "Сейчас ничего не ждёт твоего ок.", uk: () => "Зараз нічого не чекає твого ок." },
+  { re: /^Nothing is waiting for your OK now: that request ran out \(codes last 10 minutes\)\. Ask me again if you still want it\.$/, ru: () => "Сейчас ничего не ждёт твоего ок: запрос истёк (он живёт 10 минут). Если ещё нужно, попроси заново.", uk: () => "Зараз нічого не чекає твого ок: запит сплив (він живе 10 хвилин). Якщо ще треба, попроси знову." },
+  { re: /^That request ran out \(codes last 10 minutes\)\. Ask me again if you still want it\.$/, ru: () => "Этот запрос истёк (он живёт 10 минут). Если ещё нужно, попроси заново.", uk: () => "Цей запит сплив (він живе 10 хвилин). Якщо ще треба, попроси знову." },
+  { re: /^That request already ran out\. Ask me again if you still want it\.$/, ru: () => "Этот запрос уже истёк. Если ещё нужно, попроси заново.", uk: () => "Цей запит уже сплив. Якщо ще треба, попроси знову." },
+  { re: /^That code is wrong or expired\. These are waiting for your OK:$/, ru: () => "Код неверный или просрочен. Твоего ок ждут:", uk: () => "Код неправильний або прострочений. Твого ок чекають:" },
+  { re: /^That one already ran out\.$/, ru: () => "Этот уже истёк.", uk: () => "Цей уже сплив." },
+  { re: /^That one already ran out\. These are still waiting for your OK:$/, ru: () => "Этот уже истёк. Твоего ок ещё ждут:", uk: () => "Цей уже сплив. Твого ок ще чекають:" },
+  { re: /^Approve all (\d+)\? They are:$/, ru: (n) => `Подтвердить все (${n})? Вот они:`, uk: (n) => `Підтвердити всі (${n})? Ось вони:` },
+  { re: /^(\d+) requests are waiting for your OK:$/, ru: (n) => `Твоего ок ждут запросов: ${n}`, uk: (n) => `Твого ок чекають запитів: ${n}` },
+  { re: /^Money they put in or move: (\$[\d.,]+)$/, ru: (a) => `Всего денег в них: ${a}`, uk: (a) => `Усього грошей у них: ${a}` },
+  { re: /^Send \/ok all again to go ahead with all of them\. Each one is checked against your limits again first\.$/, ru: () => "Отправь /ok all ещё раз, и я сделаю все. Каждый перед этим заново проверю по твоим лимитам.", uk: () => "Надішли /ok all ще раз, і я зроблю всі. Кожен перед цим знову перевірю за твоїми лімітами." },
+  { re: /^Reply \/ok 1 for the first one, and so on, or \/ok all for all (\d+)\.$/, ru: (n) => `Ответь /ok 1 для первого и так далее, или /ok all для всех ${n}.`, uk: (n) => `Відповідай /ok 1 для першого і так далі, або /ok all для всіх ${n}.` },
+  { re: /^❌ Ran out before its turn\.$/, ru: () => "❌ Истёк, пока ждал очереди.", uk: () => "❌ Сплив, поки чекав черги." },
+  { re: /^Waiting for your OK \(reply \/ok\):$/, ru: () => "Ждёт твоего ок (ответь /ok):", uk: () => "Чекає твого ок (відповідай /ok):" },
+  { re: /^Waiting for your OK \(\/ok shows them, \/ok all approves all (\d+)\):$/, ru: (n) => `Ждут твоего ок (/ok покажет, /ok all подтвердит все ${n}):`, uk: (n) => `Чекають твого ок (/ok покаже, /ok all підтвердить усі ${n}):` },
+  // labels of waiting requests (the /ok list and /status)
+  { re: /^Loosen your limits$/, ru: () => "Ослабить лимиты", uk: () => "Послабити ліміти" },
+  { re: /^Turn Fren back on$/, ru: () => "Снова включить Fren", uk: () => "Знову ввімкнути Fren" },
+  { re: /^Close (.+) at market$/, ru: (x) => `Закрыть ${x} по рынку`, uk: (x) => `Закрити ${x} за ринком` },
+  { re: /^Send (\$[\d.,]+) USDC to your (.+) account$/, ru: (a, v) => `Отправить ${a} USDC на твой счёт ${v}`, uk: (a, v) => `Надіслати ${a} USDC на твій рахунок ${v}` },
+  { re: /^Withdraw (\$[\d.,]+) USDC from Hyperliquid to your Arbitrum wallet$/, ru: (a) => `Вывести ${a} USDC из Hyperliquid на твой кошелёк Arbitrum`, uk: (a) => `Вивести ${a} USDC з Hyperliquid на твій гаманець Arbitrum` },
+  { re: /^A trade plan$/, ru: () => "План сделки", uk: () => "План угоди" },
+  { re: /^Send USDC to a trading account$/, ru: () => "Отправить USDC на торговый счёт", uk: () => "Надіслати USDC на торговий рахунок" },
+  { re: /^Close every leveraged position$/, ru: () => "Закрыть все позиции с плечом", uk: () => "Закрити всі позиції з плечем" },
+  { re: /^Withdraw USDC from Hyperliquid$/, ru: () => "Вывести USDC из Hyperliquid", uk: () => "Вивести USDC з Hyperliquid" },
   { re: /^⚠️ (\d+) wrong \/ok codes in a row\. To be safe I cancelled every request that was waiting for a code\. If that wasn't you, send \/fren_stop\.$/, ru: (n) => `⚠️ ${n} неверных кодов /ok подряд. На всякий случай я отменил все запросы, которые ждали кода. Если это был не ты, отправь /fren_stop.`, uk: (n) => `⚠️ ${n} неправильних кодів /ok поспіль. Про всяк випадок я скасував усі запити, що чекали коду. Якщо це був не ти, надішли /fren_stop.` },
   { re: /^Too many wrong codes\. Every request waiting for a code was cancelled; ask again for a new one\.$/, ru: () => "Слишком много неверных кодов. Все запросы, ждавшие кода, отменены; попроси заново, придёт новый код.", uk: () => "Забагато неправильних кодів. Усі запити, що чекали коду, скасовано; попроси знову, прийде новий код." },
   // dashboard
@@ -131,7 +157,19 @@ function exits(tail: string, lang: "ru" | "uk"): string {
 }
 
 /** Translate one line; unknown lines come back unchanged. */
+/** A plan step without its icon: the step rules expect the "🟡 " the confirmation puts in front. */
+function planLine(x: string, lang: "ru" | "uk"): string {
+  const plain = line(x, lang);
+  if (plain !== x) return plain;
+  const icon = "🟡 ";
+  const t = line(icon + x, lang);
+  return t !== icon + x && t.startsWith(icon) ? t.slice(icon.length) : x;
+}
+
 function line(l: string, lang: "ru" | "uk"): string {
+  // A waiting request in the /ok list ("2. Buy $3.00 of JUP on Jupiter + …") or in /status ("• …").
+  const item = /^(\d{1,2}\. |• )(.+)$/.exec(l);
+  if (item) return item[1] + item[2]!.split(" + ").map((x) => planLine(x, lang)).join(" + ");
   const step = /^Step (\d+): (.+)$/.exec(l);
   if (step) return `${lang === "ru" ? "Шаг" : "Крок"} ${step[1]}: ${line(step[2]!, lang)}`;
   // A failed step: "❌ <what>: <why>". The why is already in the owner's language

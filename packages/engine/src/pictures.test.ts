@@ -109,9 +109,9 @@ describe("close all", () => {
     await t.fren.submit(antLong);
     holdAnt(t);
     t.notifier.receipts.length = 0;
-    expect((await t.fren.requestCloseAll()).text).toMatch(/its code are in my message just above/);
+    expect((await t.fren.requestCloseAll()).text).toMatch(/The plan is in my message just above\. Reply \/ok to go ahead\./);
     expect(t.notifier.sent.at(-1)).toMatch(/Close xyz:ANT now at market/);
-    const code = /\/ok ([A-Z0-9]+)/.exec(t.notifier.sent.at(-1) ?? "")?.[1];
+    const code = t.store.livePending().at(-1)?.code;
     const r = await t.fren.approveWithReceipt(code!);
     expect(r.receiptSent).toBe(true);
     expect(t.notifier.receipts).toHaveLength(1);

@@ -47,7 +47,8 @@ describe("Fren's persona in the OpenClaw workspace", () => {
 
   it("carries the trading rules of SKILL.md, which OpenClaw never puts in the prompt here", async () => {
     const md = agentsMd(pluginDir);
-    expect(md).toMatch(/reply `\/ok <code>`/);
+    expect(md).toMatch(/tell the owner to reply `\/ok`\. Nothing else/);
+    expect(md).not.toMatch(/\/ok <code>/);
     expect(md).toMatch(/call `fren_trade` once/);
     expect(md).not.toMatch(/^name: fren/m); // front matter stripped
     expect(md).toMatch(/Long NVDA with \$100 margin, 2x/); // examples say what the number is

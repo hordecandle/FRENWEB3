@@ -8,7 +8,7 @@ import { relaySolanaInstructions, type RelayQuote } from "./venues/relay.js";
 
 const ARB_USDC = "arbitrum:0xaf88d065e77c8cc2239327c5edb3a432268e5831";
 const usdc = (n: number) => BigInt(Math.round(n * 1e6));
-const codeFrom = (sent: string[]) => /\/ok ([A-Z0-9]{6})/.exec(sent.at(-1) ?? "")?.[1] ?? "";
+const codeFrom = (t: { store: { livePending(): { code: string }[] } }) => t.store.livePending().at(-1)?.code ?? "";
 
 const long = (market: string, margin: number, leverage: number) => ({
   request: `long ${market} ${leverage}x with $${margin}`,
@@ -69,7 +69,7 @@ describe("a perp pays for itself", () => {
     expect(deposits).toHaveLength(0);
     expect(t.fake.exchange).toHaveLength(0);
 
-    const out = await t.fren.approve(codeFrom(t.notifier.sent));
+    const out = await t.fren.approve(codeFrom(t));
     expect(deposits).toEqual([100.75]);
     expect(out).toMatch(/Moved \$101 USDC from Arbitrum into Hyperliquid/);
     expect(out).toMatch(/✅ Bet on/);
@@ -181,7 +181,7 @@ describe("topping Arbitrum up from Solana", () => {
     expect(res.text).toMatch(/moves \$30\.75 USDC from your Solana wallet to it with Circle's bridge/);
     expect(res.text).toMatch(/moves \$50\.75 USDC from your Arbitrum wallet into your Hyperliquid account/);
     expect(bridged).toHaveLength(0);
-    const out = await t.fren.approve(codeFrom(t.notifier.sent));
+    const out = await t.fren.approve(codeFrom(t));
     expect(bridged).toEqual([30.75]);
     expect(deposits).toEqual([50.75]);
     expect(out).toMatch(/✅ Bet on/);
@@ -275,7 +275,7 @@ describe("straight from Solana USDC through Relay", () => {
     expect(res.text).toMatch(/Take profit: if ANT rises ~10%, Fren closes it and you win about \$50/);
     expect(res.text).toMatch(/sends \$51\.16 USDC from your Solana wallet straight into your Hyperliquid account through Relay/);
     expect(t.fake.relaySolanaTxs).toHaveLength(0);
-    const out = await t.fren.approve(codeFrom(t.notifier.sent));
+    const out = await t.fren.approve(codeFrom(t));
     expect(t.fake.relaySolanaTxs).toHaveLength(1);
     expect(out).toMatch(/✅ Bet on/);
   });
@@ -387,7 +387,7 @@ describe("money already on Hyperliquid is used as is (22.11: $5.26 there, Fren o
     expect(res.verdict).toBe("needs_code");
     expect(res.text).not.toMatch(/Fren first moves/);
     expect(res.text).toMatch(/Paid from the \$5\.26 USDC already on your Hyperliquid account/);
-    if (res.verdict === "needs_code") await t.fren.approve(codeFrom(t.notifier.sent));
+    if (res.verdict === "needs_code") await t.fren.approve(codeFrom(t));
     expect(deposits).toHaveLength(0);
     expect(t.fake.exchange.map((b) => (b.action as { type: string }).type)).toContain("order");
   });
@@ -396,7 +396,7 @@ describe("money already on Hyperliquid is used as is (22.11: $5.26 there, Fren o
     const { t, deposits } = fresh(30);
     t.fake.hlFree[""] = 4.9;
     const res = await t.fren.submit(longStop("BTC", 5, 3, 20));
-    if (res.verdict === "needs_code") await t.fren.approve(codeFrom(t.notifier.sent));
+    if (res.verdict === "needs_code") await t.fren.approve(codeFrom(t));
     expect(deposits).toEqual([5]);
   });
 });
@@ -412,7 +412,7 @@ describe("withdraw from Hyperliquid back to the own Arbitrum wallet", () => {
     expect(withdraws(t)).toHaveLength(0);
     expect(t.notifier.sent.at(-1)).toMatch(/Withdraw everything free \(\$10\.26\) USDC from Hyperliquid to your own Arbitrum wallet 0x[0-9a-fA-F]{40}\? Hyperliquid keeps \$1\.00, so about \$9\.26 arrives/);
     expect(res.text).toMatch(/\/ok/);
-    const out = await t.fren.approve(codeFrom(t.notifier.sent));
+    const out = await t.fren.approve(codeFrom(t));
     expect(out).toMatch(/✅ Withdrew \$10\.26 USDC from Hyperliquid to your Arbitrum wallet/);
     const [w] = withdraws(t);
     expect(w).toMatchObject({ type: "withdraw3", amount: "10.26", destination: evm.toLowerCase() });
@@ -430,7 +430,7 @@ describe("withdraw from Hyperliquid back to the own Arbitrum wallet", () => {
     const { t } = fresh(0);
     t.fake.hlFree[""] = 10.26;
     await t.fren.requestHlWithdraw(6);
-    const code = codeFrom(t.notifier.sent);
+    const code = codeFrom(t);
     await t.fren.approve(code);
     expect(await t.fren.approve(code)).toMatch(/wrong or expired/);
     expect(withdraws(t)).toHaveLength(1);
@@ -451,7 +451,7 @@ describe("withdraw from Hyperliquid back to the own Arbitrum wallet", () => {
     t.fake.hlFree[""] = 10.26;
     await t.fren.requestHlWithdraw(10);
     t.fake.hlFree[""] = 4;
-    await t.fren.approve(codeFrom(t.notifier.sent));
+    await t.fren.approve(codeFrom(t));
     expect(withdraws(t)[0]).toMatchObject({ amount: "4" });
   });
 
@@ -459,7 +459,7 @@ describe("withdraw from Hyperliquid back to the own Arbitrum wallet", () => {
     const { t } = fresh(0);
     t.fake.hlFree[""] = 10.26;
     await t.fren.requestHlWithdraw("all");
-    const code = codeFrom(t.notifier.sent);
+    const code = codeFrom(t);
     await t.fren.stop();
     expect(await t.fren.approve(code)).toMatch(/wrong or expired/);
     expect(withdraws(t)).toHaveLength(0);
