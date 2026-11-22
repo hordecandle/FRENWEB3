@@ -205,7 +205,7 @@ const REFUSALS: Refusal[] = [
   { re: /doesn't know the token/i, safe: true, say: () => t("That coin isn't known to the exchange yet, or isn't trading.", "Эта монета бирже пока не известна или ещё не торгуется.", "Ця монета біржі поки не відома або ще не торгується.") },
 ];
 
-const looksRawText = (raw: string) => /\{\s*"|InstructionError|0x[0-9a-f]{8,}|Error:|\bat \w+\.\w+/i.test(raw);
+const looksRawText = (raw: string) => /\{\s*"|InstructionError|^\w*Error: |\bat \w+\.\w+\s*\(/.test(raw);
 
 /**
  * A failure as one plain sentence in the owner's language: what happened and, when it
@@ -215,6 +215,7 @@ const looksRawText = (raw: string) => /\{\s*"|InstructionError|0x[0-9a-f]{8,}|Er
  */
 export function humanError(raw: string, langIn: unknown): string {
   const lang = asLang(langIn);
+  if (!looksRawText(raw) && !/Simulation failed/i.test(raw)) return raw;
   const code = /"Custom"\s*:\s*(\d+)/.exec(raw)?.[1];
   if (code && CUSTOM_CODES[code]) {
     const why = CUSTOM_CODES[code]![lang];
@@ -229,7 +230,6 @@ export function humanError(raw: string, langIn: unknown): string {
     const sentence = /[.!?]$/.test(head) ? head : `${head[0]!.toUpperCase()}${head.slice(1)}.`;
     return fromSim && r.safe ? `${sentence} ${SAFE[lang]}` : sentence;
   }
-  if (!looksRawText(raw) && !/Simulation failed/i.test(raw)) return raw;
   const why = WHY[lang];
   const head = `${why[0]!.toUpperCase()}${why.slice(1)}.`;
   return /Simulation failed/i.test(raw) ? `${head} ${SAFE[lang]}` : `${head} ${CHECK[lang]}`;

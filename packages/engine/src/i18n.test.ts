@@ -47,9 +47,9 @@ describe("humanError", () => {
       ['Hyperliquid refused: {"status":"ok","response":{"data":{"statuses":[{"error":"Order could not immediately match against any resting orders."}]}}}', /Никто не взял/],
       ['Derive: {"code":11000,"message":"Insufficient collateral"}', /Derive не хватает денег/],
       ['Polymarket refused: {"error":"not enough balance / allowance"}', /Polymarket не хватает/],
-      ["Relay can't route this: No routes found", /Relay сейчас не нашёл/],
-      ["Transaction failed on-chain: execution reverted", /отклонила транзакцию/],
-      ["insufficient funds for gas * price + value", /комиссию сети/],
+      ['Relay: {"message":"No routes found","errorCode":"NO_SWAP_ROUTES"}', /Relay сейчас не нашёл/],
+      ["Error: Transaction failed on-chain: execution reverted", /отклонила транзакцию/],
+      ["Error: insufficient funds for gas * price + value", /комиссию сети/],
       ['Simulation failed: {"InstructionError":[2,{"Custom":6001}]}', /Цена слишком сдвинулась/],
       ['Kamino: {"error":"reserve full"}', /под процент/],
     ];
