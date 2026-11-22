@@ -6,6 +6,7 @@ import { createApi } from "./api.js";
 import { ResendMailer } from "./dashboard-auth.js";
 import { OpenClawChat } from "./dashboard-chat.js";
 import { Dashboard } from "./dashboard.js";
+import { keystoreVault } from "./keys-vault.js";
 import { Connection } from "@solana/web3.js";
 import { deriveApiUrl, hyperliquidApiUrl, jupiterApiUrl, jupiterLendApiUrl, frenPaths, loadConfig, relayApiUrl, type FrenConfig, type FrenPaths } from "./config.js";
 import { Fren } from "./engine.js";
@@ -190,6 +191,8 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
         local: !dashUrl,
         chat: new OpenClawChat({ bin: process.env.OPENCLAW_BIN ?? "openclaw" }),
         mailer: mailKey ? new ResendMailer(mailKey, process.env.FREN_MAIL_FROM ?? "Fren <login@getfren.xyz>") : null,
+        // Keys block: show/copy one key for 30 s after SHOW + a Telegram code. FREN_DASHBOARD_KEYS=off keeps them terminal-only.
+        keys: process.env.FREN_DASHBOARD_KEYS === "off" ? null : keystoreVault(paths.keystore, paths.passphrase),
       })
     : null;
   const dashServer = dashboard?.server() ?? null;

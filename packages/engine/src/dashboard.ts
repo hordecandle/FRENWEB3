@@ -42,12 +42,25 @@ export interface DashboardOptions {
   local?: boolean;
 }
 
+/** The rows of the Keys block, in the order the vault returns them. */
+export const KEY_LABELS = ["Solana wallet key", "EVM wallet key (Base, Arbitrum, Polygon)", "Hyperliquid trading key"] as const;
+
 /** What the owner can copy out to keep a backup of the wallets. */
 export interface KeyVault {
   reveal(): Promise<{ label: string; value: string }[]>;
 }
 
 const KEY_CODE_TTL_MS = 5 * 60_000;
+/** After the right code, the owner can show or copy single keys for this long (same browser session only). */
+const KEY_WINDOW_MS = 2 * 60_000;
+/** At most this many codes for showing keys per 10 minutes. */
+const KEY_CODES_PER_10_MIN = 3;
+/** How long the page shows a key before it hides it by itself. */
+const KEY_SHOW_MS = 30_000;
+/** At most this many single keys shown or copied per minute. */
+const KEY_REVEALS_PER_MINUTE = 6;
+/** The word the owner types before any code is sent. */
+export const KEY_CONFIRM_WORD = "SHOW";
 /** Login attempts (email codes, wallet signatures) per minute, across everyone. */
 const AUTH_PER_MINUTE = 20;
 
@@ -63,7 +76,11 @@ export class Dashboard {
   private readonly demo: boolean;
   private readonly local: boolean;
   /** The last code sent for showing keys (demo: also shown on the page). */
-  private keyCode: { code: string; exp: number; tries: number } | null = null;
+  private keyCode: { code: string; exp: number; tries: number; session: string } | null = null;
+  /** The browser session that typed the right code, and until when it may show keys. */
+  private keyWindow: { session: string; until: number } | null = null;
+  private keyCodeHits: number[] = [];
+  private keyRevealHits: number[] = [];
   private authHits: number[] = [];
   /** Demo stand only: the latest code a real install would have sent away. */
   demoNote: string | null = null;
@@ -79,6 +96,31 @@ export class Dashboard {
     this.demo = opts.demo ?? false;
     this.local = opts.local ?? false;
     this.auth = new DashboardAuth(fren.store, opts.mailer ?? null, this.now);
+  }
+
+  private hitsOver(list: number[], windowMs: number, max: number): number[] | null {
+    const t = this.now();
+    const kept = list.filter((x) => x > t - windowMs);
+    if (kept.length >= max) return null;
+    kept.push(t);
+    return kept;
+  }
+
+  /**
+   * Keys only answer the page's own origin: a page on another site (or a DNS
+   * rebinding trick pointing a foreign name at 127.0.0.1) sends its own Origin.
+   */
+  private sameOrigin(req: IncomingMessage): boolean {
+    const origin = req.headers.origin;
+    if (typeof origin !== "string") return false;
+    if (this.demo) return origin === `http://${req.headers.host ?? ""}`;
+    return origin === new URL(this.publicUrl).origin;
+  }
+
+  /** Local time for the owner's Telegram note, HH:MM. */
+  private clock(): string {
+    const d = new Date(this.now());
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }
 
   private authLimited(): boolean {
@@ -191,6 +233,7 @@ export class Dashboard {
       signIn: { email: this.auth.email(), wallets: this.auth.wallets(), emailWorks: this.auth.methods().email || (this.demo && Boolean(this.auth.email())) },
       chat: Boolean(this.chat),
       keysCanShow: Boolean(this.keys),
+      keyLabels: this.keys ? KEY_LABELS : [],
       demo: this.demo,
       limits,
       spentTodayUsd: store.spentTodayUsd(limits.mode),
@@ -385,25 +428,50 @@ export class Dashboard {
                 locked: true,
                 text: "Your keys stay locked inside the signer, a separate program that neither this page nor the AI can read, so they can't be shown here. To see them, open Terminal on the computer where Fren is installed and run: fren keys",
               });
+            if (!this.sameOrigin(req)) return json(403, { error: "forbidden" });
+            if (String(body.word ?? "").trim().toUpperCase() !== KEY_CONFIRM_WORD) return json(400, { error: `Type ${KEY_CONFIRM_WORD} to go on.` });
+            const hits = this.hitsOver(this.keyCodeHits, 10 * 60_000, KEY_CODES_PER_10_MIN);
+            if (!hits) return json(429, { error: "Too many codes. Wait 10 minutes and try again." });
+            this.keyCodeHits = hits;
             const code = String(randomBytes(4).readUInt32BE() % 1_000_000).padStart(6, "0");
-            this.keyCode = { code, exp: this.now() + KEY_CODE_TTL_MS, tries: 0 };
+            this.keyCode = { code, exp: this.now() + KEY_CODE_TTL_MS, tries: 0, session };
+            this.keyWindow = null;
             const sent = await this.fren.tellOwner(`🔐 Someone asked to show your wallet keys in the dashboard.\nCode: ${code}\n\nIf it wasn't you, don't share it and send /fren_stop.`);
             if (this.demo) this.demoNote = `Demo: on a real install this code goes to your Telegram. Code: ${code}`;
-            return json(200, { needsCode: true, sent, text: "Fren sent a 6-digit code to your Telegram. Type it here to show the keys.", ...(this.demo ? { demoNote: this.demoNote } : {}) });
+            return json(200, { needsCode: true, sent, text: "Fren sent a 6-digit code to your Telegram. Type it here to show the key.", ...(this.demo ? { demoNote: this.demoNote } : {}) });
           }
           case "/api/keys/reveal": {
-            const k = this.keyCode;
-            if (!this.keys || !k || k.exp < this.now()) return json(400, { error: "Ask for a new code first." });
-            k.tries++;
-            const a = Buffer.from(k.code);
-            const b = Buffer.from(String(body.code ?? "").trim());
-            if (!(a.length === b.length && timingSafeEqual(a, b))) {
-              if (k.tries >= 3) this.keyCode = null;
-              return json(400, { error: "That code didn't work." });
+            if (!this.keys) return json(400, { error: "Ask for a new code first." });
+            if (!this.sameOrigin(req)) return json(403, { error: "forbidden" });
+            const open = this.keyWindow && this.keyWindow.session === session && this.keyWindow.until >= this.now();
+            if (!open) {
+              const k = this.keyCode;
+              if (!k || k.exp < this.now() || k.session !== session || body.code === undefined) return json(400, { error: "Ask for a new code first." });
+              k.tries++;
+              const a = Buffer.from(k.code);
+              const b = Buffer.from(String(body.code ?? "").trim());
+              if (!(a.length === b.length && timingSafeEqual(a, b))) {
+                if (k.tries >= 3) this.keyCode = null;
+                return json(400, { error: "That code didn't work." });
+              }
+              this.keyCode = null;
+              this.keyWindow = { session, until: this.now() + KEY_WINDOW_MS };
             }
-            this.keyCode = null;
-            return json(200, { keys: await this.keys.reveal() });
+            const hits = this.hitsOver(this.keyRevealHits, 60_000, KEY_REVEALS_PER_MINUTE);
+            if (!hits) return json(429, { error: "Too many in a row. Wait a minute." });
+            this.keyRevealHits = hits;
+            const all = await this.keys.reveal();
+            const which = Number(body.which ?? 0);
+            const key = Number.isInteger(which) ? all[which] : undefined;
+            if (!key) return json(400, { error: "No such key." });
+            const copied = body.purpose === "copy";
+            void this.fren.tellOwner(`🔐 ${key.label}: ${copied ? "copied" : "shown"} in your dashboard at ${this.clock()}.\n\nIf it wasn't you, send /fren_stop and move your money to a new wallet.`).catch(() => {});
+            return json(200, { key: { which, label: key.label, value: key.value }, showForMs: KEY_SHOW_MS, until: this.keyWindow!.until });
           }
+          case "/api/keys/lock":
+            this.keyWindow = null;
+            this.keyCode = null;
+            return json(200, { ok: true });
           case "/api/logout":
             this.sessions.delete(session);
             return json(200, { ok: true });

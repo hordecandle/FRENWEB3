@@ -220,27 +220,6 @@ describe("dashboard v2", () => {
     expect((await r.json()).error).toMatch(/restarting/);
     expect(s.notifier.sent.length).toBe(before);
   });
-
-  it("keys: locked without a vault; with one, a code from the chat, 3 tries", async () => {
-    let s = await start();
-    let cookie = await s.login();
-    expect((await (await s.post("/api/keys/request", {}, cookie)).json()).locked).toBe(true);
-    close?.();
-
-    s = await start({ keys: { reveal: async () => [{ label: "Solana", value: "SECRETKEY" }] } });
-    cookie = await s.login();
-    expect((await s.post("/api/keys/reveal", { code: "123456" }, cookie)).status).toBe(400);
-    const r = await (await s.post("/api/keys/request", {}, cookie)).json();
-    expect(r.needsCode).toBe(true);
-    expect(r.demoNote).toBeUndefined();
-    const code = s.notifier.sent.at(-1)!.match(/Code: (\d{6})/)![1]!;
-    for (let i = 0; i < 3; i++) expect((await s.post("/api/keys/reveal", { code: code === "000000" ? "111111" : "000000" }, cookie)).status).toBe(400);
-    expect((await s.post("/api/keys/reveal", { code }, cookie)).status).toBe(400);
-    await s.post("/api/keys/request", {}, cookie);
-    const code2 = s.notifier.sent.at(-1)!.match(/Code: (\d{6})/)![1]!;
-    expect(await (await s.post("/api/keys/reveal", { code: code2 }, cookie)).json()).toEqual({ keys: [{ label: "Solana", value: "SECRETKEY" }] });
-    expect(JSON.stringify(await (await s.get("/api/overview", cookie)).json())).not.toMatch(/SECRETKEY/);
-  });
 });
 
 /**

@@ -214,6 +214,10 @@ details summary .n{font-weight:400;color:var(--muted);margin-left:auto;font-size
 .key b{display:block;font-size:13px;font-weight:500}
 .key code{font-family:var(--mono);font-size:13px;overflow-wrap:anywhere;color:var(--muted);letter-spacing:.04em}
 .key.shown code{color:var(--ink);letter-spacing:0}
+.key__b{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.key__t{display:block;font-size:12px;color:var(--muted);margin-top:4px}
+#km-word{text-transform:uppercase;letter-spacing:.08em}
+@media (max-width:560px){.key{grid-template-columns:auto minmax(0,1fr)}.key__b{grid-column:1/-1;justify-content:flex-start}}
 .key.shown .ic{color:var(--ok)}
 .field{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center}
 .field input{flex:1;min-width:0;width:auto;margin:0}
@@ -507,8 +511,7 @@ ${ICONS}
   <section class="card" data-tour="keys">
     <div class="card__h"><span class="ico">${ic("i-key")}</span><div><p class="kicker">Keys</p><h2>Your wallet keys</h2></div></div>
     <div class="keys" id="keys"></div>
-    <div class="row"><button class="btn btn--2" id="keys-show">${ic("i-eye")}<span>Show keys</span></button><button class="btn btn--2" id="keys-hide" hidden>${ic("i-eye-off")}<span>Hide</span></button></div>
-    <p class="note">${ic("i-shield")}<span>A key is the password to a wallet. <b>Whoever has a key owns the money.</b> Keep a copy offline, never send it to anyone, Fren included.</span></p>
+    <p class="note">${ic("i-shield")}<span>A key is the password to a wallet. <b>Whoever has a key owns the money.</b> Keep a copy offline, never send it to anyone, Fren included. Each key shows for 30 seconds, and Fren tells you in Telegram every time one is shown or copied.</span></p>
     <div class="msg" id="keys-msg"></div>
   </section>
 
@@ -537,9 +540,10 @@ ${ICONS}
 
 <div class="modal" id="km" hidden><div class="modal__c">
   <span class="ico ico--bad">${ic("i-key")}</span>
-  <h3>Show your keys?</h3>
+  <h3 id="km-h">Show your key?</h3>
   <p>Anyone who sees a key can take the money in that wallet. Make sure nobody is looking at your screen and you're not sharing it.</p>
   <label class="check"><input type="checkbox" id="km-ok"><span>I understand. I'll keep the keys offline and never send them to anyone.</span></label>
+  <div class="field" id="km-w"><input id="km-word" autocomplete="off" maxlength="8" placeholder="Type SHOW to go on"></div>
   <div id="km-code" hidden><p id="km-t"></p><div class="field"><input id="km-in" inputmode="numeric" maxlength="6" placeholder="6-digit code"><button class="btn" id="km-go">Show</button></div></div>
   <div class="msg" id="km-msg"></div>
   <div class="row"><button class="btn btn--bad" id="km-next" disabled>${ic("i-tg")}<span>Send me a code</span></button><button class="btn btn--2" id="km-no">Cancel</button></div>
@@ -807,23 +811,41 @@ ${ICONS}
     }
   }
 
-  let keysShown = null;
+  // One key at a time, like Render: dots until the owner asks, then 30 s, then dots again.
+  const KEY_ROWS = ["Solana wallet key", "EVM wallet key (Base, Arbitrum, Polygon)", "Hyperliquid trading key"];
+  let keysShown = null; // { which, value, until }
   let hideTimer = 0;
+  let tickTimer = 0;
+  function copyText(v) {
+    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(v);
+    const t = document.createElement("textarea"); t.value = v; t.setAttribute("readonly", ""); t.style.position = "fixed"; t.style.opacity = "0";
+    document.body.append(t); t.select(); try { document.execCommand("copy"); } finally { t.remove(); }
+    return Promise.resolve();
+  }
   function renderKeys(d) {
     const w = $("keys");
-    const rows = keysShown || [{ label: "Solana wallet key", value: null }, { label: "EVM wallet key (Base, Arbitrum, Polygon)", value: null }, { label: "Hyperliquid trading key", value: null }];
+    const labels = (d && d.keyLabels && d.keyLabels.length) ? d.keyLabels : KEY_ROWS;
     w.replaceChildren();
-    for (const k of rows) {
-      const r = el("div", "key" + (k.value ? " shown" : ""));
-      const t = el("div"); t.append(el("b", null, k.label), el("code", null, k.value || "••••••••••••••••••••••••••••••••"));
-      r.append(icon(k.value ? "i-eye" : "i-lock"), t);
-      if (k.value) { const c = iconBtn("i-copy", "Copy"); c.onclick = () => navigator.clipboard.writeText(k.value).then(() => setBtn(c, "i-check", "Copied")); r.append(c); }
+    labels.forEach((label, i) => {
+      const shown = keysShown && keysShown.which === i;
+      const r = el("div", "key" + (shown ? " shown" : ""));
+      const t = el("div"); t.append(el("b", null, label), el("code", null, shown ? keysShown.value : "••••••••••••••••••••••••••••••••"));
+      if (shown) t.append(el("span", "key__t", "Hides in " + Math.max(0, Math.ceil((keysShown.until - Date.now()) / 1000)) + " s"));
+      const b = el("div", "key__b");
+      if (shown) {
+        const c = iconBtn("i-copy", "Copy"); c.onclick = () => copyText(keysShown.value).then(() => setBtn(c, "i-check", "Copied"));
+        const h = iconBtn("i-eye-off", "Hide"); h.onclick = hideKeys;
+        b.append(c, h);
+      } else {
+        const v = iconBtn("i-eye", "Reveal"); v.onclick = () => askKey(i, "show");
+        const c = iconBtn("i-copy", "Copy"); c.onclick = () => askKey(i, "copy", c);
+        b.append(v, c);
+      }
+      r.append(icon(shown ? "i-eye" : "i-lock"), t, b);
       w.append(r);
-    }
-    $("keys-hide").hidden = !keysShown;
-    $("keys-show").hidden = Boolean(keysShown);
+    });
   }
-  function hideKeys() { keysShown = null; clearTimeout(hideTimer); renderKeys(D); $("keys-msg").textContent = ""; }
+  function hideKeys() { keysShown = null; clearTimeout(hideTimer); clearInterval(tickTimer); renderKeys(D); $("keys-msg").textContent = ""; }
 
   function renderSignIn(d) {
     const s = d.signIn;
@@ -950,26 +972,53 @@ ${ICONS}
 
   // ---- keys ---------------------------------------------------------------
   const km = $("km");
-  function closeKm() { km.hidden = true; $("km-ok").checked = false; $("km-next").disabled = true; $("km-code").hidden = true; $("km-next").hidden = false; $("km-msg").textContent = ""; $("km-in").value = ""; }
-  $("keys-show").onclick = () => { km.hidden = false; tour.did("keys"); };
-  $("keys-hide").onclick = hideKeys;
+  let keyAsk = null; // { which, purpose, btn }
+  function closeKm() { km.hidden = true; $("km-ok").checked = false; $("km-word").value = ""; $("km-w").hidden = false; $("km-next").disabled = true; $("km-code").hidden = true; $("km-next").hidden = false; $("km-msg").textContent = ""; $("km-in").value = ""; }
+  function kmReady() { $("km-next").disabled = !($("km-ok").checked && $("km-word").value.trim().toUpperCase() === "SHOW"); }
+  function gotKey(r, purpose, btn) {
+    tour.did("keys");
+    if (purpose === "copy") {
+      return copyText(r.key.value).then(() => {
+        if (btn) setBtn(btn, "i-check", "Copied");
+        $("keys-msg").textContent = "Copied. Paste it somewhere offline, then copy something else so it leaves your clipboard.";
+      });
+    }
+    keysShown = { which: r.key.which, value: r.key.value, until: Date.now() + (r.showForMs || 30000) };
+    renderKeys(D);
+    $("keys-msg").textContent = "Shown for 30 seconds, then hidden again. Fren told you in Telegram.";
+    clearTimeout(hideTimer); clearInterval(tickTimer);
+    hideTimer = setTimeout(hideKeys, r.showForMs || 30000);
+    tickTimer = setInterval(() => keysShown && renderKeys(D), 1000);
+  }
+  async function askKey(which, purpose, btn) {
+    if (D && D.keysCanShow === false) {
+      const r = await call("keys/request", {}).catch((e) => ({ text: e.message }));
+      $("keys-msg").textContent = r.text; tour.did("keys"); return;
+    }
+    keyAsk = { which, purpose, btn };
+    tour.did("keys");
+    // Already unlocked in this browser for a couple of minutes: no new code.
+    try { return await gotKey(await call("keys/reveal", { which, purpose }), purpose, btn); } catch {}
+    $("km-h").textContent = purpose === "copy" ? "Copy your key?" : "Show your key?";
+    km.hidden = false; $("km-ok").focus();
+  }
   $("km-no").onclick = closeKm;
-  $("km-ok").onchange = () => ($("km-next").disabled = !$("km-ok").checked);
+  $("km-ok").onchange = kmReady;
+  $("km-word").oninput = kmReady;
   $("km-next").onclick = async () => {
     try {
-      const r = await call("keys/request", {});
+      const r = await call("keys/request", { word: $("km-word").value });
       if (r.locked) { closeKm(); $("keys-msg").textContent = r.text; return; }
       $("km-t").textContent = r.text;
       $("km-msg").textContent = r.demoNote || "";
-      $("km-code").hidden = false; $("km-next").hidden = true; $("km-in").focus();
+      $("km-code").hidden = false; $("km-next").hidden = true; $("km-w").hidden = true; $("km-in").focus();
     } catch (e) { $("km-msg").textContent = e.message; }
   };
   $("km-go").onclick = async () => {
     try {
-      const r = await call("keys/reveal", { code: $("km-in").value });
-      keysShown = r.keys; closeKm(); renderKeys(D);
-      $("keys-msg").textContent = "Shown for 60 seconds, then hidden again.";
-      clearTimeout(hideTimer); hideTimer = setTimeout(hideKeys, 60_000);
+      const a = keyAsk || { which: 0, purpose: "show" };
+      const r = await call("keys/reveal", { code: $("km-in").value, which: a.which, purpose: a.purpose });
+      closeKm(); await gotKey(r, a.purpose, a.btn);
     } catch (e) { $("km-msg").textContent = e.message; }
   };
 
@@ -997,7 +1046,7 @@ ${ICONS}
     { k: "chat", bottom: true, h: "Talk to Fren", p: "This is your Telegram chat with Fren, right here. Ask what you hold or what to do; before any trade Fren says the most you can lose.", t: "Send Fren a message, e.g. \\"what do I hold?\\"", act: true },
     { k: "history", h: "Check every trade", p: "Everything Fren did, with a link to the public record. You don't have to trust us: click and see.", t: "Open one of the links." },
     { k: "stop", h: "Stop anytime", p: "Pause works at once and stops new trades. Turning back on needs the code from your chat, so nobody else can.", t: "You don't have to press it now. Just know it's here." },
-    { k: "keys", h: "Your keys stay hidden", p: "A key is the password to a wallet. Fren keeps them locked away where neither this page nor the AI can read them. To see them yourself, open Terminal on the computer Fren runs on and type: fren keys", t: "Press Show keys to see where to look.", act: true },
+    { k: "keys", h: "Your keys stay hidden", p: "A key is the password to a wallet. Here they stay as dots. Reveal shows one for 30 seconds after you type SHOW and the code Fren sends to your Telegram; the AI never sees them. Write them down offline, never send them to anyone.", t: "Press Reveal or Copy on a key to see how it works.", act: true },
   ];
   const tour = (() => {
     let i = -1;
