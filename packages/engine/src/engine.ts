@@ -1087,7 +1087,9 @@ It shows up as pUSD in your Polymarket wallet ${to}.`;
       for (const [c, v] of Object.entries(eth)) parts.push({ network: chainName[c] ?? c, place: chainName[c] ?? c, wallet: "evm", asset: "ETH", amount: v, usd: ethPx !== null ? v * ethPx : null });
       parts.push({ network: "Hyperliquid", place: "Hyperliquid", wallet: "hyperliquid", asset: "USDC", amount: hl, usd: hl });
     }
-    for (const p of held)
+    // Live: the wallet lines above already count SOL and ETH, so a held SOL or ETH position is the same coins, not more.
+    const walletCoins = mode === "live" && this.d.signer ? new Set(["SOL", "ETH"]) : new Set<string>();
+    for (const p of held.filter((x) => !walletCoins.has(String(x.symbol).toUpperCase())))
       parts.push(
         mode === "paper"
           ? { network: heldNetwork(p.venue), place: `${p.symbol} (practice)`, wallet: "paper", asset: p.symbol, amount: p.size, usd: p.valueUsd }
