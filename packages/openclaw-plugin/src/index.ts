@@ -34,6 +34,7 @@ export const TOOL_NAMES = [
   "fren_close_all",
   "fren_limits",
   "fren_deposit_hyperliquid",
+  "fren_withdraw_hyperliquid",
   "fren_bet_quote",
   "fren_fund",
   "fren_yield",
@@ -252,6 +253,14 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; 
         "Move USDC into the user's own Hyperliquid account: from their Arbitrum address when it has the USDC, otherwise straight from their Solana USDC. Not needed before a long or short: fren_trade moves the margin into Hyperliquid by itself. Use this only when the user asks to deposit, and never tell them to deposit first.",
       parameters: Type.Object({ amountUsd: Type.Number({ minimum: 5 }) }),
       run: async (p) => withReceiptNote(await client.call<OwnerResult>("POST", "/deposit/hyperliquid", { amountUsd: p.amountUsd })),
+    },
+    {
+      name: "fren_withdraw_hyperliquid",
+      label: "Withdraw from Hyperliquid",
+      description:
+        "Move USDC out of the user's Hyperliquid account back to their own Arbitrum address (the only place it can go). Leave amountUsd out to take everything that is free. Hyperliquid keeps 1 USDC as its fee and pays out in a few minutes. The owner always approves it with a code. Use it when they ask to withdraw, take money back, or get it off Hyperliquid; never tell them to do it by hand.",
+      parameters: Type.Object({ amountUsd: Type.Optional(Type.Number({ exclusiveMinimum: 1, description: "Dollars to withdraw; leave out for everything free." })) }),
+      run: async (p, ctx) => deliverOwnerCode(await client.call<OwnerResult>("POST", "/withdraw/hyperliquid", p.amountUsd === undefined ? {} : { amountUsd: p.amountUsd }), ctx),
     },
     {
       name: "fren_bet_quote",

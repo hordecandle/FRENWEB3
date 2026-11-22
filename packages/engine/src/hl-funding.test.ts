@@ -78,7 +78,7 @@ describe("a perp pays for itself", () => {
   it("a main-dex market only needs the deposit, and never less than Hyperliquid's $5 minimum", async () => {
     const { t, deposits } = fresh(20);
     t.fake.hlFree[""] = 1;
-    const res = await t.fren.submit(long("BTC", 2, 2));
+    const res = await t.fren.submit(long("BTC", 4, 3));
     expect(res.verdict).toBe("executed");
     expect(res.text).toMatch(/Moved \$5\.00 USDC from Arbitrum into Hyperliquid/);
     expect(deposits).toEqual([5]);
@@ -325,5 +325,148 @@ describe("Relay's real Solana deposit", () => {
     expect(() => relaySolanaInstructions(fx.quote, { ...w, amountRaw: 25_300_001n })).toThrow(/isn't for the amount asked/);
     expect(() => relaySolanaInstructions(fx.quote, { ...w, evm: "0x2222222222222222222222222222222222222222" })).toThrow(/different Hyperliquid account/);
     expect(() => relaySolanaInstructions(fx.quote, { ...w, solana: "11111111111111111111111111111111" })).toThrow(/different Solana wallet/);
+  });
+});
+
+const longStop = (market: string, margin: number, leverage: number, stopLossPct: number) => ({
+  request: `long ${market} ${leverage}x with $${margin}, stop -${stopLossPct}%`,
+  steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market, side: "long", sizing: { type: "margin", usd: margin }, leverage, stopLossPct } }],
+});
+
+describe("Hyperliquid's $10 minimum, checked before anything moves (22.11 live test)", () => {
+  it("$5 at 2x with a -20% stop: refused before the code and before any deposit, with the margin or leverage that works", async () => {
+    const { t, deposits } = fresh(30);
+    const res = await t.fren.submit(longStop("BTC", 5, 2, 20));
+    expect(res.verdict).toBe("rejected");
+    expect(res.text).toMatch(/Hyperliquid's minimum order is \$10\.00/);
+    expect(res.text).toMatch(/Nothing was moved or opened/);
+    expect(res.text).toMatch(/put in \$6\.00 at 2x, or keep \$5\.00 and use 3x/);
+    expect(deposits).toHaveLength(0);
+    expect(t.fake.exchange).toHaveLength(0);
+    expect(t.notifier.sent.some((m) => m.includes("/ok"))).toBe(false);
+  });
+
+  it("the suggested sizes really pass", async () => {
+    for (const [margin, lev] of [[6, 2], [5, 3]] as const) {
+      const { t } = fresh(30);
+      const res = await t.fren.submit(longStop("BTC", margin, lev, 20));
+      expect(res.verdict, `${margin} at ${lev}x`).not.toBe("rejected");
+    }
+  });
+
+  it("says it in Russian for a Russian owner", async () => {
+    const { t } = fresh(30);
+    t.fren.setOwnerLang("ru");
+    const res = await t.fren.submit(longStop("BTC", 5, 2, 20));
+    expect(res.text).toMatch(/Минимальный заказ на Hyperliquid \$10\.00/);
+    expect(res.text).toMatch(/вложить \$6\.00 с плечом 2x или оставить \$5\.00 и взять плечо 3x/);
+  });
+
+  it("a short is checked at the price it may fill at, not the mid", async () => {
+    const { t } = fresh(30);
+    // $10.20 of BTC at the mid, but the IOC limit sits 1% under it.
+    const res = await t.fren.submit({ request: "short", steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "BTC", side: "short", sizing: { type: "notional", usd: 10.2 }, leverage: 2 } }] });
+    expect(res.verdict).toBe("rejected");
+    expect(res.text).toMatch(/minimum order/);
+  });
+
+  it("practice mode follows the same rule as the exchange", async () => {
+    const t = buildTestFren();
+    const res = await t.fren.submit(longStop("BTC", 5, 2, 20));
+    expect(res.verdict).toBe("rejected");
+    expect(res.text).toMatch(/minimum order/);
+  });
+});
+
+describe("money already on Hyperliquid is used as is (22.11: $5.26 there, Fren offered $5 more)", () => {
+  it("$5.26 free covers $5 at 3x: no deposit, and the plan says where the money comes from", async () => {
+    const { t, deposits } = fresh(30);
+    t.fake.hlFree[""] = 5.26;
+    t.store.setLimits({ ...t.store.getLimits(), autoApproveUsd: 0 });
+    const res = await t.fren.submit(longStop("BTC", 5, 3, 20));
+    expect(res.verdict).toBe("needs_code");
+    expect(res.text).not.toMatch(/Fren first moves/);
+    expect(res.text).toMatch(/Paid from the \$5\.26 USDC already on your Hyperliquid account/);
+    if (res.verdict === "needs_code") await t.fren.approve(codeFrom(t.notifier.sent));
+    expect(deposits).toHaveLength(0);
+    expect(t.fake.exchange.map((b) => (b.action as { type: string }).type)).toContain("order");
+  });
+
+  it("not enough for the margin itself: still tops up", async () => {
+    const { t, deposits } = fresh(30);
+    t.fake.hlFree[""] = 4.9;
+    const res = await t.fren.submit(longStop("BTC", 5, 3, 20));
+    if (res.verdict === "needs_code") await t.fren.approve(codeFrom(t.notifier.sent));
+    expect(deposits).toEqual([5]);
+  });
+});
+
+describe("withdraw from Hyperliquid back to the own Arbitrum wallet", () => {
+  const withdraws = (t: ReturnType<typeof fresh>["t"]) => t.fake.exchange.filter((b) => (b.action as { type: string }).type === "withdraw3").map((b) => b.action as Record<string, unknown>);
+
+  it("everything free: asks with a code, then withdraws to its own address only", async () => {
+    const { t } = fresh(0);
+    t.fake.hlFree[""] = 10.26;
+    const res = await t.fren.requestHlWithdraw("all");
+    const evm = /wallet (0x[0-9a-fA-F]{40})/.exec(t.notifier.sent.at(-1) ?? "")![1]!;
+    expect(withdraws(t)).toHaveLength(0);
+    expect(t.notifier.sent.at(-1)).toMatch(/Withdraw everything free \(\$10\.26\) USDC from Hyperliquid to your own Arbitrum wallet 0x[0-9a-fA-F]{40}\? Hyperliquid keeps \$1\.00, so about \$9\.26 arrives/);
+    expect(res.text).toMatch(/\/ok/);
+    const out = await t.fren.approve(codeFrom(t.notifier.sent));
+    expect(out).toMatch(/✅ Withdrew \$10\.26 USDC from Hyperliquid to your Arbitrum wallet/);
+    const [w] = withdraws(t);
+    expect(w).toMatchObject({ type: "withdraw3", amount: "10.26", destination: evm.toLowerCase() });
+  });
+
+  it("a wrong code moves nothing", async () => {
+    const { t } = fresh(0);
+    t.fake.hlFree[""] = 10.26;
+    await t.fren.requestHlWithdraw("all");
+    expect(await t.fren.approve("ZZZZZZ")).toMatch(/wrong or expired/);
+    expect(withdraws(t)).toHaveLength(0);
+  });
+
+  it("the code is used once: a second /ok with it does nothing", async () => {
+    const { t } = fresh(0);
+    t.fake.hlFree[""] = 10.26;
+    await t.fren.requestHlWithdraw(6);
+    const code = codeFrom(t.notifier.sent);
+    await t.fren.approve(code);
+    expect(await t.fren.approve(code)).toMatch(/wrong or expired/);
+    expect(withdraws(t)).toHaveLength(1);
+  });
+
+  it("more than is free, or not more than the $1 fee, or NaN: refused without a code", async () => {
+    const { t } = fresh(0);
+    t.fake.hlFree[""] = 10.26;
+    for (const usd of [50, 1, 0.5, -3, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const res = await t.fren.requestHlWithdraw(usd);
+      expect(res.text, String(usd)).not.toMatch(/\/ok/);
+    }
+    expect(t.notifier.sent.some((m) => m.includes("/ok"))).toBe(false);
+  });
+
+  it("if a bet took some of it before /ok, only what is still free leaves", async () => {
+    const { t } = fresh(0);
+    t.fake.hlFree[""] = 10.26;
+    await t.fren.requestHlWithdraw(10);
+    t.fake.hlFree[""] = 4;
+    await t.fren.approve(codeFrom(t.notifier.sent));
+    expect(withdraws(t)[0]).toMatchObject({ amount: "4" });
+  });
+
+  it("/fren_stop cancels a waiting withdrawal code", async () => {
+    const { t } = fresh(0);
+    t.fake.hlFree[""] = 10.26;
+    await t.fren.requestHlWithdraw("all");
+    const code = codeFrom(t.notifier.sent);
+    await t.fren.stop();
+    expect(await t.fren.approve(code)).toMatch(/wrong or expired/);
+    expect(withdraws(t)).toHaveLength(0);
+  });
+
+  it("practice mode has nothing to withdraw", async () => {
+    const t = buildTestFren();
+    expect((await t.fren.requestHlWithdraw("all")).text).toMatch(/Practice mode has nothing/);
   });
 });

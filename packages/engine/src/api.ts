@@ -40,6 +40,7 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     "POST /close_all": async () => fren.requestCloseAll(),
     "POST /cancel": async (b) => ({ text: await fren.cancel(String(b.planId ?? "")) }),
     "POST /deposit/hyperliquid": async (b) => fren.depositWithReceipt(Number(b.amountUsd)),
+    "POST /withdraw/hyperliquid": async (b) => fren.requestHlWithdraw(b.amountUsd === undefined || b.amountUsd === null ? "all" : Number(b.amountUsd)),
     "GET /settings": async () => ({ settings: fren.settings(), text: describeSettings(fren.settings(), fren.receiptRoute) }),
     "POST /settings": async (b) => {
       const changes: { images?: boolean } = {};

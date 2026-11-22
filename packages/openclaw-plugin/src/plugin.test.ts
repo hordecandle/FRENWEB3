@@ -201,4 +201,12 @@ describe("Bee's ANT long, from the chat tools down, with only USDC on Solana", (
     const out = await run("fren_deposit_hyperliquid", { amountUsd: 20 });
     expect(out).toMatch(/Moved \$20\.00 USDC from your Solana wallet into Hyperliquid through Relay/);
   });
+
+  it("\"take everything off Hyperliquid\": a code first, then a withdrawal to the own Arbitrum address", async () => {
+    t.fake.hlFree[""] = 12.5;
+    const out = await run("fren_withdraw_hyperliquid", {});
+    expect(out).toMatch(/\/ok/);
+    expect(t.notifier.sent.at(-1)).toMatch(/Withdraw everything free \(\$12\.50\) USDC from Hyperliquid/);
+    expect(t.fake.exchange.some((b) => (b.action as { type: string }).type === "withdraw3")).toBe(false);
+  });
 });

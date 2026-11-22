@@ -28,7 +28,7 @@ import {
   type ResolvedStep,
   type Venue,
 } from "@fren/core";
-import type { Addresses, SignerApi } from "@fren/signer";
+import { HL_WITHDRAW_FEE_USD as HL_WITHDRAW_FEE, type Addresses, type SignerApi } from "@fren/signer";
 import { quoteBet, type BetQuery, type BetQuote } from "./bets.js";
 import { imageType, type Notifier } from "./notify.js";
 import type { Mode, PendingKind, Store } from "./store.js";
@@ -576,6 +576,12 @@ export class Fren {
       return "✅ Fren is back on. The watcher is running again.";
     }
     if (p.kind === "closeall") return this.closeAllNow();
+    if (p.kind === "hlwithdraw") {
+      const { usd } = JSON.parse(p.payload) as { usd: number | "all" };
+      const text = await this.runHlWithdraw(usd).catch((err: Error) => `❌ ${err.message}`);
+      const receiptSent = text.startsWith("✅") && (await this.deliver({ steps: [receiptFromText(text)] }));
+      return { text, ...(receiptSent ? { receiptSent } : {}) };
+    }
     if (p.kind === "fund") {
       const { venue, usd, to } = JSON.parse(p.payload) as { venue: FundVenue; usd: number; to: string };
       const text = await this.runFunding(venue, usd, to).catch((err: Error) => `❌ ${err.message}`);
@@ -950,6 +956,38 @@ export class Fren {
     if (!(usd >= 10)) return { text: `Send at least $10 to ${FUND_NAMES[venue]}.` };
     const to = await this.fundingAddress(venue);
     return this.issueCode("fund", JSON.stringify({ venue, usd, to }), `Send ${fmtUsd(usd)} USDC from Arbitrum to your ${FUND_NAMES[venue]} account at ${to}?`);
+  }
+
+  /**
+   * Take USDC off Hyperliquid back to the wallet's own Arbitrum address. The signer
+   * fixes the destination, so the only cost is Hyperliquid's 1 USDC fee; the owner still
+   * approves every withdrawal with a code. Allowed while Fren is stopped: it only brings money home.
+   */
+  async requestHlWithdraw(usdIn: number | "all"): Promise<OwnerRequestResult> {
+    if (this.limits().mode === "paper") return { text: "Practice mode has nothing on Hyperliquid to withdraw. Switch to live first." };
+    if (!this.d.signer) return { text: "No wallets yet. Run `fren init` first." };
+    const free = await this.d.hyperliquid.withdrawableUsd().catch(() => null);
+    if (free === null || !Number.isFinite(free)) return { text: "Can't read your Hyperliquid balance right now. Try again in a minute." };
+    const usd = usdIn === "all" ? Math.floor(free * 100) / 100 : usdIn;
+    if (!(Number.isFinite(usd) && usd > HL_WITHDRAW_FEE)) {
+      return { text: `There's ${fmtUsd(free)} free on your Hyperliquid account; a withdrawal has to be more than Hyperliquid's ${fmtUsd(HL_WITHDRAW_FEE)} fee.` };
+    }
+    if (usd > free + 1e-9) return { text: `Only ${fmtUsd(free)} is free on your Hyperliquid account (money held by open bets can't leave). Withdraw that, or close a bet first.` };
+    const { evm } = await this.d.signer.addresses();
+    return this.issueCode(
+      "hlwithdraw",
+      JSON.stringify({ usd: usdIn === "all" ? "all" : usd }),
+      `Withdraw ${usdIn === "all" ? `everything free (${fmtUsd(usd)})` : fmtUsd(usd)} USDC from Hyperliquid to your own Arbitrum wallet ${evm}? Hyperliquid keeps ${fmtUsd(HL_WITHDRAW_FEE)}, so about ${fmtUsd(usd - HL_WITHDRAW_FEE)} arrives, usually within 5 minutes.`,
+    );
+  }
+
+  private async runHlWithdraw(usdIn: number | "all"): Promise<string> {
+    // Read again: a bet opened after the code was issued may hold some of it now.
+    const free = (await this.d.hyperliquid.withdrawableUsd()) ?? 0;
+    const cap = Math.floor(free * 100) / 100;
+    const usd = usdIn === "all" ? cap : Math.min(usdIn, cap);
+    if (!(usd > HL_WITHDRAW_FEE)) return `❌ Only ${fmtUsd(free)} is free on Hyperliquid now, not more than its ${fmtUsd(HL_WITHDRAW_FEE)} fee. Nothing was withdrawn.`;
+    return this.d.hyperliquid.withdrawToArbitrum(usd);
   }
 
   /** Where funding for a venue goes, as that venue's API reports it. */

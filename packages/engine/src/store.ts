@@ -63,7 +63,7 @@ export interface PaperHolding {
   costUsd: number;
 }
 
-export type PendingKind = "plan" | "limits" | "resume" | "fund" | "closeall";
+export type PendingKind = "plan" | "limits" | "resume" | "fund" | "closeall" | "hlwithdraw";
 
 export interface PendingAction {
   code: string;
