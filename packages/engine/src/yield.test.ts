@@ -138,6 +138,28 @@ describe("live USDC yield", () => {
     expect(ru.text).toMatch(/Первый вклад в Kamino открывает счёт, на ренту и комиссии нужно около 0\.035 SOL, а на кошельке Solana 0\.0244 SOL\. Ничего не переведено\./);
   });
 
+  it("lets a plan buy the SOL first, and checks the rent again when the Kamino step runs", async () => {
+    const { signer } = chainSigner({});
+    const t = buildTestFren({ signer, live: true });
+    t.fake.solanaUsdc = 12;
+    t.fake.solanaLamports = 24_439_310;
+    const plan = {
+      request: "buy SOL, then Kamino",
+      steps: [
+        { leg: { kind: "swap", venue: "jupiter", side: "buy", token: "SOL", amount: { type: "usd", usd: 1.5 } } },
+        { leg: { kind: "earn", venue: "yield", action: "deposit", amount: { type: "usd", usd: 2 }, protocol: "kamino" } },
+      ],
+    };
+    const first = (await t.fren.submit(plan)).text;
+    const code = codeFrom(t.notifier.sent);
+    const out = code ? await t.fren.approve(code) : first; // small plans may run without a code
+    // Step 1 was tried, so the plan wasn't refused up front; the Kamino step stopped itself
+    // (the fake swap brings no SOL) before anything was sent.
+    expect(out).toMatch(/Buy \$1\.50 of SOL on Jupiter/);
+    expect(out).toMatch(/❌ Lend \$2\.00 of USDC on Kamino \(Solana\): Kamino's first deposit opens an account that needs about 0\.035 SOL/);
+    expect(t.fake.lendCalls.filter((c) => c.path === "/ktx/klend/deposit")).toHaveLength(0);
+  });
+
   it("doesn't ask for rent SOL once the Kamino account is open", async () => {
     const { signer } = chainSigner({});
     const t = buildTestFren({ signer, live: true });

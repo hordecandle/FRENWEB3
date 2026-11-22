@@ -36,6 +36,8 @@ describe("Fren's persona in the OpenClaw workspace", () => {
     expect(agents).toMatch(/no access to the owner's files, git, a browser or this computer/i);
     expect(agents).toMatch(/`fren_run_code`/);
     expect(agents).toMatch(/sandbox can't sign or spend/);
+    // Live run 22.11: "/resume" reached the model as text and it answered "trading is back on" while Fren stayed stopped.
+    expect(agents).toMatch(/If one reaches you as plain text, it did not run\. Never answer as if it had/);
     expect(agents).not.toMatch(/Birth Sequence|avatar, git/); // the starter text is gone
     expect(readFileSync(join(ws, "AGENTS.md.openclaw"), "utf8")).toMatch(/OpenClaw starter/);
     expect(readFileSync(join(ws, "IDENTITY.md"), "utf8")).toMatch(/Name: Fren/);

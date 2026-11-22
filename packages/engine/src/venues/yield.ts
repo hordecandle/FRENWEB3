@@ -120,7 +120,8 @@ export class YieldVenue implements VenueAdapter {
     if (leg.action === "deposit") {
       const { p, apy, usd } = await this.pick(leg, mode);
       if (!(usd > 0)) throw new VenueError("There's no USDC to lend.");
-      if (mode !== "paper" && p.checkDeposit) await p.checkDeposit(usd);
+      // Only a first step is checked before /ok: an earlier step may be buying the SOL (execute checks again).
+      if (mode !== "paper" && index === 0 && p.checkDeposit) await p.checkDeposit(usd);
       const notes = [
         `Earns about ${apy === null ? "an unknown rate" : pct(apy)} a year on ${fmtUsd(usd)}, variable. You can take it back any time; Fren also takes it back on its own when a trade needs the cash.`,
       ];
@@ -221,6 +222,7 @@ export class YieldVenue implements VenueAdapter {
     const cash = await this.o.walletUsdc(p.chain);
     const usd = leg.amount.type === "usd" ? leg.amount.usd : Math.floor(cash * leg.amount.fraction * 1e6) / 1e6;
     if (usd > cash + 1e-6) throw new VenueError(`Your wallet has ${fmtUsd(cash)} USDC on ${chainLabel[p.chain]}; this needs ${fmtUsd(usd)}.`);
+    if (p.checkDeposit) await p.checkDeposit(usd);
     const link = await p.deposit(usd);
     const name = yieldProtocolName[p.id] ?? p.id;
     this.o.store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "yield", symbol: name, action: "deposit", size: usd, price: 1, usd, spendUsd: 0, mode: "live", ref: link });
