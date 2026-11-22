@@ -359,6 +359,7 @@ pre.qr{font-family:var(--mono);line-height:1;font-size:7px;letter-spacing:0;back
   <div class="say" id="final-say">
     <h3>Say gm. Then try:</h3>
     <div class="tries"><span>what's my wallet</span><span>long BTC 5x with $20</span><span>stop everything</span></div>
+    <p class="muted" style="margin-top:14px">Your dashboard is ready too: your balance in dollars, your history and a short tour. The login link arrives in the chat as soon as Fren comes online. Later, send /fren_dashboard.</p>
   </div>
   <p class="paper"><svg class="ic"><use href="#i-paper"/></svg>Paper mode: real prices, pretend money, until you switch to live.</p>
   <p class="closed">This setup page is now closed for good. Your Fren keeps running on your server.</p>

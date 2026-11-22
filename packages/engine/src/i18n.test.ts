@@ -39,7 +39,32 @@ describe("humanError", () => {
   });
   it("unknown codes and plain words", () => {
     expect(humanError('Simulation failed: {"InstructionError":[1,{"Custom":9}]}', "en")).toContain("The network refused it");
-    expect(humanError("Not enough USDC.", "ru")).toBe("Not enough USDC.");
+    expect(humanError("Some already plain sentence.", "ru")).toBe("Some already plain sentence.");
+  });
+  it("every venue's refusals come out as plain words in the owner's language", () => {
+    const cases: [string, RegExp][] = [
+      ['Hyperliquid refused: {"status":"err","response":"Insufficient margin to place order"}', /Hyperliquid не хватает/],
+      ['Hyperliquid refused: {"status":"ok","response":{"data":{"statuses":[{"error":"Order could not immediately match against any resting orders."}]}}}', /Никто не взял/],
+      ['Derive: {"code":11000,"message":"Insufficient collateral"}', /Derive не хватает денег/],
+      ['Polymarket refused: {"error":"not enough balance / allowance"}', /Polymarket не хватает/],
+      ["Relay can't route this: No routes found", /Relay сейчас не нашёл/],
+      ["Transaction failed on-chain: execution reverted", /отклонила транзакцию/],
+      ["insufficient funds for gas * price + value", /комиссию сети/],
+      ['Simulation failed: {"InstructionError":[2,{"Custom":6001}]}', /Цена слишком сдвинулась/],
+      ['Kamino: {"error":"reserve full"}', /под процент/],
+    ];
+    for (const [raw, re] of cases) {
+      const out = humanError(raw, "ru");
+      expect(out).toMatch(re);
+      expect(out).not.toMatch(/[{}]|InstructionError/);
+      expect(humanError(raw, "en")).not.toMatch(/[{}]|InstructionError|[а-яё]/i);
+      expect(humanError(raw, "uk")).not.toMatch(/[{}]|[ыэё]/);
+    }
+  });
+  it("unknown raw text never leaks JSON", () => {
+    const out = humanError('Weird: {"x":1} 0xdeadbeefcafe', "ru");
+    expect(out).not.toMatch(/[{}]/);
+    expect(out).toMatch(/проверь баланс/);
   });
 });
 

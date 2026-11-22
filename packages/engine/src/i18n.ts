@@ -144,18 +144,99 @@ const SAFE = {
 };
 const WHY = { en: "the network refused it", ru: "сеть отклонила операцию", uk: "мережа відхилила операцію" };
 
+type L3 = (...g: string[]) => { en: string; ru: string; uk: string };
+interface Refusal {
+  re: RegExp;
+  say: L3;
+  /** True when the failure always happens before anything is sent, so the money is untouched. */
+  safe: boolean;
+}
+const t = (en: string, ru: string, uk: string) => ({ en, ru, uk });
+
 /**
- * A raw failure (Solana simulation JSON, error codes) as one plain sentence: what
- * happened, and, when it failed before anything was sent, that the money is untouched.
- * Messages that are already words go through unchanged.
+ * What exchanges and networks say when they say no, in words, for every venue Fren
+ * trades on. Matched against the raw error text (JSON and all); first hit wins.
+ */
+const REFUSALS: Refusal[] = [
+  // Hyperliquid
+  { re: /insufficient margin|not enough margin|Insufficient (?:spot )?balance/i, safe: true, say: () => t("Not enough money on Hyperliquid for this trade.", "На Hyperliquid не хватает денег для этой сделки.", "На Hyperliquid не вистачає грошей для цієї угоди.") },
+  { re: /minimum value of \$?(\d+)|must have minimum value|below the smallest/i, safe: true, say: (m) => t("The trade is smaller than the exchange's minimum. Try a bigger amount.", "Сделка меньше минимума биржи. Попробуй сумму побольше.", "Угода менша за мінімум біржі. Спробуй більшу суму.") },
+  { re: /price too far from (?:oracle|the oracle)|too far from the mark|oracle/i, safe: true, say: () => t("The price moved too far from the market price, so the exchange said no. Ask again for a fresh price.", "Цена ушла слишком далеко от рыночной, и биржа отказала. Попроси сделку заново по свежей цене.", "Ціна пішла надто далеко від ринкової, і біржа відмовила. Попроси угоду знову за свіжою ціною.") },
+  { re: /could not immediately match|did not fill immediately|Nothing filled|Order could not|No liquidity/i, safe: true, say: () => t("Nobody took the other side at that price, so nothing was bought or sold. Try again in a moment.", "Никто не взял другую сторону по этой цене, поэтому ничего не куплено и не продано. Попробуй ещё раз чуть позже.", "Ніхто не взяв іншу сторону за цією ціною, тому нічого не куплено й не продано. Спробуй ще раз трохи згодом.") },
+  { re: /reduce only|would increase position/i, safe: true, say: () => t("There's no open bet to close that way.", "Нет открытой ставки, которую так можно закрыть.", "Немає відкритої ставки, яку так можна закрити.") },
+  { re: /User or API Wallet .* does not exist|does not exist.*(?:account|wallet)|deposit USDC to your Hyperliquid|Could not enable trading/i, safe: true, say: () => t("Your Hyperliquid account has no money yet. Say \"deposit $25 to Hyperliquid\" first.", "На твоём счёте Hyperliquid ещё нет денег. Сначала скажи «положи $25 на Hyperliquid».", "На твоєму рахунку Hyperliquid ще немає грошей. Спочатку скажи «поклади $25 на Hyperliquid».") },
+  { re: /too many cumulative requests|rate.?limit|429|Too Many Requests/i, safe: true, say: () => t("The service is busy and asked us to slow down. Try again in a minute.", "Сервис перегружен и просит подождать. Попробуй через минуту.", "Сервіс перевантажений і просить зачекати. Спробуй за хвилину.") },
+  { re: /isolated margin|cross margin|leverage.*(?:exceed|max)|max leverage/i, safe: true, say: () => t("That boost is higher than this market allows. Try a lower one.", "Такое усиление выше, чем разрешает этот рынок. Попробуй поменьше.", "Таке підсилення вище, ніж дозволяє цей ринок. Спробуй менше.") },
+  // Derive
+  { re: /Derive:.*(?:insufficient|not enough)|insufficient (?:collateral|funds) on derive/i, safe: true, say: () => t("Not enough money on Derive for this option. Say \"fund Derive with $X\" first.", "На Derive не хватает денег для этого опциона. Сначала скажи «пополни Derive на $X».", "На Derive не вистачає грошей для цього опціону. Спочатку скажи «поповни Derive на $X».") },
+  { re: /Derive:.*(?:rate.?limit|too many)/i, safe: true, say: () => t("Derive is busy. Try again in a minute.", "Derive перегружен. Попробуй через минуту.", "Derive перевантажений. Спробуй за хвилину.") },
+  { re: /Derive:.*(?:price|limit).*(?:bound|range|too)|Derive:.*(?:min|size)/i, safe: true, say: () => t("Derive turned the order down: the price or the size is outside what it allows for this option. Ask for a fresh quote.", "Derive отклонил заказ: цена или размер вне допустимого для этого опциона. Попроси свежую котировку.", "Derive відхилив замовлення: ціна або розмір поза допустимим для цього опціону. Попроси свіжу котирування.") },
+  { re: /Derive:/i, safe: false, say: () => t("Derive didn't accept the order. Check your Derive balance before trying again.", "Derive не принял заказ. Проверь баланс на Derive, прежде чем пробовать снова.", "Derive не прийняв замовлення. Перевір баланс на Derive, перш ніж пробувати знову.") },
+  // Polymarket
+  { re: /not enough balance|insufficient (?:balance|allowance)|allowance/i, safe: true, say: () => t("Not enough money on Polymarket for this bet. Say \"fund Polymarket with $X\" first.", "На Polymarket не хватает денег для этой ставки. Сначала скажи «пополни Polymarket на $X».", "На Polymarket не вистачає грошей для цієї ставки. Спочатку скажи «поповни Polymarket на $X».") },
+  { re: /(?:FOK|fill.or.kill).*(?:couldn't|could not|not).*fully filled|couldn't be fully filled|no match/i, safe: true, say: () => t("There weren't enough sellers at that price to fill the whole bet, so nothing happened.", "Не нашлось столько продавцов по этой цене, чтобы заполнить всю ставку, поэтому ничего не произошло.", "Не знайшлося стільки продавців за цією ціною, щоб виконати всю ставку, тому нічого не сталося.") },
+  { re: /tick size|invalid price|minimum.*(?:size|order)|lower than the minimum/i, safe: true, say: () => t("The bet is smaller than Polymarket's minimum, or the price isn't allowed. Try a bigger amount.", "Ставка меньше минимума Polymarket или цена не подходит. Попробуй сумму побольше.", "Ставка менша за мінімум Polymarket або ціна не підходить. Спробуй більшу суму.") },
+  { re: /not (?:available|allowed).*region|geoblock|restricted in your/i, safe: true, say: () => t("Polymarket isn't available where you are.", "Polymarket недоступен там, где ты находишься.", "Polymarket недоступний там, де ти перебуваєш.") },
+  { re: /Polymarket refused/i, safe: false, say: () => t("Polymarket didn't accept the bet. Check your Polymarket balance before trying again.", "Polymarket не принял ставку. Проверь баланс на Polymarket, прежде чем пробовать снова.", "Polymarket не прийняв ставку. Перевір баланс на Polymarket, перш ніж пробувати знову.") },
+  // Relay and EVM chains (Aave rides on these)
+  { re: /No routes? found|no route|NO_SWAP_ROUTES|NO_QUOTES/i, safe: true, say: () => t("Relay found no way to make this swap right now. Try a different amount or try later.", "Relay сейчас не нашёл, как сделать этот обмен. Попробуй другую сумму или позже.", "Relay зараз не знайшов, як зробити цей обмін. Спробуй іншу суму або пізніше.") },
+  { re: /insufficient funds for gas|gas required exceeds|intrinsic gas|insufficient funds for intrinsic/i, safe: true, say: () => t("Not enough ETH in the wallet to pay the network fee. Add a little ETH on that network.", "В кошельке не хватает ETH, чтобы оплатить комиссию сети. Добавь немного ETH в этой сети.", "У гаманці не вистачає ETH, щоб оплатити комісію мережі. Додай трохи ETH у цій мережі.") },
+  { re: /insufficient funds|exceeds balance|transfer amount exceeds|ERC20: insufficient/i, safe: true, say: () => t("The wallet doesn't hold enough for this.", "В кошельке не хватает денег для этого.", "У гаманці не вистачає грошей для цього.") },
+  { re: /slippage|price impact|Too little received|STF|INSUFFICIENT_OUTPUT/i, safe: true, say: () => t("The price moved too much while it was being sent, so it was cancelled. Try again.", "Цена слишком сдвинулась, пока шла сделка, поэтому её отменили. Попробуй ещё раз.", "Ціна надто зсунулася, поки йшла угода, тому її скасовано. Спробуй ще раз.") },
+  { re: /supply cap|borrow cap|reserve.*frozen|RESERVE_FROZEN|SUPPLY_CAP_EXCEEDED/i, safe: true, say: () => t("The lending pool is full or paused right now, so it can't take more deposits.", "Пул, куда кладут под процент, сейчас переполнен или на паузе и не принимает вклады.", "Пул, куди кладуть під відсоток, зараз переповнений або на паузі й не приймає внески.") },
+  { re: /execution reverted|Transaction reverted|reverted on/i, safe: false, say: () => t("The network rejected the transaction. The fee may have been used, but the amount itself didn't move. Check your balance before trying again.", "Сеть отклонила транзакцию. Комиссия могла списаться, а сама сумма не ушла. Проверь баланс, прежде чем пробовать снова.", "Мережа відхилила транзакцію. Комісія могла списатися, а сама сума не пішла. Перевір баланс, перш ніж пробувати знову.") },
+  { re: /Relay can't (?:route|move)/i, safe: true, say: () => t("Relay can't move the money between networks right now. Try again in a few minutes.", "Relay сейчас не может перевести деньги между сетями. Попробуй через несколько минут.", "Relay зараз не може переказати гроші між мережами. Спробуй за кілька хвилин.") },
+  // Jupiter, Solana, pump.fun, Kamino
+  { re: /"Custom"\s*:\s*(?:6001|0x1771)|0x1771|SlippageToleranceExceeded/i, safe: true, say: () => t("The price moved too much while it was being sent, so it was cancelled. Nothing was spent.", "Цена слишком сдвинулась, пока шла сделка, поэтому её отменили. Ничего не потрачено.", "Ціна надто зсунулася, поки йшла угода, тому її скасовано. Нічого не витрачено.") },
+  { re: /"Custom"\s*:\s*1\b|insufficient lamports|custom program error: 0x1\b|Attempt to debit an account/i, safe: true, say: () => t("The Solana wallet doesn't hold enough for this, or not enough SOL for the fee.", "В кошельке Solana не хватает денег для этого или не хватает SOL на комиссию.", "У гаманці Solana не вистачає грошей для цього або не вистачає SOL на комісію.") },
+  { re: /Blockhash not found|block height exceeded|expired/i, safe: false, say: () => t("The Solana network was too slow and the transaction expired. Check your balance, then try again.", "Сеть Solana не успела, и транзакция истекла. Проверь баланс, потом попробуй снова.", "Мережа Solana не встигла, і транзакція прострочилась. Перевір баланс, потім спробуй знову.") },
+  { re: /Transaction failed on-chain/i, safe: false, say: () => t("The Solana network rejected the transaction. Check your balance before trying again.", "Сеть Solana отклонила транзакцию. Проверь баланс, прежде чем пробовать снова.", "Мережа Solana відхилила транзакцію. Перевір баланс, перш ніж пробувати знову.") },
+  { re: /Simulation failed/i, safe: true, say: () => t("the network refused it", "сеть отклонила операцию", "мережа відхилила операцію") },
+  { re: /pump\.?fun|bonding curve|curve is complete|migrated/i, safe: true, say: () => t("This coin has just moved off pump.fun's first stage, so it can't be bought that way. Try again in a minute.", "Эта монета только что ушла с первого этапа pump.fun, так её уже не купить. Попробуй через минуту.", "Ця монета щойно пішла з першого етапу pump.fun, так її вже не купити. Спробуй за хвилину.") },
+  { re: /Kamino|Jupiter Lend|reserve.*(?:limit|full)/i, safe: false, say: () => t("The lending service didn't accept it. Check your balance before trying again.", "Сервис, где деньги лежат под процент, не принял операцию. Проверь баланс, прежде чем пробовать снова.", "Сервіс, де гроші лежать під відсоток, не прийняв операцію. Перевір баланс, перш ніж пробувати знову.") },
+  { re: /Jupiter isn't answering|Jupiter.*(?:5\d\d|timeout|unavailable)/i, safe: true, say: () => t("Jupiter isn't answering right now. Nothing was bought. Try again in a minute.", "Jupiter сейчас не отвечает. Ничего не куплено. Попробуй через минуту.", "Jupiter зараз не відповідає. Нічого не куплено. Спробуй за хвилину.") },
+  // our own plain-words refusals, so a Russian or Ukrainian reader doesn't get English in the middle
+  { re: /^Practice balance is (\$[\d.,]+)/, safe: true, say: (a) => t(`Your practice balance is ${a}.`, `Твой тренировочный баланс: ${a}.`, `Твій тренувальний баланс: ${a}.`) },
+  { re: /Live trading needs wallets|Live Polymarket needs wallets/i, safe: true, say: () => t("Real trades need wallets. Run `fren init` first.", "Для настоящих сделок нужны кошельки. Сначала запусти `fren init`.", "Для справжніх угод потрібні гаманці. Спочатку запусти `fren init`.") },
+  { re: /^Nobody is (selling|buying) /i, safe: true, say: (v) => t(`Nobody is ${v} that right now. Try another one, or try later.`, `Сейчас никто не ${v === "selling" ? "продаёт" : "покупает"} это. Попробуй другой вариант или позже.`, `Зараз ніхто не ${v === "selling" ? "продає" : "купує"} це. Спробуй інший варіант або пізніше.`) },
+  { re: /isn't taking orders/i, safe: true, say: () => t("That market isn't taking orders right now.", "Этот рынок сейчас не принимает заказы.", "Цей ринок зараз не приймає замовлення.") },
+  { re: /^Not enough USDC|no wallet has enough/i, safe: true, say: () => t("There isn't enough USDC in your wallets for this. Check your balance on the dashboard.", "В твоих кошельках не хватает USDC для этого. Баланс виден в дашборде.", "У твоїх гаманцях не вистачає USDC для цього. Баланс видно в дашборді.") },
+  { re: /^No price for |couldn't confirm the price data/i, safe: true, say: () => t("Can't get a trustworthy price right now, so Fren isn't trading it. Try again in a minute.", "Сейчас нет надёжной цены, поэтому Fren не торгует этим. Попробуй через минуту.", "Зараз немає надійної ціни, тому Fren цим не торгує. Спробуй за хвилину.") },
+  { re: /doesn't know the token/i, safe: true, say: () => t("That coin isn't known to the exchange yet, or isn't trading.", "Эта монета бирже пока не известна или ещё не торгуется.", "Ця монета біржі поки не відома або ще не торгується.") },
+];
+
+const looksRawText = (raw: string) => /\{\s*"|InstructionError|0x[0-9a-f]{8,}|Error:|\bat \w+\.\w+/i.test(raw);
+
+/**
+ * A failure as one plain sentence in the owner's language: what happened and, when it
+ * failed before anything was sent, that the money is untouched. Known refusals from
+ * every venue are matched; anything raw (JSON, codes, stack bits) that we don't know
+ * becomes a generic line instead of leaking; messages that are already words pass through.
  */
 export function humanError(raw: string, langIn: unknown): string {
   const lang = asLang(langIn);
-  const sim = /Simulation failed/i.test(raw);
   const code = /"Custom"\s*:\s*(\d+)/.exec(raw)?.[1];
-  const looksRaw = /\{\s*"/.test(raw) || /InstructionError/.test(raw);
-  if (!sim && !looksRaw) return raw;
-  const why = (code && CUSTOM_CODES[code]?.[lang]) || WHY[lang];
+  if (code && CUSTOM_CODES[code]) {
+    const why = CUSTOM_CODES[code]![lang];
+    const head = `${why[0]!.toUpperCase()}${why.slice(1)}.`;
+    return /Simulation failed/i.test(raw) ? `${head} ${SAFE[lang]}` : head;
+  }
+  for (const r of REFUSALS) {
+    const m = r.re.exec(raw);
+    if (!m) continue;
+    const head = r.say(...m.slice(1).map((x) => x ?? ""))[lang];
+    const fromSim = /Simulation failed/i.test(raw);
+    const sentence = /[.!?]$/.test(head) ? head : `${head[0]!.toUpperCase()}${head.slice(1)}.`;
+    return fromSim && r.safe ? `${sentence} ${SAFE[lang]}` : sentence;
+  }
+  if (!looksRawText(raw) && !/Simulation failed/i.test(raw)) return raw;
+  const why = WHY[lang];
   const head = `${why[0]!.toUpperCase()}${why.slice(1)}.`;
-  return sim ? `${head} ${SAFE[lang]}` : head;
+  return /Simulation failed/i.test(raw) ? `${head} ${SAFE[lang]}` : `${head} ${CHECK[lang]}`;
 }
+
+const CHECK = {
+  en: "I can't tell if anything moved: check your balance before trying again.",
+  ru: "Не могу сказать, ушло ли что-то: проверь баланс, прежде чем пробовать снова.",
+  uk: "Не можу сказати, чи пішло щось: перевір баланс, перш ніж пробувати знову.",
+};

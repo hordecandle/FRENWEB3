@@ -128,6 +128,8 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
   ${running ? "✓ Your Fren is live." : "✓ Your Fren is set up. Start the two commands above, then it's live."}
   ${where}. Try "what's my wallet", "long BTC 5x with $20", "stop everything".
 
+  Your dashboard (balance in dollars, history, a short tour) is ready too: a login link arrives in the chat right after you say gm, or type "fren dashboard" in this terminal.
+
   Paper mode: real prices, pretend money, until you switch to live.
   When you're ready for real money, send it: /limits mode=live
 `);
