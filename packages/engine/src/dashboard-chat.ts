@@ -28,16 +28,39 @@ export interface ChatBridge {
   history(limit?: number): Promise<ChatState>;
   /** Hands the message to the agent. Resolves once it's accepted, not answered. */
   send(text: string): Promise<void>;
+  /**
+   * A line the dashboard answered itself (an "ok" it ran as /ok), shown in this chat in
+   * order. The chat app gets its own copy from the dashboard; the agent never sees it.
+   */
+  note(from: "you" | "fren", text: string): void;
 }
+
+/**
+ * "ok", "ок", "/ok", "/ok 2", "/ok all", "ок все", "/ok CODE": the owner approving what
+ * waits, typed into the dashboard's chat. Returns what goes after /ok ("" for a bare one),
+ * or null for anything else ("ok, and how much is the fee?" is a question, not an OK).
+ */
+export function okCommand(text: string): string | null {
+  const m = /^\/?(?:ok|okay|okey|ок|окей|оке|окай)(?:[\s,]+(\d{1,2}|all|на вс[её]|вс[еёі]|усі|[A-Za-z0-9]{6}))?[\s.!]*$/iu.exec(text.trim());
+  return m ? (m[1] ?? "") : null;
+}
+
+/** Local notes kept per chat, newest last; the history merges them in by time. */
+const NOTES_KEPT = 30;
 
 /** Runs a program without a shell; resolves with its exit code and output. */
 export type ExecOut = (file: string, args: string[], timeoutMs: number) => Promise<{ code: number; stdout: string; stderr: string }>;
+
+/** The line execOut adds to stderr when it had to kill a program that ran too long. */
+export const TIMED_OUT = "[fren] timed out";
 
 export const execOut: ExecOut = (file, args, timeoutMs) =>
   new Promise((resolve) => {
     execFile(file, args, { timeout: timeoutMs, maxBuffer: 8 << 20 }, (err, stdout, stderr) => {
       const code = err ? (typeof err.code === "number" ? err.code : 1) : 0;
-      resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
+      // Killed by the timeout: say so in the output, so the caller can tell it from a refusal.
+      const late = err && (err as { killed?: boolean }).killed ? `\n${TIMED_OUT}` : "";
+      resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") + late });
     });
   });
 
@@ -49,6 +72,8 @@ export interface OpenClawChatOptions {
   now?: () => number;
   /** Default 4 s. */
   acceptMs?: number;
+  /** Default 4 min: an answer that takes longer is reported, never a page that types forever. */
+  answerMs?: number;
 }
 
 /** Text out of an OpenClaw transcript entry: a string or a list of parts. */
@@ -72,6 +97,10 @@ export class OpenClawChat implements ChatBridge {
   private readonly acceptMs: number;
   /** The last message that was accepted but then never reached Fren. */
   private failed: { text: string; at: number; why: string } | null = null;
+  /** How long a send may run before the page stops saying "typing" and says so. */
+  private readonly answerMs: number;
+  private readonly notes: ChatMessage[] = [];
+  private noteN = 0;
 
   constructor(o: OpenClawChatOptions = {}) {
     this.bin = o.bin ?? "openclaw";
@@ -79,6 +108,12 @@ export class OpenClawChat implements ChatBridge {
     this.exec = o.exec ?? execOut;
     this.now = o.now ?? Date.now;
     this.acceptMs = o.acceptMs ?? 4_000;
+    this.answerMs = o.answerMs ?? 4 * 60_000;
+  }
+
+  note(from: "you" | "fren", text: string): void {
+    this.notes.push({ id: `note-${++this.noteN}`, from, text, at: this.now() });
+    if (this.notes.length > NOTES_KEPT) this.notes.shift();
   }
 
   async history(limit = 40): Promise<ChatState> {
@@ -105,6 +140,10 @@ export class OpenClawChat implements ChatBridge {
       const f = this.failed;
       messages.push({ id: `failed-${f.at}`, from: "you", text: f.text, at: f.at }, { id: `failed-${f.at}-why`, from: "fren", text: `⚠️ ${f.why}`, at: f.at });
     }
+    if (this.notes.length) {
+      messages.push(...this.notes);
+      messages.sort((a, b) => a.at - b.at);
+    }
     const ch = data.sessionInfo?.channel ?? data.sessionInfo?.lastChannel;
     return { messages, thinking: this.running > 0, channel: typeof ch === "string" ? ch : null };
   }
@@ -117,7 +156,9 @@ export class OpenClawChat implements ChatBridge {
     // The answer can take a while (tools, trades); the page polls the history meanwhile.
     // A send that never reached Fren (gateway restarting, no chat to deliver to) fails
     // within seconds: wait that long, so the page says so instead of "Sent".
-    const run = this.exec(this.bin, args, 10 * 60_000)
+    // Past answerMs the CLI is let go (the agent may still answer in the chat app, and
+    // then it shows here too); the page says so instead of "Fren is typing" forever.
+    const run = this.exec(this.bin, args, this.answerMs)
       .catch((err: Error) => ({ code: 1, stdout: "", stderr: String(err?.message ?? err) }))
       .finally(() => this.running--);
     const early = await Promise.race([run, new Promise<null>((r) => {
@@ -126,7 +167,10 @@ export class OpenClawChat implements ChatBridge {
     if (early && early.code !== 0) throw new Error(sendFailure(early));
     if (!early)
       void run.then((r) => {
-        if (r.code !== 0) this.failed = { text, at: this.now(), why: sendFailure(r) };
+        if (r.code === 0) return;
+        // Too slow is not "never got it": the message is already in the chat, only the note is new.
+        if (r.stderr.endsWith(TIMED_OUT)) this.note("fren", `⏳ ${sendFailure(r)}`);
+        else this.failed = { text, at: this.now(), why: sendFailure(r) };
       });
   }
 }
@@ -142,6 +186,8 @@ export function sendFailure(r: { stdout: string; stderr: string }): string {
   const all = `${msg} ${r.stderr}`;
   if (/requires target|no (delivery|route)|not paired/i.test(all))
     return "Fren couldn't find your Telegram chat to answer in. Send Fren any message in Telegram once, then try again here.";
+  if (r.stderr.endsWith(TIMED_OUT))
+    return "Fren hasn't answered in 4 minutes. If the answer comes, it shows up here and in Telegram; or ask again.";
   if (/ECONNREFUSED|gateway|timed? ?out|unreachable|ENOENT/i.test(all))
     return "Fren didn't get that: it's restarting or not running right now. Try again in a minute.";
   return "Fren didn't get that message. Try again in a minute, or write in Telegram.";
@@ -167,6 +213,10 @@ export class MemoryChat implements ChatBridge {
     const m = { id: `m${++this.n}`, from, text, at };
     this.messages.push(m);
     return m;
+  }
+
+  note(from: "you" | "fren", text: string): void {
+    this.fromApp(from, text);
   }
 
   async history(limit = 40): Promise<ChatState> {

@@ -2,7 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { describeMaxLoss, describeStep } from "@fren/core";
 import { DashboardAuth, type Mailer, type WalletKind } from "./dashboard-auth.js";
-import type { ChatBridge } from "./dashboard-chat.js";
+import { okCommand, type ChatBridge } from "./dashboard-chat.js";
 import { DASHBOARD_PAGE, LOGIN_PAGE, SIGNIN_PAGE } from "./dashboard-page.js";
 import type { Fren, OwnerRequestResult } from "./engine.js";
 import type { PendingAction, PendingKind } from "./store.js";
@@ -351,9 +351,20 @@ export class Dashboard {
             if (!this.chat) return json(404, { error: "The chat isn't connected on this machine." });
             const text = String(body.text ?? "").trim().slice(0, 2000);
             if (!text) return json(400, { error: "Type a message first." });
-            // Commands stay in the chat app. Here the page has buttons for the same things.
+            // "ok" typed here is the owner's /ok, run by the engine like the Telegram command
+            // (bare, a number from the list, all, or a code), never handed to the model: the
+            // model can't approve anything, so it would only say "send /ok in Telegram".
+            const okArg = okCommand(text);
+            if (okArg !== null) {
+              const r = await this.fren.approveWithReceipt(okArg);
+              this.chat.note("you", text);
+              this.chat.note("fren", r.text);
+              void this.fren.tellOwner(`${this.fren.localize("🖥 You, from the dashboard:")}\n${text}${r.receiptSent ? "" : `\n\n${r.text}`}`);
+              return json(200, { ok: true, answered: true });
+            }
+            // Other commands stay in the chat app. Here the page has buttons for the same things.
             if (text.startsWith("/"))
-              return json(200, { hint: "Commands like /ok belong in your Telegram chat. Here, use the buttons: Approve and Cancel in “Fren wants to do this”, Pause and Close everything in Safety." });
+              return json(200, { hint: "Commands like /fren_stop belong in your Telegram chat. Here, use the buttons: Approve and Cancel in “Fren wants to do this”, Pause and Close everything in Safety." });
             await this.chat.send(text);
             // The chat app sees what was asked here, so both read as one conversation.
             void this.fren.tellOwner(`${this.fren.localize("🖥 You, from the dashboard:")}\n${text}`);

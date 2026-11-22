@@ -2,10 +2,10 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { PublicKey } from "@solana/web3.js";
 import { privateKeyToAccount } from "viem/accounts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { describeMaxLoss, maxLoss } from "@fren/core";
 import { Dashboard, type DashboardOptions } from "./dashboard.js";
-import { MemoryChat, OpenClawChat, type ExecOut } from "./dashboard-chat.js";
+import { MemoryChat, OpenClawChat, TIMED_OUT, okCommand, type ExecOut } from "./dashboard-chat.js";
 import { buildTestFren } from "./testing.js";
 
 let close: (() => void) | null = null;
@@ -151,8 +151,8 @@ describe("dashboard v2", () => {
     h = await (await s.get("/api/chat", cookie)).json();
     expect(h.messages.map((m: { from: string }) => m.from)).toEqual(["you", "you", "fren"]);
     expect(s.notifier.sent.at(-1)).toBe("🖥 You, from the dashboard:\nwhat do I hold?");
-    // /ok and friends stay in Telegram.
-    expect((await (await s.post("/api/chat", { text: "/ok 123456" }, cookie)).json()).hint).toMatch(/Telegram/);
+    // Other commands stay in Telegram.
+    expect((await (await s.post("/api/chat", { text: "/fren_stop" }, cookie)).json()).hint).toMatch(/Telegram/);
     expect(chat.messages).toHaveLength(3);
   });
 
@@ -240,5 +240,127 @@ describe("dashboard v2", () => {
     const code2 = s.notifier.sent.at(-1)!.match(/Code: (\d{6})/)![1]!;
     expect(await (await s.post("/api/keys/reveal", { code: code2 }, cookie)).json()).toEqual({ keys: [{ label: "Solana", value: "SECRETKEY" }] });
     expect(JSON.stringify(await (await s.get("/api/overview", cookie)).json())).not.toMatch(/SECRETKEY/);
+  });
+});
+
+/**
+ * "ok" typed into the dashboard's chat (Timofey 22.11 18:36: "I type ok in the dashboard chat
+ * and it hangs; the Approve button works"). It's the owner's /ok, run by the engine like the
+ * Telegram command, never handed to the model; same checks as /ok and the Approve button.
+ */
+describe("ok typed in the dashboard chat", () => {
+  afterEach(() => vi.useRealTimers());
+  const goldLong = (margin: number) => ({
+    request: `long gold 10x with $${margin}`,
+    steps: [{ leg: { kind: "perp_open" as const, venue: "hyperliquid", market: "xyz:gold", side: "long" as const, sizing: { type: "margin" as const, usd: margin }, leverage: 10 } }],
+  });
+  async function waiting(n = 1) {
+    const asked: string[] = [];
+    const chat = new MemoryChat(async (t) => (asked.push(t), "model answer"));
+    const s = await start({ chat });
+    s.store.setLimits({ ...s.store.getLimits(), autoApproveUsd: 0 });
+    const cookie = await s.login();
+    for (let i = 0; i < n; i++) expect((await s.fren.submit(goldLong(100 + i))).verdict).toBe("needs_code");
+    const say = async (text: string) => (await s.post("/api/chat", { text }, cookie)).json();
+    return { ...s, chat, asked, cookie, say };
+  }
+
+  it("reads ok, ок, /ok, /ok 2, /ok all, ок все and a code; a question with ok in it is a question", () => {
+    for (const [t, want] of [["ok", ""], ["OK!", ""], ["ок", ""], ["Окей.", ""], ["/ok", ""], ["/ok 2", "2"], ["/ok all", "all"], ["ок все", "все"], ["ок на всё", "на всё"], ["/ok AB12CD", "AB12CD"]] as const)
+      expect(okCommand(t), t).toBe(want);
+    for (const t of ["ok, and the fee?", "окно", "ok thanks a lot", "не ок", "/okay_then", "/ok 2 and 3", "book"]) expect(okCommand(t), t).toBeNull();
+  });
+
+  it("a bare ok runs the one waiting request at once, answers in the chat and tells Telegram; the model never sees it", async () => {
+    const { say, chat, asked, store, notifier } = await waiting();
+    expect(await say("ок")).toEqual({ ok: true, answered: true });
+    expect(store.paperPositions()).toHaveLength(1);
+    expect(store.livePending()).toHaveLength(0);
+    expect(asked).toEqual([]);
+    expect(chat.messages.map((m) => m.from)).toEqual(["you", "fren"]);
+    expect(chat.messages[1]!.text).toMatch(/GOLD/);
+    expect(notifier.sent.at(-1)).toMatch(/^🖥 You, from the dashboard:\nок/);
+  });
+
+  it("several waiting: ok lists them, ok 2 picks one, /ok all asks once more and then checks each", async () => {
+    const { say, chat, store } = await waiting(3);
+    await say("ok");
+    expect(chat.messages.at(-1)!.text).toMatch(/3 requests are waiting/);
+    expect(store.paperPositions()).toHaveLength(0);
+    await say("/ok 2");
+    expect(store.livePending()).toHaveLength(2);
+    await say("/ok all");
+    expect(chat.messages.at(-1)!.text).toMatch(/Approve all 2\?/);
+    expect(store.livePending()).toHaveLength(2);
+    await say("/ok all");
+    expect(store.livePending()).toHaveLength(0);
+    expect(store.plansWithStatus("pending_confirm")).toHaveLength(0);
+  });
+
+  it("limits tightened since are checked again, like the Approve button", async () => {
+    const { say, chat, store } = await waiting();
+    store.setLimits({ ...store.getLimits(), maxTradeUsd: 50 });
+    await say("ok");
+    expect(chat.messages.at(-1)!.text).toMatch(/Not doing this after all/);
+    expect(store.paperPositions()).toHaveLength(0);
+  });
+
+  it("an ok after the request ran out approves nothing and says why", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { say, chat, store } = await waiting();
+    vi.setSystemTime(Date.now() + 11 * 60_000);
+    await say("ok");
+    expect(chat.messages.at(-1)!.text).toMatch(/ran out/);
+    expect(store.paperPositions()).toHaveLength(0);
+  });
+
+  it("an ok twice runs nothing twice; nothing waiting says so", async () => {
+    const { say, chat, store } = await waiting();
+    await say("ok");
+    await say("ok");
+    expect(chat.messages.at(-1)!.text).toMatch(/Nothing is waiting/);
+    expect(store.paperPositions()).toHaveLength(1);
+  });
+
+  it("wrong codes count like in Telegram: after the limit every waiting request is dropped", async () => {
+    const { say, store } = await waiting();
+    for (let i = 0; i < 5; i++) await say("/ok ZZZZZ" + i);
+    expect(store.livePending()).toHaveLength(0);
+    expect(store.paperPositions()).toHaveLength(0);
+  });
+
+  it("needs the session and the header", async () => {
+    const { post, store } = await waiting();
+    expect((await post("/api/chat", { text: "ok" }, "fren_dash=nope")).status).toBe(401);
+    expect(store.paperPositions()).toHaveLength(0);
+    expect(store.livePending()).toHaveLength(1);
+  });
+});
+
+describe("dashboard chat never hangs", () => {
+  it("an OpenClaw send that runs past its limit leaves a note in the chat, without repeating the message", async () => {
+    const history = { code: 0, stderr: "", stdout: JSON.stringify({ messages: [{ role: "user", content: "hi", timestamp: 1 }] }) };
+    let finish: (r: { code: number; stdout: string; stderr: string }) => void = () => {};
+    const c = new OpenClawChat({ exec: (_f, a) => (a[0] === "agent" ? new Promise((r) => (finish = r)) : Promise.resolve(history)), acceptMs: 10, now: () => 2 });
+    await c.send("hi");
+    expect((await c.history()).thinking).toBe(true);
+    finish({ code: 1, stdout: "", stderr: `\n${TIMED_OUT}` });
+    await new Promise((r) => setTimeout(r, 5));
+    const h = await c.history();
+    expect(h.thinking).toBe(false);
+    expect(h.messages.map((m) => [m.from, m.text])).toEqual([
+      ["you", "hi"],
+      ["fren", "⏳ Fren hasn't answered in 4 minutes. If the answer comes, it shows up here and in Telegram; or ask again."],
+    ]);
+  });
+
+  it("notes merge into the OpenClaw history by time", async () => {
+    let t = 10;
+    const history = { code: 0, stderr: "", stdout: JSON.stringify({ messages: [{ role: "user", content: "a", timestamp: 5 }, { role: "assistant", content: "b", timestamp: 20 }] }) };
+    const c = new OpenClawChat({ exec: async () => history, now: () => t });
+    c.note("you", "ok");
+    t = 11;
+    c.note("fren", "✅ done");
+    expect((await c.history()).messages.map((m) => m.text)).toEqual(["a", "ok", "✅ done", "b"]);
   });
 });

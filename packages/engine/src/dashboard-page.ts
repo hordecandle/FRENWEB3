@@ -190,6 +190,17 @@ details summary .n{font-weight:400;color:var(--muted);margin-left:auto;font-size
 .m--fren .bub{background:#fff;border:1px solid var(--line);border-radius:18px 18px 18px 4px}
 .m time{font-size:11px;color:var(--muted);margin-top:5px;padding:0 4px}
 .bub.typing{color:var(--muted);background:var(--line-2);border:0}
+.typing .dots{display:inline-flex;gap:3px;margin-left:6px;vertical-align:middle}
+.typing .dots i{width:5px;height:5px;border-radius:50%;background:currentColor;animation:fren-dot 1.2s infinite ease-in-out}
+.typing .dots i:nth-child(2){animation-delay:.15s}.typing .dots i:nth-child(3){animation-delay:.3s}
+@keyframes fren-dot{0%,60%,100%{opacity:.25;transform:none}30%{opacity:1;transform:translateY(-2px)}}
+.m--new{animation:fren-in .28s ease-out both}
+@keyframes fren-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.m--mine:not(.m--failed) .bub{opacity:.7}
+.m--failed time{color:var(--bad)}
+.linkbtn{border:0;background:none;padding:0;font:inherit;color:var(--ink);text-decoration:underline;cursor:pointer}
+.m__tip{font-size:12px;color:var(--muted);margin-top:4px;padding:0 4px}
+@media (prefers-reduced-motion:reduce){.m--new,.typing .dots i{animation:none}}
 .chat__f{display:flex;gap:8px;align-items:flex-end;padding:12px 14px 10px;border-top:1px solid var(--line);background:#fff}
 .chat__f textarea{flex:1;resize:none;margin:0;height:auto;min-height:44px;max-height:140px;padding:11px 12px;line-height:1.35}
 .chat__f .btn{padding:0 16px}
@@ -547,8 +558,13 @@ ${ICONS}
   const fitTop = () => document.documentElement.style.setProperty("--top", document.querySelector(".top").offsetHeight + "px");
   addEventListener("resize", fitTop); fitTop();
 
-  async function call(path, body) {
-    const res = await fetch("/api/" + path, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json", "x-fren": "1" }, body: JSON.stringify(body) });
+  async function call(path, body, ms) {
+    // A request never hangs the page: past ms it's dropped with a plain error.
+    const ctl = ms ? new AbortController() : null; const tm = ctl ? setTimeout(() => ctl.abort(), ms) : 0;
+    let res;
+    try { res = await fetch("/api/" + path, { ...(body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json", "x-fren": "1" }, body: JSON.stringify(body) }), ...(ctl ? { signal: ctl.signal } : {}) }); }
+    catch (e) { throw new Error(ctl && ctl.signal.aborted ? "Fren didn't answer in time. Try again." : "Can't reach Fren on this computer. Check that it's running, then try again."); }
+    finally { clearTimeout(tm); }
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) { location.reload(); throw new Error("logged out"); }
     if (!res.ok) throw new Error(data.error || "Something went wrong.");
@@ -821,47 +837,92 @@ ${ICONS}
     renderBalance(d); renderTopUp(d); renderWaiting(d); renderPositions(d); renderHistory(d); renderSafety(d); renderSignIn(d);
     if (!keysShown) renderKeys(d);
     $("chat-card").hidden = !d.chat;
+    if (chatSeen) renderChat();
   }
 
   async function load() { try { render(await call("overview")); } catch (e) { if (e.message !== "logged out") $("act-msg").textContent = e.message; } }
 
   // ---- chat -------------------------------------------------------------
-  let chatSig = "";
+  // What was sent from this page shows at once (Telegram-style), before the history has it.
+  // It stays until the history shows the same text, or is marked "Not sent" with Retry.
+  let chatSig = "", chatSeen = null, chatState = { messages: [], thinking: false };
+  const mine = [];
+  let mineN = 0;
+  /** Three dots while Fren writes, like Telegram. */
+  function typingRow() {
+    const w = el("div", "m m--fren m--typing"); const b = el("div", "bub typing");
+    const dots = el("span", "dots"); dots.setAttribute("aria-hidden", "true"); dots.append(el("i"), el("i"), el("i"));
+    b.append(el("span", null, "Fren is typing"), dots); w.append(b); return w;
+  }
+  function renderChat() {
+    const s = chatState, list = $("chat");
+    for (let i = mine.length - 1; i >= 0; i--) {
+      const p = mine[i];
+      if (p.state !== "failed" && s.messages.some((m) => m.from === "you" && m.text.trim() === p.text && m.at >= p.at - 120000)) mine.splice(i, 1);
+    }
+    const typing = s.thinking || mine.some((p) => p.state !== "failed");
+    const sig = s.messages.map((m) => m.id).join() + "|" + mine.map((p) => p.id + p.state).join() + "|" + typing + "|" + Boolean(D && D.waiting && D.waiting.length);
+    if (sig === chatSig) return;
+    chatSig = sig;
+    const first = chatSeen === null, seen = chatSeen || new Set();
+    const atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+    list.replaceChildren();
+    if (!s.messages.length && !mine.length) list.append(el("p", "muted", "No messages yet. Say hi."));
+    // The last Fren line that asks for /ok gets a pointer to the buttons here, while something waits.
+    let okAt = -1;
+    if (D && D.waiting && D.waiting.length) s.messages.forEach((m, i) => { if (m.from === "fren" && /\\/ok\\b/i.test(m.text)) okAt = i; });
+    s.messages.forEach((m, i) => {
+      const w = el("div", "m m--" + m.from + (!first && !seen.has(m.id) ? " m--new" : ""));
+      seen.add(m.id);
+      w.append(bubble(m.text), el("time", null, (m.from === "you" ? "You · " : "Fren · ") + when(new Date(m.at).toISOString())));
+      if (i === okAt && !s.messages.slice(i + 1).some((x) => x.from === "you")) w.append(el("p", "m__tip", "Here: press Approve in “Fren wants to do this” above, or type ok."));
+      list.append(w);
+    });
+    for (const p of mine) {
+      const w = el("div", "m m--you m--mine" + (p.state === "failed" ? " m--failed" : "") + (p.fresh ? " m--new" : ""));
+      p.fresh = false;
+      w.append(bubble(p.text));
+      if (p.state === "failed") {
+        const t = el("time", null, "Not sent. " + p.why + " ");
+        const r = el("button", "linkbtn", "Retry"); r.type = "button"; r.onclick = () => { mine.splice(mine.indexOf(p), 1); sendChat(p.text); };
+        t.append(r); w.append(t);
+      } else w.append(el("time", null, "You · " + (p.state === "sending" ? "sending…" : "sent")));
+      list.append(w);
+    }
+    if (typing) list.append(typingRow());
+    chatSeen = seen;
+    if (first || atEnd || mine.length) list.scrollTo({ top: list.scrollHeight, behavior: first ? "auto" : "smooth" });
+  }
   async function loadChat() {
     if (D && !D.chat) return;
     let s;
-    try { s = await call("chat"); } catch (e) { $("chat-sub").textContent = e.message; return; }
+    try { s = await call("chat", undefined, 25000); } catch (e) { $("chat-sub").textContent = e.message; return; }
     const ch = s.channel ? s.channel[0].toUpperCase() + s.channel.slice(1) : "your chat app";
     $("chat-sub").textContent = "The same chat as in " + ch + ". Write here or there.";
-    const sig = s.messages.map((m) => m.id).join() + s.thinking;
-    if (sig === chatSig) return;
-    chatSig = sig;
-    const list = $("chat");
-    const atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-    list.replaceChildren();
-    if (!s.messages.length) list.append(el("p", "muted", "No messages yet. Say hi."));
-    for (const m of s.messages) {
-      const w = el("div", "m m--" + m.from);
-      w.append(bubble(m.text), el("time", null, (m.from === "you" ? "You · " : "Fren · ") + when(new Date(m.at).toISOString())));
-      list.append(w);
-    }
-    if (s.thinking) { const w = el("div", "m m--fren"); w.append(el("div", "bub typing", "Fren is thinking…")); list.append(w); }
-    if (atEnd || s.thinking) list.scrollTop = list.scrollHeight;
+    chatState = s;
+    renderChat();
   }
   const hint = (t) => { const e = $("chat-hint-t"); if (e) e.textContent = t; else $("chat-hint").textContent = t; };
-  $("chat-f").onsubmit = async (ev) => {
-    ev.preventDefault();
-    const t = $("chat-in").value.trim();
-    if (!t) return;
+  async function sendChat(t) {
+    const p = { id: "p" + ++mineN, text: t, at: Date.now(), state: "sending", fresh: true };
+    mine.push(p);
+    renderChat();
     $("chat-go").disabled = true;
     try {
-      const r = await call("chat", { text: t });
-      if (r.hint) hint(r.hint);
-      else { $("chat-in").value = ""; hint("Sent. The answer also lands in Telegram."); tour.did("chat"); }
-      await loadChat();
-      $("chat").scrollTop = $("chat").scrollHeight;
-    } catch (e) { hint(e.message); }
+      const r = await call("chat", { text: t }, 30000);
+      if (r.hint) { mine.splice(mine.indexOf(p), 1); hint(r.hint); if (!$("chat-in").value) $("chat-in").value = t; }
+      else { p.state = "sent"; hint(r.answered ? "Done here. Telegram got a copy." : "Sent. The answer also lands in Telegram."); tour.did("chat"); if (r.answered) load(); }
+    } catch (e) { p.state = "failed"; p.why = e.message; }
     $("chat-go").disabled = false;
+    renderChat();
+    loadChat();
+  }
+  $("chat-f").onsubmit = (ev) => {
+    ev.preventDefault();
+    const t = $("chat-in").value.trim();
+    if (!t || $("chat-go").disabled) return;
+    $("chat-in").value = "";
+    sendChat(t);
   };
   $("chat-in").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("chat-f").requestSubmit(); } };
 
