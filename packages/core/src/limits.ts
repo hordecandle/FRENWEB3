@@ -25,6 +25,25 @@ export type Limits = z.infer<typeof Limits>;
 
 export const DEFAULT_LIMITS: Limits = Limits.parse({});
 
+/**
+ * Safer starting limits for someone new to this (proposal for Bee, off by default):
+ * small trades, low boost, every trade confirmed with /ok, no options (Derive).
+ * Used for a fresh install when FREN_NOVICE_DEFAULTS=1; the owner can loosen them with /limits.
+ */
+export const NOVICE_LIMITS: Limits = Limits.parse({
+  maxTradeUsd: 100,
+  maxDailyUsd: 300,
+  maxLeverage: 3,
+  maxOpenPositions: 3,
+  autoApproveUsd: 0,
+  allowedVenues: ["hyperliquid", "jupiter", "relay", "polymarket", "yield"],
+});
+
+/** The limits a fresh install starts with. */
+export function startingLimits(env: Record<string, string | undefined> = process.env): Limits {
+  return env.FREN_NOVICE_DEFAULTS === "1" ? NOVICE_LIMITS : DEFAULT_LIMITS;
+}
+
 export type LimitKey = keyof Omit<Limits, "allowedVenues">;
 
 /**
