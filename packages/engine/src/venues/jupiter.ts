@@ -438,6 +438,38 @@ export class JupiterVenue implements SpotVenueAdapter {
     return this.signAndSend(txBase64, maxSolSpendLamports, 0, lastValidBlockHeight);
   }
 
+  /**
+   * Make sure the wallet has its associated token account for an SPL mint
+   * (plain Token program), creating it if not. Some protocols' transactions
+   * (Jupiter Lend's first deposit) assume the account exists and fail with
+   * AccountNotInitialized (3012) otherwise. Costs ~0.002 SOL of rent, once.
+   */
+  async ensureTokenAccount(mint: string): Promise<void> {
+    const owner = await this.owner();
+    const m = new PublicKey(mint);
+    const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    const ATA_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+    const [ata] = PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM.toBuffer(), m.toBuffer()], ATA_PROGRAM);
+    if (await this.connection.getAccountInfo(ata)) return;
+    const ix: TransactionInstruction = {
+      programId: ATA_PROGRAM,
+      keys: [
+        { pubkey: owner, isSigner: true, isWritable: true },
+        { pubkey: ata, isSigner: false, isWritable: true },
+        { pubkey: owner, isSigner: false, isWritable: false },
+        { pubkey: m, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        { pubkey: TOKEN_PROGRAM, isSigner: false, isWritable: false },
+      ],
+      // CreateIdempotent: succeeds if someone created it in the meantime.
+      data: Buffer.from([1]),
+    };
+    const { blockhash } = await this.connection.getLatestBlockhash("confirmed");
+    const msg = new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions: [ix] }).compileToV0Message();
+    const txBase64 = Buffer.from(new VersionedTransaction(msg).serialize()).toString("base64");
+    await this.sendApiTransaction(txBase64, 5_000_000);
+  }
+
   /** Raw (integer) balance of an SPL token in the wallet, summed across accounts. */
   async rawBalance(owner: PublicKey, mint: string): Promise<bigint> {
     const res = await this.connection.getParsedTokenAccountsByOwner(owner, { mint: new PublicKey(mint) });

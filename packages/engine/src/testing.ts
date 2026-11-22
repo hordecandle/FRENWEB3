@@ -595,12 +595,14 @@ export function buildTestFren(opts: TestFrenOptions = {}) {
     ...(opts.solanaBridge ? { solanaBridge: opts.solanaBridge } : {}),
   });
   const solanaSent: { txBase64: string; maxSolSpendLamports: number }[] = [];
+  const ensuredAccounts: string[] = [];
   const solana: SolanaAccess = {
     ownerAddress: async () => (signer ? (await signer.addresses()).solana : "PaperWa11et1111111111111111111111111111111"),
     sendApiTransaction: async (txBase64, maxSolSpendLamports) => {
       solanaSent.push({ txBase64, maxSolSpendLamports });
       return `sig${solanaSent.length}`;
     },
+    ensureTokenAccount: async (mint) => void ensuredAccounts.push(mint),
   };
   const yieldVenue = new YieldVenue({
     store,
@@ -672,7 +674,7 @@ export function buildTestFren(opts: TestFrenOptions = {}) {
     ...(opts.snapshots ? { snapshots: new Snapshots({ fetchFn: fake.fetch, hyperliquidInfo: (body) => hyperliquid.markets.info(body), now: () => clock.t }) } : {}),
   });
   if (opts.live) store.setLimits({ ...store.getLimits(), mode: "live" });
-  return { clock, fake, pump, poly, polyTrader, derive, polymarket, yield: yieldVenue, solanaSent, evmBalances, store, notifier, fren, evmTxs, relay };
+  return { clock, fake, pump, poly, polyTrader, derive, polymarket, yield: yieldVenue, solanaSent, ensuredAccounts, evmBalances, store, notifier, fren, evmTxs, relay };
 }
 
 /** Relay's answer for USDC from a Solana wallet to a Hyperliquid account: one deposit into its depository, as the real API gives. */
