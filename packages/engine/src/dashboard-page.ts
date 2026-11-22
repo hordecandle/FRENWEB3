@@ -214,6 +214,7 @@ details summary .n{font-weight:400;color:var(--muted);margin-left:auto;font-size
 .key b{display:block;font-size:13px;font-weight:500}
 .key code{font-family:var(--mono);font-size:13px;overflow-wrap:anywhere;color:var(--muted);letter-spacing:.04em}
 .key.shown code{color:var(--ink);letter-spacing:0}
+.key:not(.shown) code{display:block;white-space:nowrap;overflow:hidden}
 .key__b{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .key__t{display:block;font-size:12px;color:var(--muted);margin-top:4px}
 #km-word{text-transform:uppercase;letter-spacing:.08em}
