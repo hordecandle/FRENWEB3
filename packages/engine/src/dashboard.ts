@@ -1,10 +1,11 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { describeMaxLoss, describeStep } from "@fren/core";
 import { DashboardAuth, type Mailer, type WalletKind } from "./dashboard-auth.js";
 import type { ChatBridge } from "./dashboard-chat.js";
 import { DASHBOARD_PAGE, LOGIN_PAGE, SIGNIN_PAGE } from "./dashboard-page.js";
 import type { Fren, OwnerRequestResult } from "./engine.js";
+import type { PendingAction, PendingKind } from "./store.js";
 
 /**
  * The owner's web dashboard: what Fren holds and is doing, plus the kill switch.
@@ -163,16 +164,23 @@ export class Dashboard {
     ]);
     const store = this.fren.store;
     const events = store.eventsSince(0).slice(-30).reverse();
-    const waiting = store.plansWithStatus("pending_confirm").map((p) => {
+    // Everything waiting for the owner's OK, the way /ok sees it. The code itself never
+    // leaves the server: the page gets a reference derived from it (see ref()).
+    const waiting = store.livePending().map((p) => {
+      const base = { ref: this.ref(p.code), kind: p.kind, label: p.label ?? KIND_LABEL[p.kind], usd: p.usd ?? 0, expiresAt: p.expiresAt };
+      if (p.kind !== "plan") return base;
+      const rec = store.getPlan(p.payload);
+      if (!rec) return base;
       const resolved = store
-        .getSteps(p.id)
+        .getSteps(rec.id)
         .map((s) => s.resolved)
         .filter((r): r is NonNullable<typeof r> => r !== null);
       return {
-        id: p.id,
-        at: p.createdAt,
-        request: p.request,
-        steps: p.plan.steps.map((st, i) => describeStep(st, resolved.find((r) => r.index === i))),
+        ...base,
+        id: rec.id,
+        at: rec.createdAt,
+        request: rec.request,
+        steps: rec.plan.steps.map((st, i) => describeStep(st, resolved.find((r) => r.index === i))),
         maxLoss: describeMaxLoss(resolved),
       };
     });
@@ -195,6 +203,49 @@ export class Dashboard {
       waitingForCode: store.plansWithStatus("pending_confirm").map((p) => p.id),
       events,
     };
+  }
+
+  /**
+   * Approve and Cancel on the page go through the same door as /ok: the pending code.
+   * The page never sees the code, only an HMAC of it under a key this process made at
+   * start, so a reference is good for one install's lifetime and says nothing about the
+   * code. The owner is the only one with a session (the login link only ever goes down the
+   * private line), and the x-fren header keeps cross-site forms out.
+   */
+  private readonly refKey = randomBytes(32);
+  private ref(code: string): string {
+    return createHmac("sha256", this.refKey).update(code).digest("base64url");
+  }
+  private pendingByRef(ref: unknown): PendingAction | null {
+    const want = Buffer.from(String(ref ?? ""));
+    for (const p of this.fren.store.livePending()) {
+      const have = Buffer.from(this.ref(p.code));
+      if (have.length === want.length && timingSafeEqual(have, want)) return p;
+    }
+    return null;
+  }
+
+  /** Approve from the page. Same checks as /ok: a live request, limits and the day's budget again at run time. */
+  private async approveFromPage(body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
+    const p = this.pendingByRef(body.ref);
+    if (!p) return { status: 400, body: { error: "That request isn't waiting any more: it ran out, or was already approved or cancelled." } };
+    // The page sends back the amount it showed. A request replaced since then (another
+    // amount under the same button) is not approved blind.
+    if (Number(body.usd ?? 0) !== (p.usd ?? 0)) return { status: 409, body: { error: "This request changed since the page loaded. Look at it again." } };
+    const label = p.label ?? KIND_LABEL[p.kind];
+    const r = await this.fren.approveWithReceipt(p.code);
+    void this.fren.tellOwner(`${this.fren.localize(`🖥 You approved it from the dashboard: ${label}`)}${r.receiptSent ? "" : `\n${r.text}`}`);
+    return { status: 200, body: { text: r.text } };
+  }
+
+  private async cancelFromPage(body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
+    const p = this.pendingByRef(body.ref);
+    if (!p) return { status: 400, body: { error: "That request isn't waiting any more: it ran out, or was already approved or cancelled." } };
+    const label = p.label ?? KIND_LABEL[p.kind];
+    this.fren.store.takePending(p.code);
+    if (p.kind === "plan") await this.fren.cancel(p.payload);
+    void this.fren.tellOwner(this.fren.localize(`🖥 You cancelled it from the dashboard: ${label}`));
+    return { status: 200, body: { text: "Cancelled. Nothing happens." } };
   }
 
   /** When the OpenClaw gateway last said it started (via the Fren plugin). */
@@ -275,11 +326,19 @@ export class Dashboard {
         // A cross-site form can't set this header, on top of SameSite=Lax (which already keeps the cookie off cross-site POSTs). Lax, not Strict, because the login link is opened from Telegram, and a Strict cookie would be dropped on the redirect.
         if (req.headers["x-fren"] !== "1") return json(403, { error: "forbidden" });
         const body = await readJson(req);
-        const owner = (r: OwnerRequestResult) => ({
-          text: r.codeSentPrivately === false || r.ownerCode ? `${r.text}\nSend /fren_code in your chat to see the code.` : r.text,
-          needsCode: Boolean(r.codeSentPrivately !== undefined || r.ownerCode),
-        });
+        const owner = (r: OwnerRequestResult) => {
+          const needsCode = Boolean(r.codeSentPrivately !== undefined || r.ownerCode);
+          return { text: needsCode ? "Waiting for your OK: approve or cancel it in “Fren wants to do this” above, or reply /ok in your chat." : r.text, needsCode };
+        };
         switch (url.pathname) {
+          case "/api/ok": {
+            const r = await this.approveFromPage(body);
+            return json(r.status, r.body);
+          }
+          case "/api/cancel": {
+            const r = await this.cancelFromPage(body);
+            return json(r.status, r.body);
+          }
           case "/api/pause":
             return json(200, { text: await this.fren.stop() });
           case "/api/resume":
@@ -292,9 +351,9 @@ export class Dashboard {
             if (!this.chat) return json(404, { error: "The chat isn't connected on this machine." });
             const text = String(body.text ?? "").trim().slice(0, 2000);
             if (!text) return json(400, { error: "Type a message first." });
-            // Codes and commands stay in the chat app: that's where the owner's code goes.
+            // Commands stay in the chat app. Here the page has buttons for the same things.
             if (text.startsWith("/"))
-              return json(200, { hint: "Commands like /ok go in your Telegram chat with Fren, where the code arrives. Here, use the buttons: Pause Fren and Close all positions." });
+              return json(200, { hint: "Commands like /ok belong in your Telegram chat. Here, use the buttons: Approve and Cancel in “Fren wants to do this”, Pause and Close everything in Safety." });
             await this.chat.send(text);
             // The chat app sees what was asked here, so both read as one conversation.
             void this.fren.tellOwner(`${this.fren.localize("🖥 You, from the dashboard:")}\n${text}`);
@@ -369,22 +428,52 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 }
 
 
+/** What a bare /ok would call each kind of request, for the page's "Fren wants to do this" box. */
+const KIND_LABEL: Record<PendingKind, string> = {
+  plan: "A trade plan",
+  limits: "Loosen your limits",
+  resume: "Turn Fren back on",
+  fund: "Send USDC to a trading account",
+  closeall: "Close every leveraged position",
+  hlwithdraw: "Withdraw USDC from Hyperliquid",
+};
+
+export interface CardTopUp {
+  provider: "Transak";
+  /** live: real card payments; sandbox: Transak's test checkout, no real card charged; off: no partner key yet. */
+  mode: "live" | "sandbox" | "off";
+  /** The checkout without an amount; the page adds fiatAmount. Null while off. */
+  url: string | null;
+  network: "solana" | "base";
+  coin: "USDC";
+}
+
 /**
- * Top-up by card as an extra next to sending crypto. Off unless FREN_CARD_ONRAMP=sandbox
- * (a test widget, no real payments) and a partner key is set. Provider: Transak, because
- * its staging widget takes the wallet address, coin and network in the link, so the owner
- * never types an address and Fren never sees card details. Real payments need a separate
- * explicit decision (production key, KYC terms), so only the sandbox is wired.
+ * Top-up by card, always shown next to sending crypto (the owner asked for it on 21.11; the
+ * card is an extra way in, not a replacement). Provider: Transak, because its checkout takes
+ * the wallet address, coin and network in the link, so the owner never types an address,
+ * KYC and the card stay on Transak's side, and Fren never sees card details. USDC lands on
+ * Solana, where Fren trades, so no bridging afterwards. Transak needs a partner key for
+ * any checkout (its public page refuses without one), so without FREN_TRANSAK_KEY the
+ * button is shown but off, with a plain line saying why. FREN_CARD_ONRAMP=live switches
+ * from Transak's test checkout to real payments; that is a separate decision (production
+ * key, KYC terms), so the default with a key is the sandbox.
  */
-export function cardTopUp(addresses: { solana?: string | null; evm?: string | null } | null | undefined, env: NodeJS.ProcessEnv = process.env): { provider: string; sandbox: true; url: string } | null {
-  if (env.FREN_CARD_ONRAMP !== "sandbox" || !env.FREN_TRANSAK_KEY || !addresses?.evm) return null;
+export function cardTopUp(addresses: { solana?: string | null; evm?: string | null } | null | undefined, env: NodeJS.ProcessEnv = process.env): CardTopUp {
+  const network = addresses?.solana ? "solana" : "base";
+  const wallet = addresses?.solana || addresses?.evm;
+  const key = env.FREN_TRANSAK_KEY;
+  if (!key || !wallet) return { provider: "Transak", mode: "off", url: null, network, coin: "USDC" };
+  const live = env.FREN_CARD_ONRAMP === "live";
   const q = new URLSearchParams({
-    apiKey: env.FREN_TRANSAK_KEY,
+    apiKey: key,
+    productsAvailed: "BUY",
     cryptoCurrencyCode: "USDC",
-    network: "base",
-    walletAddress: addresses.evm,
+    network,
+    walletAddress: wallet,
     disableWalletAddressForm: "true",
+    fiatCurrency: "USD",
     themeColor: "a5caff",
   });
-  return { provider: "Transak", sandbox: true, url: `https://global-stg.transak.com/?${q}` };
+  return { provider: "Transak", mode: live ? "live" : "sandbox", url: `https://${live ? "global" : "global-stg"}.transak.com/?${q}`, network, coin: "USDC" };
 }

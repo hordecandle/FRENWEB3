@@ -17,7 +17,8 @@ const HEAD = `<meta charset="utf-8">
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;font-size:15px;line-height:1.45}
 h1,h2,h3,p{margin:0}
 button,input,select,textarea{font:inherit;color:inherit}
-.ic{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ic{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lg{width:20px;height:20px;flex:none;display:block}
 .top{position:sticky;top:0;z-index:5;background:rgba(255,255,255,.88);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
 .top__in{max-width:1280px;margin:0 auto;padding:0 28px;height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px}
 .brand{display:flex;align-items:baseline;gap:9px;font-weight:600;font-size:21px;letter-spacing:-.03em}
@@ -25,7 +26,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .top__r{display:flex;align-items:center;gap:12px}
 .demo{background:var(--blue-2);color:var(--ink);font-size:13px;padding:6px 16px;border-bottom:1px solid var(--blue-3);display:flex;align-items:center;justify-content:center;gap:8px}
 .demo .ic{width:15px;height:15px}
-.layout{max-width:1280px;margin:0 auto;padding:28px 28px 72px;display:grid;gap:24px;grid-template-columns:minmax(0,1fr) 400px;align-items:start}
+.layout{max-width:1280px;margin:0 auto;padding:28px 28px 0;display:grid;gap:24px;grid-template-columns:minmax(0,1fr) 400px;align-items:start}
 .col{display:grid;gap:24px;min-width:0}
 .side{position:sticky;top:calc(var(--top) + 24px);height:calc(100dvh - var(--top) - 48px);min-height:420px}
 @media (max-width:1060px){.layout{grid-template-columns:minmax(0,1fr)}.side{position:static;height:auto}}
@@ -111,20 +112,56 @@ details summary .n{font-weight:400;color:var(--muted);margin-left:auto;font-size
 .tag{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;border-radius:99px;padding:3px 9px 3px 7px;margin-left:8px;vertical-align:1px;background:var(--line-2);color:var(--ink-2)}
 .tag .ic{width:13px;height:13px;stroke-width:2.2}
 .tag--ok{background:var(--ok-2);color:var(--ok)}.tag--bad{background:var(--bad-2);color:var(--bad)}.tag--wait{background:var(--warn-2);color:var(--warn)}
-.addrs{display:grid;gap:14px;grid-template-columns:1fr 1fr;align-items:stretch}
-@media (max-width:760px){.addrs{grid-template-columns:1fr}}
-.demo-warn{grid-column:1/-1;margin:0}
-.addr-box{background:var(--bg);border-radius:16px;padding:18px;min-width:0;display:grid;grid-template-rows:auto auto 1fr;gap:4px}
-.addr-box__t{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-.addr-box h3{font-size:15px;font-weight:500;display:flex;align-items:center;gap:8px;min-width:0;min-height:36px;line-height:1.35}
-.addr-box h3 .ic{width:18px;height:18px}
-.addr-box .muted{font-size:13px}
-.addr-box .addr{margin-top:8px;align-self:start}
-.wait{display:flex;gap:12px;align-items:flex-start;background:var(--warn-2);border-radius:16px;padding:16px 18px;margin-top:12px;font-size:14px;line-height:1.5}
-.wait .ic{width:18px;height:18px;flex:none;margin-top:3px;color:var(--warn)}
+/* Top up: one block, two ways in (crypto | card), one network picker, one address, one Copy. Every row with a button is a grid with its content centred, so text and buttons share a line. */
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;background:var(--bg);border-radius:14px}
+.seg__b{display:flex;align-items:center;justify-content:center;gap:8px;height:40px;border:0;border-radius:11px;background:transparent;color:var(--muted);font-size:15px;font-weight:500;cursor:pointer;transition:background .15s,color .15s,box-shadow .15s}
+.seg__b .ic{width:18px;height:18px}
+.seg__b.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08),0 0 0 1px var(--line)}
+.seg__b:hover:not(.on){color:var(--ink)}
+.pay{margin-top:20px}
+.demo-warn{margin:0 0 16px}
+.netpick{display:flex;flex-wrap:wrap;gap:8px}
+.netb{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px 0 10px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:14px;font-weight:500;cursor:pointer;transition:border-color .15s,background .15s,box-shadow .15s}
+.netb:hover{border-color:var(--faint)}
+.netb.on{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.netb .lg{width:20px;height:20px}
+.addr-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;margin-top:16px;background:var(--bg);border-radius:16px;padding:14px 14px 14px 16px}
+.addr-row .ico{width:40px;height:40px;border-radius:12px;background:#fff}
+.addr-row .ico .lg{width:22px;height:22px}
+.addr-row b{display:block;font-size:15px;font-weight:500;line-height:1.3}
+.addr-row .muted{font-size:13px;margin-top:2px}
+.addr-row .btn{align-self:center}
+.addr-row+.addr{margin-top:10px}
+.camt{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;margin-top:16px}
+.camt label{font-size:13px;color:var(--muted)}
+.camt__in{display:flex;align-items:center;gap:6px;height:48px;padding:0 14px;border:1px solid var(--line);border-radius:var(--r-sm);background:#fff;font-size:22px;font-weight:500;letter-spacing:-.02em;transition:border-color .15s}
+.camt__in:focus-within{border-color:var(--ink)}
+.camt__in span{color:var(--muted)}
+.camt__in input{border:0;outline:0;width:100%;min-width:0;background:transparent;font-size:22px;font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums;padding:0}
+.presets{display:flex;gap:6px}
+.presets button{height:36px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:13px;font-weight:500;cursor:pointer;transition:border-color .15s,background .15s}
+.presets button:hover{border-color:var(--faint)}
+.presets button.on{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.card-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px;align-items:center;margin-top:16px}
+.card-row .state{font-size:13px;color:var(--muted);line-height:1.4}
+.card-row .state.off{color:var(--warn)}
+.path{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px;font-size:14px;color:var(--muted)}
+.path .step{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:999px;background:var(--bg);color:var(--ink);font-weight:500;font-size:13px}
+.path .step .lg,.path .step .ic{width:16px;height:16px}
+.path>.ic{width:14px;height:14px;transform:rotate(-90deg)}
+@media (max-width:640px){.camt{grid-template-columns:1fr}.card-row{grid-template-columns:1fr}.addr-row{grid-template-columns:auto minmax(0,1fr)}.addr-row .btn{grid-column:1/-1;justify-self:start}}
+/* Waiting for the owner's OK: the same request Fren sent to the chat, with Approve and Cancel right here. */
+.wait{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;background:var(--warn-2);border-radius:16px;padding:16px 18px;margin-top:12px;font-size:14px;line-height:1.5}
+.wait>.ic{width:18px;height:18px;flex:none;margin-top:3px;color:var(--warn)}
 .wait p{margin-top:6px}.wait p:first-child{margin-top:0}
 .wait .muted{color:var(--warn)}
+.wait .lbl-l{font-size:15px;font-weight:500}
+.wait .row{margin-top:14px;align-items:center}
+.wait .row .muted{font-size:13px}
+.wait .btn--ok{background:var(--ok);border-color:var(--ok);color:#fff;box-shadow:none;transform:none}
+.wait .btn--ok:hover{background:#19743f;box-shadow:none;transform:none}
 .loss{font-weight:500}
+.hist-more{margin-top:12px;justify-content:center}
 .hist{list-style:none;margin:0;padding:0;display:grid}
 .hist li{padding:16px 0;border-bottom:1px solid var(--line-2);display:grid;gap:6px;min-width:0}
 .hist li:first-child{padding-top:4px}
@@ -188,46 +225,56 @@ details summary .n{font-weight:400;color:var(--muted);margin-left:auto;font-size
 .signin h1{font-size:32px;font-weight:500;letter-spacing:-.03em;margin-top:6px;line-height:1.1}
 .signin .card__h{margin-bottom:0}
 .signin .card>.row,.signin .card>.field{margin-top:16px}
-.foot{text-align:center;font-size:13px;color:var(--muted)}
-@media (max-width:520px){.layout{padding:14px 14px 48px;gap:14px}.col{gap:14px}.card{padding:20px;border-radius:16px}.card__h{gap:12px;margin-bottom:16px}.ico{width:38px;height:38px;border-radius:12px}.ico .ic{width:20px;height:20px}.total{font-size:44px;letter-spacing:-.04em}.top__in{padding:0 16px;height:58px}.brand small{display:none}
+.foot{max-width:1280px;margin:0 auto;padding:24px 28px 40px;text-align:center;font-size:13px;color:var(--muted)}
+@media (max-width:520px){.layout{padding:14px 14px 0;gap:14px}.foot{padding:20px 14px 32px}.col{gap:14px}.card{padding:20px;border-radius:16px}.card__h{gap:12px;margin-bottom:16px}.ico{width:38px;height:38px;border-radius:12px}.ico .ic{width:20px;height:20px}.total{font-size:44px;letter-spacing:-.04em}.top__in{padding:0 16px;height:58px}.brand small{display:none}
 .top__r .pill{display:none}.top__r{gap:10px}.chat{height:480px;min-height:0}.chat__h{padding:14px 16px}.chat__list{padding:14px 12px 8px}.bub{max-width:90%}.side{min-height:0}
 .tour-tip{left:12px!important;right:12px;width:auto;bottom:12px;top:auto!important;padding:16px}.tour-tip.at-top{top:12px!important;bottom:auto}.tour-tip p{font-size:14px;margin-top:6px}.tour-tip .row{margin-top:12px}}
 </style>`;
 
-/** Line icons, 24x24, stroke 1.8, currentColor. The only pictures in the interface: no emoji outside the chat bubbles. */
+/** Icons. UI: Lucide (ISC), 24x24 stroke icons, currentColor. Logos of networks and coins: web3icons branded set (MIT), in colour. Telegram: simple-icons. Inlined at build time: nothing is fetched at run time. No emoji outside the chat bubbles. */
 const ICONS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H17v3"/><rect x="4" y="8" width="16" height="11" rx="2.5"/><path d="M15.5 13.5h4.5"/></symbol>
-  <symbol id="i-plus" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></symbol>
-  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></symbol>
-  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 18.5 9.5 12l3.5 3.5 7-8"/><path d="M15.5 7.5H20v4.5"/></symbol>
-  <symbol id="i-history" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4v4.5H9"/><path d="M12 8.5V12l2.5 1.5"/></symbol>
-  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5 5 6v5.5c0 4.3 2.9 7.6 7 9 4.1-1.4 7-4.7 7-9V6z"/><path d="m9 12 2.2 2.2L15.5 10"/></symbol>
-  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 8.5-8.5M16 7l2.5 2.5M14 9l2 2"/></symbol>
-  <symbol id="i-login" viewBox="0 0 24 24"><path d="M13 4.5h4.5a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H13"/><path d="M4 12h9M9.5 8.5 13 12l-3.5 3.5"/></symbol>
-  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4.5 6.5A2.5 2.5 0 0 1 7 4h10a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 17 16h-6l-4.5 3.5V16H7a2.5 2.5 0 0 1-2.5-2.5z"/></symbol>
-  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></symbol>
-  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 5h5v5M19 5l-8 8"/><path d="M17 14v3.5a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2H10"/></symbol>
-  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
-  <symbol id="i-x" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></symbol>
-  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></symbol>
-  <symbol id="i-target" viewBox="0 0 24 24"><path d="M12 4v4M12 16v4M4 12h4M16 12h4"/><circle cx="12" cy="12" r="3"/></symbol>
-  <symbol id="i-card" viewBox="0 0 24 24"><rect x="3.5" y="6" width="17" height="12" rx="2.5"/><path d="M3.5 10h17M7 14.5h3"/></symbol>
-  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="m4 7 8 6 8-6"/></symbol>
-  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 7v10M15 7v10"/></symbol>
-  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 6.5v11l9-5.5z"/></symbol>
-  <symbol id="i-send" viewBox="0 0 24 24"><path d="M20 4 4 10.5l7 2.5 2.5 7z"/><path d="m11 13 9-9"/></symbol>
-  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></symbol>
-  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M4 4l16 16"/><path d="M10 6.3A9.7 9.7 0 0 1 12 6c5.5 0 9 6 9 6a15 15 0 0 1-3 3.6M6.4 7.9A15 15 0 0 0 3 12s3.5 6 9 6c1.4 0 2.6-.3 3.7-.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
-  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></symbol>
-  <symbol id="i-tg" viewBox="0 0 24 24"><path d="M21.2 4.1 2.9 11.2c-.8.3-.8 1.4 0 1.7l4.5 1.6 1.8 5.4c.2.7 1.1.9 1.6.4l2.6-2.5 4.7 3.4c.6.4 1.4.1 1.6-.6l3-15.2c.2-.9-.7-1.6-1.5-1.3Z"/><path d="m7.4 14.5 10.4-7-7.6 8.1-.4 4"/></symbol>
-  <symbol id="i-sol" viewBox="0 0 24 24"><path d="M6.5 7h12l-3 3h-12zM6.5 11h12l-3 3h-12zM6.5 15h12l-3 3h-12z"/></symbol>
-  <symbol id="i-eth" viewBox="0 0 24 24"><path d="M12 3.5 6 12.5l6 3.5 6-3.5z"/><path d="m6 13.5 6 7 6-7-6 3.5z"/></symbol>
-  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5"/></symbol>
-  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M9.5 7V5h5v2M8 7l.8 12h6.4L16 7"/></symbol>
-  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5.5 20V4.5h11l-2.5 4 2.5 4h-11"/></symbol>
+  <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" /> <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" /></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="M8 12h8" /> <path d="M12 8v8" /></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <polyline points="12 6 12 12 16 14" /></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17" /> <polyline points="16 7 22 7 22 13" /></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /> <path d="M3 3v5h5" /> <path d="M12 7v5l4 2" /></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /> <path d="m9 12 2 2 4-4" /></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" /> <circle cx="16.5" cy="7.5" r=".5" fill="currentColor" /></symbol>
+  <symbol id="i-login" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /> <polyline points="10 17 15 12 10 7" /> <line x1="15" x2="3" y1="12" y2="12" /></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M15 3h6v6" /> <path d="M10 14 21 3" /> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18" /> <path d="m6 6 12 12" /></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <line x1="12" x2="12" y1="8" y2="12" /> <line x1="12" x2="12.01" y1="16" y2="16" /></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <line x1="22" x2="18" y1="12" y2="12" /> <line x1="6" x2="2" y1="12" y2="12" /> <line x1="12" x2="12" y1="6" y2="2" /> <line x1="12" x2="12" y1="22" y2="18" /></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5" rx="2" /> <line x1="2" x2="22" y1="10" y2="10" /></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2" /> <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="4" width="4" height="16" rx="1" /> <rect x="6" y="4" width="4" height="16" rx="1" /></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3" /></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z" /> <path d="m21.854 2.147-10.94 10.939" /></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" /> <circle cx="12" cy="12" r="3" /></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" /> <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" /> <path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" /> <path d="m2 2 20 20" /></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /> <path d="M7 11V7a5 5 0 0 1 10 0v4" /></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" /></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18" /> <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /> <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /> <line x1="10" x2="10" y1="11" y2="17" /> <line x1="14" x2="14" y1="11" y2="17" /></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /> <line x1="4" x2="4" y1="22" y2="15" /></symbol>
+  <symbol id="i-coins" viewBox="0 0 24 24"><circle cx="8" cy="8" r="6" /> <path d="M18.09 10.37A6 6 0 1 1 10.34 18" /> <path d="M7 6h1v4" /> <path d="m16.71 13.88.7.71-2.82 2.82" /></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="m4.9 4.9 14.2 14.2" /></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="m3 10 2.5-2.5L3 5" /> <path d="m3 19 2.5-2.5L3 14" /> <path d="M10 6h11" /> <path d="M10 12h11" /> <path d="M10 18h11" /></symbol>
+  <symbol id="i-tg" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></symbol>
+  <symbol id="l-sol" viewBox="0 0 24 24"><path fill="url(#solana__a)" d="M18.413 7.902a.62.62 0 0 1-.411.163H3.58c-.512 0-.77-.585-.416-.928l2.369-2.284a.6.6 0 0 1 .41-.169H20.42c.517 0 .77.59.41.935z"/> <path fill="url(#solana__b)" d="M18.413 19.158a.62.62 0 0 1-.411.158H3.58c-.512 0-.77-.58-.416-.923l2.369-2.29a.6.6 0 0 1 .41-.163H20.42c.517 0 .77.586.41.928z"/> <path fill="url(#solana__c)" d="M18.413 10.473a.62.62 0 0 0-.411-.158H3.58c-.512 0-.77.58-.416.923l2.369 2.29c.111.103.257.16.41.163H20.42c.517 0 .77-.586.41-.928z"/> <defs> <linearGradient id="solana__a" x1="3.001" x2="21.459" y1="55.041" y2="54.871" gradientUnits="userSpaceOnUse"> <stop stop-color="#599DB0"/> <stop offset="1" stop-color="#47F8C3"/> </linearGradient> <linearGradient id="solana__b" x1="3.001" x2="21.341" y1="9.168" y2="9.027" gradientUnits="userSpaceOnUse"> <stop stop-color="#C44FE2"/> <stop offset="1" stop-color="#73B0D0"/> </linearGradient> <linearGradient id="solana__c" x1="4.036" x2="20.303" y1="12.003" y2="12.003" gradientUnits="userSpaceOnUse"> <stop stop-color="#778CBF"/> <stop offset="1" stop-color="#5DCDC9"/> </linearGradient> </defs></symbol>
+  <symbol id="l-base" viewBox="0 0 24 24"><path fill="#00F" d="M3 4.706c0-.585 0-.877.11-1.101.106-.215.28-.39.496-.495C3.83 3 4.122 3 4.706 3h14.588c.585 0 .876 0 1.101.11.215.105.389.28.494.495.111.225.111.517.111 1.101v14.588c0 .585 0 .876-.11 1.101-.106.215-.28.389-.495.494-.225.111-.517.111-1.101.111H4.706c-.585 0-.876 0-1.101-.11a1.08 1.08 0 0 1-.494-.495C3 20.17 3 19.878 3 19.294z"/></symbol>
+  <symbol id="l-arb" viewBox="0 0 24 24"><path fill="#213147" d="M4.515 8.471v7.056c0 .45.245.867.64 1.092l6.205 3.529a1.3 1.3 0 0 0 1.28 0l6.203-3.53c.396-.224.64-.64.64-1.09V8.47c0-.45-.244-.867-.64-1.091L12.64 3.85a1.3 1.3 0 0 0-1.28 0L5.155 7.38a1.25 1.25 0 0 0-.639 1.091"/> <path fill="#12AAFF" d="m13.353 13.368-.885 2.39a.3.3 0 0 0 0 .205l1.523 4.112 1.76-1.001-2.113-5.706a.152.152 0 0 0-.285 0m1.774-4.019a.152.152 0 0 0-.285 0l-.885 2.39a.3.3 0 0 0 0 .205l2.494 6.732 1.761-1.001z"/> <path fill="#9DCCED" d="M11.998 4.115a.3.3 0 0 1 .126.033l6.715 3.818a.25.25 0 0 1 .126.214v7.635c0 .089-.048.17-.126.214l-6.715 3.819a.25.25 0 0 1-.126.032.3.3 0 0 1-.125-.032l-6.715-3.815a.25.25 0 0 1-.126-.215V8.182c0-.089.048-.17.126-.215l6.715-3.818a.26.26 0 0 1 .125-.034m0-1.115c-.238 0-.478.06-.692.183L4.593 7A1.36 1.36 0 0 0 3.9 8.182v7.635c0 .487.264.938.693 1.181l6.714 3.819a1.41 1.41 0 0 0 1.386 0l6.714-3.818a1.36 1.36 0 0 0 .693-1.182V8.182A1.36 1.36 0 0 0 19.407 7l-6.716-3.817A1.4 1.4 0 0 0 11.998 3"/> <path fill="#213147" d="m7.559 18.685.617-1.666 1.244 1.018-1.163 1.046z"/> <path fill="#fff" d="M11.433 7.635H9.731a.3.3 0 0 0-.285.197l-3.649 9.852 1.761 1.001 4.018-10.849a.15.15 0 0 0-.143-.2m2.979-.001h-1.703a.3.3 0 0 0-.284.197l-4.167 11.25 1.761 1 4.535-12.246a.15.15 0 0 0-.142-.2"/></symbol>
+  <symbol id="l-matic" viewBox="0 0 24 24"><path fill="url(#polygon__a)" d="m16.364 15.217 4.27-2.435a.73.73 0 0 0 .366-.627V7.284a.72.72 0 0 0-.366-.627l-4.27-2.435a.74.74 0 0 0-.732 0l-4.27 2.435a.72.72 0 0 0-.366.627v8.704l-2.994 1.707-2.994-1.707v-3.415l2.994-1.707 1.974 1.127V9.702l-1.608-.918a.75.75 0 0 0-.732 0l-4.27 2.435a.72.72 0 0 0-.366.627v4.87c0 .258.14.498.366.627l4.27 2.436a.75.75 0 0 0 .732 0l4.27-2.436a.72.72 0 0 0 .366-.626V8.012l.053-.03 2.94-1.677 2.994 1.707v3.415l-2.994 1.707-1.972-1.124v2.291l1.606.916a.75.75 0 0 0 .732 0z"/> <defs> <linearGradient id="polygon__a" x1="2.942" x2="20.119" y1="17.194" y2="7.101" gradientUnits="userSpaceOnUse"> <stop stop-color="#A726C1"/> <stop offset=".88" stop-color="#803BDF"/> <stop offset="1" stop-color="#7B3FE4"/> </linearGradient> </defs></symbol>
+  <symbol id="l-eth" viewBox="0 0 24 24"><path fill="#8FFCF3" d="M12 3v6.651l5.625 2.516z"/> <path fill="#CABCF8" d="m12 3-5.625 9.166L12 9.653z"/> <path fill="#CBA7F5" d="M12 16.478V21l5.625-7.784z"/> <path fill="#74A0F3" d="M12 21v-4.522l-5.625-3.262z"/> <path fill="#CBA7F5" d="m12 15.43 5.625-3.263L12 9.652z"/> <path fill="#74A0F3" d="M6.375 12.167 12 15.43V9.652z"/> <path fill="#202699" fill-rule="evenodd" d="m12 15.43-5.625-3.263L12 3l5.624 9.166zm-5.252-3.528 5.161-8.41v6.114zm-.077.229 5.238-2.327v5.364zm5.418-2.327v5.364l5.234-3.037zm0-.198 5.161 2.296-5.161-8.41z" clip-rule="evenodd"/> <path fill="#202699" fill-rule="evenodd" d="m12 16.406-5.625-3.195L12 21l5.624-7.79zm-4.995-2.633 4.904 2.79v4.005zm5.084 2.79v4.005l4.905-6.795z" clip-rule="evenodd"/></symbol>
+  <symbol id="l-usdc" viewBox="0 0 24 24"><path fill="#0B53BF" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18"/> <path fill="#fff" d="M13.62 5.45v1.159a5.64 5.64 0 0 1 4.005 5.394 5.64 5.64 0 0 1-4.005 5.394v1.16a6.74 6.74 0 0 0 5.13-6.554 6.74 6.74 0 0 0-5.13-6.553m-7.245 6.553a5.64 5.64 0 0 1 4.005-5.394V5.45a6.74 6.74 0 0 0-5.13 6.553 6.74 6.74 0 0 0 5.13 6.553v-1.159a5.63 5.63 0 0 1-4.005-5.394"/> <path fill="#fff" d="M14.419 13.258c0-2.301-3.606-1.356-3.606-2.627 0-.456.366-.748 1.063-.748.833 0 1.12.405 1.21.95h1.147c-.102-1.024-.69-1.67-1.67-1.863v-.904h-1.125v.872c-1.075.137-1.75.762-1.75 1.693 0 2.312 3.611 1.445 3.611 2.694 0 .472-.455.787-1.226.787-1.007 0-1.339-.444-1.462-1.057H9.49c.073 1.122.764 1.823 1.947 1.999v.886h1.125v-.875c1.153-.149 1.856-.82 1.856-1.807"/></symbol>
 </svg>`;
 
 const ic = (name: string) => `<svg class="ic"><use href="#${name}"/></svg>`;
+const lg = (name: string) => `<svg class="lg"><use href="#${name}"/></svg>`;
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -242,6 +289,8 @@ const COMMON_JS = `
   function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   /** An <svg><use> for one of the page's line icons. */
   function icon(name) { const s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("class", "ic"); const u = document.createElementNS("http://www.w3.org/2000/svg", "use"); u.setAttribute("href", "#" + name); s.append(u); return s; }
+  /** An <svg><use> for a network or coin logo (in colour). */
+  function logo(name) { const s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("class", "lg"); const u = document.createElementNS("http://www.w3.org/2000/svg", "use"); u.setAttribute("href", "#" + name); s.append(u); return s; }
   /** A button with an icon in front of its label. */
   function iconBtn(name, label, cls) { const b = el("button", cls || "btn btn--2 btn--sm"); b.type = "button"; b.append(icon(name), el("span", null, label)); return b; }
   function setBtn(b, name, label) { b.replaceChildren(icon(name), el("span", null, label)); }
@@ -315,7 +364,7 @@ ${ICONS}
     m.wallet
       ? `<section class="card">
     <div class="card__h"><span class="ico">${ic("i-wallet")}</span><div><h2>With your wallet</h2><p class="muted">Sign a short message. It's free and can't move money.</p></div></div>
-    <div class="row"><button class="btn btn--2" data-w="solana">${ic("i-sol")}<span>Phantom (Solana)</span></button><button class="btn btn--2" data-w="evm">${ic("i-eth")}<span>MetaMask (EVM)</span></button></div>
+    <div class="row"><button class="btn btn--2" data-w="solana">${lg("l-sol")}<span>Phantom (Solana)</span></button><button class="btn btn--2" data-w="evm">${lg("l-eth")}<span>MetaMask (EVM)</span></button></div>
     <div class="msg" id="w-msg"></div>
   </section>`
       : ""
@@ -371,14 +420,26 @@ ${ICONS}
 
   <section class="card" data-tour="topup" id="topup">
     <div class="card__h"><span class="ico ico--ok">${ic("i-plus")}</span><div><p class="kicker">Add money</p><h2>Top up your Fren</h2></div></div>
-    <div class="addrs" id="addrs"></div>
-    <p class="note">${ic("i-alert")}<span>Send <b>USDC</b> from an exchange or your own wallet. <b>Same network on both sides</b>, or the money gets lost. It shows up above in a minute or two.</span></p>
-    <div id="card-box" hidden><div class="lbl">${ic("i-card")}<span>Or pay by card</span></div><p class="muted" id="card-note" style="margin-top:6px"></p><div class="row"><a class="btn" id="card-btn" target="_blank" rel="noopener">${ic("i-card")}<span>Pay by card</span></a></div></div>
+    <div class="seg" role="tablist" aria-label="How to add money"><button class="seg__b on" type="button" role="tab" data-pay="crypto" aria-selected="true">${ic("i-coins")}<span>Send crypto</span></button><button class="seg__b" type="button" role="tab" data-pay="card" aria-selected="false">${ic("i-card")}<span>Pay by card</span></button></div>
+    <div class="pay" id="pay-crypto" role="tabpanel">
+      <p class="wait demo-warn" id="topup-demo" hidden>${ic("i-alert")}<span>Demo addresses: don't send anything here, it would be lost.</span></p>
+      <div class="netpick" id="nets" aria-label="Network"></div>
+      <div class="addr-row" id="addr-row"><span class="ico" id="addr-logo"></span><div><b id="addr-name"></b><div class="muted" id="addr-note"></div></div><button class="btn btn--2 btn--sm" type="button" id="addr-copy">${ic("i-copy")}<span>Copy</span></button></div>
+      <div class="addr" id="addr"></div>
+      <p class="note">${ic("i-alert")}<span id="addr-help"></span></p>
+    </div>
+    <div class="pay" id="pay-card" role="tabpanel" hidden>
+      <p class="muted">Card to USDC on Solana, straight into your Fren wallet. Transak handles the card and the ID check; Fren never sees your card.</p>
+      <div class="camt"><label for="card-amt">Amount</label><div class="camt__in"><span>$</span><input id="card-amt" inputmode="decimal" value="100" aria-label="Amount in dollars"></div><div class="presets" id="presets"></div></div>
+      <div class="card-row"><a class="btn" id="card-btn" target="_blank" rel="noopener">${ic("i-card")}<span>Pay by card</span></a><p class="state" id="card-state"></p></div>
+      <div class="path"><span class="step">${ic("i-card")}Your card</span>${ic("i-down")}<span class="step">${lg("l-usdc")}USDC</span>${ic("i-down")}<span class="step">${lg("l-sol")}Solana</span>${ic("i-down")}<span class="step">${ic("i-wallet")}Your Fren</span></div>
+    </div>
   </section>
 
   <section class="card" id="wait-card" hidden>
     <div class="card__h"><span class="ico ico--warn">${ic("i-clock")}</span><div><p class="kicker">Waiting for your OK</p><h2>Fren wants to do this</h2></div></div>
     <div id="waits"></div>
+    <div class="msg" id="wait-msg"></div>
   </section>
 
   <section class="card" id="pos-card">
@@ -391,6 +452,7 @@ ${ICONS}
     <div class="card__h"><span class="ico">${ic("i-history")}</span><div><p class="kicker">History</p><h2>What Fren did</h2></div></div>
     <ul class="hist" id="hist"></ul>
     <p class="muted" id="hist-empty" style="margin-top:4px"></p>
+    <div class="row hist-more" id="hist-more-row" hidden><button class="btn btn--2 btn--sm" type="button" id="hist-more">${ic("i-list")}<span>Show all</span></button></div>
     <details><summary>Everything else Fren noted</summary><ul class="ev" id="events"></ul></details>
   </section>
 
@@ -403,7 +465,7 @@ ${ICONS}
       <button class="btn" id="resume" hidden>${ic("i-play")}<span>Turn Fren back on</span></button>
       <button class="btn btn--2" id="closeall">${ic("i-stop")}<span>Close everything</span></button>
     </div>
-    <p class="note">${ic("i-lock")}<span>Pause works at once. Turning back on, closing real trades and raising limits need the code from your chat: reply <b>/ok CODE</b> there.</span></p>
+    <p class="note">${ic("i-lock")}<span>Pause works at once. Turning back on, closing real trades and raising limits need your OK first: it appears in <b>Fren wants to do this</b> above, and in your Telegram chat.</span></p>
     <div class="msg" id="act-msg"></div>
     <details><summary>Limits: what Fren may do on its own</summary>
     <div class="lim">
@@ -433,11 +495,10 @@ ${ICONS}
     <div class="field"><input id="si-email" type="email" placeholder="you@example.com"><button class="btn btn--2" id="si-email-save">${ic("i-check")}<span>Save</span></button></div>
     <div class="lbl">${ic("i-wallet")}<span>Wallets you log in with</span></div>
     <div id="si-wallets" class="keys" style="margin-top:8px"></div>
-    <div class="row"><button class="btn btn--2" data-link="solana">${ic("i-sol")}<span>Add Phantom (Solana)</span></button><button class="btn btn--2" data-link="evm">${ic("i-eth")}<span>Add MetaMask (EVM)</span></button></div>
+    <div class="row"><button class="btn btn--2" data-link="solana">${lg("l-sol")}<span>Add Phantom (Solana)</span></button><button class="btn btn--2" data-link="evm">${lg("l-eth")}<span>Add MetaMask (EVM)</span></button></div>
     <div class="msg" id="si-msg"></div>
   </section>
 
-  <p class="foot">Fren is software you run yourself. Not financial advice.</p>
  </div>
 
  <aside class="side">
@@ -445,10 +506,11 @@ ${ICONS}
     <div class="chat__h"><span class="ico ico--blue">${ic("i-chat")}</span><div><h2>Talk to Fren</h2><p class="muted" id="chat-sub">The same chat as in Telegram.</p></div><p class="kicker" id="chat-k" hidden>Chat</p></div>
     <div class="chat__list" id="chat"></div>
     <form class="chat__f" id="chat-f"><textarea id="chat-in" rows="1" placeholder="Ask Fren anything"></textarea><button class="btn" id="chat-go">${ic("i-send")}<span>Send</span></button></form>
-    <p class="chat__hint" id="chat-hint">${ic("i-tg")}<span id="chat-hint-t">Codes like /ok go in Telegram, where the code arrives.</span></p>
+    <p class="chat__hint" id="chat-hint">${ic("i-tg")}<span id="chat-hint-t">Fren answers here and in Telegram. Approvals live in the “Fren wants to do this” box.</span></p>
   </section>
  </aside>
 </main>
+<footer class="foot">Fren is software you run yourself. Not financial advice.</footer>
 
 <div class="modal" id="km" hidden><div class="modal__c">
   <span class="ico ico--bad">${ic("i-key")}</span>
@@ -531,47 +593,118 @@ ${ICONS}
     if (wn) wn.textContent = nets.length ? nets.length + (nets.length === 1 ? " network" : " networks") : "";
   }
 
-  function renderTopUp(d) {
-    const w = $("addrs");
-    if (w.dataset.done) return;
-    w.replaceChildren();
-    const a = d.addresses;
-    if (!a) { w.append(el("p", "muted", "No wallets yet.")); return; }
-    if (d.demo) { const dw = el("p", "wait demo-warn"); dw.append(icon("i-alert"), el("span", null, "Demo addresses: don't send anything here, it would be lost.")); w.append(dw); }
-    for (const [name, v, note, ico] of [["Solana", a.solana, "USDC or SOL.", "i-sol"], ["Base, Arbitrum, Polygon or Hyperliquid", a.evm, "USDC. One address for all of them.", "i-eth"]]) {
-      if (!v) continue;
-      const box = el("div", "addr-box");
-      const copy = iconBtn("i-copy", "Copy");
-      copy.onclick = async () => { try { await navigator.clipboard.writeText(v); } catch { const r = document.createRange(); r.selectNodeContents(box.querySelector(".addr")); getSelection().removeAllRanges(); getSelection().addRange(r); } setBtn(copy, "i-check", "Copied"); setTimeout(() => setBtn(copy, "i-copy", "Copy"), 1500); tour.did("topup"); };
-      const top = el("div", "addr-box__t");
-      const h = el("h3"); h.append(icon(ico), el("span", null, name));
-      top.append(h, copy);
-      box.append(top, el("p", "muted", note), el("div", "addr", v));
-      w.append(box);
-    }
-    w.dataset.done = "1";
+  // ---- top up: one block, crypto or card ------------------------------------
+  // Every network Fren can receive USDC on. One Solana address; one EVM address shared by Base, Arbitrum and Polygon (same wallet on each).
+  const NETS = [
+    { k: "solana", name: "Solana", logo: "l-sol", a: "solana", note: "USDC or SOL. Fastest and cheapest.", help: "Send USDC on Solana. Same network on both sides, or the money gets lost. It shows up above in a minute or two." },
+    { k: "base", name: "Base", logo: "l-base", a: "evm", note: "USDC.", help: "Send USDC on Base. The same address works on Arbitrum and Polygon too: it's one wallet. Same network on both sides, or the money gets lost." },
+    { k: "arbitrum", name: "Arbitrum", logo: "l-arb", a: "evm", note: "USDC. Also the way into Hyperliquid.", help: "Send USDC on Arbitrum. Fren moves it to Hyperliquid itself when a trade needs it. Same network on both sides, or the money gets lost." },
+    { k: "polygon", name: "Polygon", logo: "l-matic", a: "evm", note: "USDC.", help: "Send USDC on Polygon. The same address works on Base and Arbitrum too: it's one wallet. Same network on both sides, or the money gets lost." },
+  ];
+  let net = "solana";
+  let pay = "crypto";
+  const PRESETS = [50, 100, 250, 500];
+  function showNet() {
+    const a = (D && D.addresses) || {};
+    const n = NETS.find((x) => x.k === net) || NETS[0];
+    for (const b of $("nets").children) { const on = b.dataset.net === n.k; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); }
+    $("addr-logo").replaceChildren(logo(n.logo));
+    $("addr-name").textContent = n.name + " address";
+    $("addr-note").textContent = n.note;
+    $("addr").textContent = a[n.a] || "";
+    $("addr-help").textContent = n.help;
   }
-
+  function renderTopUp(d) {
+    const a = d.addresses;
+    $("topup-demo").hidden = !d.demo;
+    const nets = $("nets");
+    if (!nets.dataset.done) {
+      nets.replaceChildren();
+      for (const n of NETS) {
+        if (!a || !a[n.a]) continue;
+        const b = el("button", "netb"); b.type = "button"; b.dataset.net = n.k; b.append(logo(n.logo), el("span", null, n.name));
+        b.onclick = () => { net = n.k; showNet(); };
+        nets.append(b);
+      }
+      if (!nets.children.length) { $("addr-row").hidden = $("addr").hidden = true; $("addr-help").textContent = "No wallets yet."; }
+      else if (!nets.querySelector('[data-net="' + net + '"]')) net = nets.children[0].dataset.net;
+      const ps = $("presets");
+      for (const v of PRESETS) { const b = el("button", null, "$" + v); b.type = "button"; b.onclick = () => { $("card-amt").value = String(v); cardAmount(); }; ps.append(b); }
+      $("card-amt").oninput = cardAmount;
+      nets.dataset.done = "1";
+    }
+    if (nets.children.length) showNet();
+    renderCard(d);
+  }
+  $("addr-copy").onclick = async () => {
+    const v = $("addr").textContent;
+    if (!v) return;
+    const copy = $("addr-copy");
+    try { await navigator.clipboard.writeText(v); } catch { const r = document.createRange(); r.selectNodeContents($("addr")); getSelection().removeAllRanges(); getSelection().addRange(r); }
+    setBtn(copy, "i-check", "Copied"); setTimeout(() => setBtn(copy, "i-copy", "Copy"), 1500); tour.did("topup");
+  };
+  for (const b of document.querySelectorAll("[data-pay]")) b.onclick = () => {
+    pay = b.dataset.pay;
+    for (const x of document.querySelectorAll("[data-pay]")) { const on = x.dataset.pay === pay; x.classList.toggle("on", on); x.setAttribute("aria-selected", String(on)); }
+    $("pay-crypto").hidden = pay !== "crypto";
+    $("pay-card").hidden = pay !== "card";
+  };
+  /** The amount typed (or picked) goes into the Transak link as fiatAmount. */
+  function cardAmount() {
+    const c = D && D.card;
+    const v = Math.max(0, Math.floor(Number(String($("card-amt").value).replace(/[^0-9.]/g, "")) || 0));
+    for (const b of $("presets").children) b.classList.toggle("on", b.textContent === "$" + v);
+    const btn = $("card-btn");
+    if (!c || !c.url) { btn.removeAttribute("href"); return; }
+    const u = new URL(c.url);
+    if (v) u.searchParams.set("fiatAmount", String(v)); else u.searchParams.delete("fiatAmount");
+    btn.href = u.toString();
+  }
   function renderCard(d) {
     const c = d.card;
-    $("card-box").hidden = !c;
-    if (!c) return;
-    $("card-btn").href = c.url;
-    $("card-note").textContent = "Test mode: " + c.provider + " opens a practice checkout, no real card is charged. USDC lands in your Base wallet, shown above in a minute or two.";
+    const btn = $("card-btn"), st = $("card-state");
+    const off = !c || c.mode === "off" || !c.url;
+    btn.classList.toggle("is-off", off);
+    btn.setAttribute("aria-disabled", String(off));
+    if (off) btn.setAttribute("disabled", ""); else btn.removeAttribute("disabled");
+    st.className = "state" + (off ? " off" : "");
+    if (d.demo) st.textContent = "Demo: no real card payments here. In your own Fren this button opens " + ((c && c.provider) || "Transak") + ".";
+    else if (off) st.textContent = "Card payments open after Bee adds the Transak key.";
+    else if (c.mode === "sandbox") st.textContent = "Test mode: " + c.provider + " opens a practice checkout, no real card is charged.";
+    else st.textContent = "Opens " + c.provider + " in a new tab. USDC lands on " + (c.network === "solana" ? "Solana" : "Base") + ", shown above in a minute or two.";
+    cardAmount();
   }
 
+  // ---- waiting for your OK: approve or cancel right here ----------------------
   function renderWaiting(d) {
-    $("wait-card").hidden = !d.waiting.length;
+    // After Approve or Cancel the request is gone, but its result stays on screen until the next page load.
+    $("wait-card").hidden = !d.waiting.length && !$("wait-msg").textContent;
     const w = $("waits");
     w.replaceChildren();
     for (const x of d.waiting) {
       const box = el("div", "wait");
       const body = el("div");
-      body.append(el("p", "muted", when(x.at) + " · you asked: " + plain(x.request)));
-      for (const s of x.steps) body.append(el("p", null, plain(s)));
+      body.append(el("p", "lbl-l", plain(x.label)));
+      if (x.request) body.append(el("p", "muted", when(x.at) + " · you asked: " + plain(x.request)));
+      for (const s of x.steps || []) body.append(el("p", null, plain(s)));
       if (x.maxLoss) body.append(el("p", "loss", plain(x.maxLoss)));
-      const p = el("p", "muted"); p.append("To go ahead, reply in Telegram with "); p.append(el("b", null, "/ok") ); p.append(" and the code Fren sent you there. Ignore it and nothing happens.");
-      body.append(p);
+      const row = el("div", "row");
+      const ok = iconBtn("i-check", "Approve", "btn btn--ok");
+      const no = iconBtn("i-x", "Cancel", "btn btn--2");
+      const until = new Date(x.expiresAt);
+      row.append(ok, no, el("span", "muted", isNaN(until) ? "" : "Waits until " + until.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) + ", then it's dropped."));
+      ok.onclick = async () => {
+        if (d.limits && d.limits.mode === "live" && !confirm("Approve with real money?\\n\\n" + plain(x.label))) return;
+        ok.disabled = no.disabled = true;
+        try { const r = await call("ok", { ref: x.ref, usd: x.usd }); $("wait-msg").textContent = r.text; } catch (e) { $("wait-msg").textContent = e.message; }
+        await load();
+      };
+      no.onclick = async () => {
+        ok.disabled = no.disabled = true;
+        try { const r = await call("cancel", { ref: x.ref }); $("wait-msg").textContent = r.text; } catch (e) { $("wait-msg").textContent = e.message; }
+        await load();
+      };
+      body.append(row);
       box.append(icon("i-clock"), body);
       w.append(box);
     }
@@ -591,11 +724,18 @@ ${ICONS}
     $("pos-empty").textContent = d.positionsError ? "Couldn't load this just now: " + d.positionsError : d.positions.length ? "" : "Nothing open right now.";
   }
 
+  // History shows the last few; "Show all" unfolds the rest.
+  const HIST_SHORT = 3;
+  let histAll = false;
+  $("hist-more").onclick = () => { histAll = !histAll; if (D) renderHistory(D); };
   function renderHistory(d) {
     const ul = $("hist");
     ul.replaceChildren();
     const st = { done: ["Done", "tag--ok", "i-check"], failed: ["Didn't go through", "tag--bad", "i-x"], cancelled: ["Cancelled", "", "i-x"], active: ["Watching the price", "tag--wait", "i-clock"], rejected: ["Blocked by your limits", "tag--bad", "i-shield"] };
-    for (const h of d.history) {
+    const more = d.history.length - HIST_SHORT;
+    $("hist-more-row").hidden = more <= 0;
+    setBtn($("hist-more"), histAll ? "i-list" : "i-down", histAll ? "Show fewer" : "Show all " + d.history.length);
+    for (const h of histAll ? d.history : d.history.slice(0, HIST_SHORT)) {
       const li = el("li");
       const top = el("div", "when", when(h.at) + (h.mode === "paper" ? " · practice" : " · real money"));
       const s = h.steps.some((x) => x.status === "failed") ? st.failed : st[h.status] || [h.status, "", null];
@@ -661,13 +801,13 @@ ${ICONS}
       const r = el("div", "key"); const t = el("div"); t.append(el("b", null, x.kind === "evm" ? "MetaMask (EVM)" : "Phantom (Solana)"), el("code", null, x.address));
       const rm = iconBtn("i-trash", "Remove");
       rm.onclick = () => call("sign-in/wallet/remove", x).then(load);
-      r.append(icon(x.kind === "evm" ? "i-eth" : "i-sol"), t, rm); w.append(r);
+      r.append(logo(x.kind === "evm" ? "l-eth" : "l-sol"), t, rm); w.append(r);
     }
   }
 
   function render(d) {
     D = d;
-    renderBalance(d); renderTopUp(d); renderCard(d); renderWaiting(d); renderPositions(d); renderHistory(d); renderSafety(d); renderSignIn(d);
+    renderBalance(d); renderTopUp(d); renderWaiting(d); renderPositions(d); renderHistory(d); renderSafety(d); renderSignIn(d);
     if (!keysShown) renderKeys(d);
     $("chat-card").hidden = !d.chat;
   }
@@ -774,7 +914,7 @@ ${ICONS}
   const STEPS = [
     { k: "balance", h: "This is all your money", p: "One number for everything Fren holds for you, in dollars, wherever it sits.", t: "Look: is it the amount you expect?" },
     { k: "breakdown", h: "Where it sits", p: "The same money, split by network and wallet. If something's missing, it's usually on a network you didn't expect.", t: "Find the biggest line." },
-    { k: "topup", h: "Add money here", p: "Copy an address and send USDC to it from an exchange or your wallet. Same network on both sides.", t: "Press Copy on one of the addresses.", act: true },
+    { k: "topup", h: "Add money here", p: "Pick a network, copy the address and send USDC to it from an exchange or your wallet. Same network on both sides. Or pay by card: it turns into USDC on Solana.", t: "Press Copy next to the address.", act: true },
     { k: "chat", bottom: true, h: "Talk to Fren", p: "This is your Telegram chat with Fren, right here. Ask what you hold or what to do; before any trade Fren says the most you can lose.", t: "Send Fren a message, e.g. \\"what do I hold?\\"", act: true },
     { k: "history", h: "Check every trade", p: "Everything Fren did, with a link to the public record. You don't have to trust us: click and see.", t: "Open one of the links." },
     { k: "stop", h: "Stop anytime", p: "Pause works at once and stops new trades. Turning back on needs the code from your chat, so nobody else can.", t: "You don't have to press it now. Just know it's here." },

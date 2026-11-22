@@ -69,6 +69,8 @@ const rules: Rule[] = [
   { re: /^🖥 Your Fren dashboard is ready: your balance in dollars, your history, and a short tour\.$/, ru: () => "🖥 Твой дашборд Fren готов: баланс в долларах, история и короткое обучение.", uk: () => "🖥 Твій дашборд Fren готовий: баланс у доларах, історія і коротке навчання." },
   { re: /^(Open it on this computer\. )?The link works once, for 10 minutes\. Later, send \/fren_dashboard for a new one\.$/, ru: (here) => `${here ? "Открой её на этом компьютере. " : ""}Ссылка одноразовая, работает 10 минут. Потом отправь /fren_dashboard, пришлю новую.`, uk: (here) => `${here ? "Відкрий його на цьому комп'ютері. " : ""}Посилання одноразове, працює 10 хвилин. Потім надішли /fren_dashboard, надішлю нове.` },
   { re: /^🖥 You, from the dashboard:$/, ru: () => "🖥 Ты, из дашборда:", uk: () => "🖥 Ти, з дашборда:" },
+  { re: /^🖥 You approved it from the dashboard: (.+)$/, ru: (x) => `🖥 Ты одобрил из дашборда: ${x}`, uk: (x) => `🖥 Ти схвалив з дашборда: ${x}` },
+  { re: /^🖥 You cancelled it from the dashboard: (.+)$/, ru: (x) => `🖥 Ты отменил из дашборда: ${x}`, uk: (x) => `🖥 Ти скасував з дашборда: ${x}` },
   { re: /^The dashboard isn't running on this machine\. Restart Fren, or set FREN_DASHBOARD=on\.$/, ru: () => "Дашборд на этом компьютере не запущен. Перезапусти Fren или включи его настройкой FREN_DASHBOARD=on.", uk: () => "Дашборд на цьому комп'ютері не запущено. Перезапусти Fren або ввімкни його налаштуванням FREN_DASHBOARD=on." },
   { re: /^That plan is no longer waiting for approval\.$/, ru: () => "Этот план больше не ждёт подтверждения.", uk: () => "Цей план більше не чекає підтвердження." },
   { re: /^Not doing this:$/, ru: () => "Не буду это делать:", uk: () => "Не робитиму цього:" },
