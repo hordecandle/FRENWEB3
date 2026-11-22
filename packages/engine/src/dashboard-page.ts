@@ -1041,7 +1041,7 @@ ${ICONS}
 
   // ---- the tour -------------------------------------------------------------
   const STEPS = [
-    { k: "balance", h: "This is all your money", p: "One number for everything Fren holds for you, in dollars, wherever it sits.", t: "Look: is it the amount you expect?" },
+    { k: "balance", h: "This is all your money", p: "One number for everything Fren holds for you, in dollars, wherever it sits.", t: "Is it the amount you expect?" },
     { k: "breakdown", h: "Where it sits", p: "The same money, split by network and wallet. If something's missing, it's usually on a network you didn't expect.", t: "Find the biggest line." },
     { k: "topup", h: "Add money here", p: "Pick a network, copy the address and send USDC to it from an exchange or your wallet. Same network on both sides. Or pay by card: it turns into USDC on Solana.", t: "Press Copy next to the address.", act: true },
     { k: "chat", bottom: true, h: "Talk to Fren", p: "This is your Telegram chat with Fren, right here. Ask what you hold or what to do; before any trade Fren says the most you can lose.", t: "Send Fren a message, e.g. \\"what do I hold?\\"", act: true },
@@ -1055,7 +1055,7 @@ ${ICONS}
     const hole = $("tour-hole"), tip = $("tour-tip");
     const target = () => document.querySelector('[data-tour="' + STEPS[i].k + '"]');
     const tall = () => Boolean(STEPS[i].bottom) && target().getBoundingClientRect().height > innerHeight * 0.45;
-    const tryLine = (s, ok) => { const t = $("tour-try"); t.className = "try" + (ok ? " done" : ""); t.replaceChildren(icon(ok ? "i-check" : "i-circle"), el("span", null, (ok ? "Done. " : "Try it: ") + s.t)); };
+    const tryLine = (s, ok) => { const t = $("tour-try"); t.className = "try" + (ok ? " done" : ""); t.replaceChildren(icon(ok ? "i-check" : "i-circle"), el("span", null, (ok ? "Done. " : "Try it: ") + s.t.replace(/^[A-Za-z ]{2,12}:\\s*/, ""))); };
     function place() {
       if (i < 0) return;
       const t = target();
