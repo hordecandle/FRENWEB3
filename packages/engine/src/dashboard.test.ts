@@ -130,3 +130,19 @@ describe("dashboard address", () => {
     if (old !== undefined) process.env.FREN_DASHBOARD_URL = old;
   });
 });
+
+import { cardTopUp } from "./dashboard.js";
+describe("card top-up", () => {
+  const a = { evm: "0xabc", solana: "So1" };
+  it("is off unless the sandbox flag and key are set", () => {
+    expect(cardTopUp(a, {})).toBeNull();
+    expect(cardTopUp(a, { FREN_CARD_ONRAMP: "sandbox" })).toBeNull();
+    expect(cardTopUp(a, { FREN_CARD_ONRAMP: "live", FREN_TRANSAK_KEY: "k" })).toBeNull();
+  });
+  it("builds a sandbox link carrying the owner's own Base address", () => {
+    const c = cardTopUp(a, { FREN_CARD_ONRAMP: "sandbox", FREN_TRANSAK_KEY: "k" })!;
+    expect(c.url).toContain("global-stg.transak.com");
+    expect(c.url).toContain("walletAddress=0xabc");
+    expect(c.url).toContain("network=base");
+  });
+});

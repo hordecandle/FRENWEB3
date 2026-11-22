@@ -189,6 +189,7 @@ export class Dashboard {
       positions: Array.isArray(positions) ? positions : [],
       positionsError: Array.isArray(positions) ? null : positions.error,
       addresses: wallet.addresses,
+      card: cardTopUp(wallet.addresses),
       watching: store.plansWithStatus("active").map((p) => ({ id: p.id, createdAt: p.createdAt })),
       waitingForCode: store.plansWithStatus("pending_confirm").map((p) => p.id),
       events,
@@ -366,3 +367,23 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
   return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
 }
 
+
+/**
+ * Top-up by card as an extra next to sending crypto. Off unless FREN_CARD_ONRAMP=sandbox
+ * (a test widget, no real payments) and a partner key is set. Provider: Transak, because
+ * its staging widget takes the wallet address, coin and network in the link, so the owner
+ * never types an address and Fren never sees card details. Real payments need a separate
+ * explicit decision (production key, KYC terms), so only the sandbox is wired.
+ */
+export function cardTopUp(addresses: { solana?: string | null; evm?: string | null } | null | undefined, env: NodeJS.ProcessEnv = process.env): { provider: string; sandbox: true; url: string } | null {
+  if (env.FREN_CARD_ONRAMP !== "sandbox" || !env.FREN_TRANSAK_KEY || !addresses?.evm) return null;
+  const q = new URLSearchParams({
+    apiKey: env.FREN_TRANSAK_KEY,
+    cryptoCurrencyCode: "USDC",
+    network: "base",
+    walletAddress: addresses.evm,
+    disableWalletAddressForm: "true",
+    themeColor: "a5caff",
+  });
+  return { provider: "Transak", sandbox: true, url: `https://global-stg.transak.com/?${q}` };
+}

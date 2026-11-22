@@ -299,6 +299,7 @@ export const DASHBOARD_PAGE = `<!doctype html><html lang="en"><head>${HEAD}<titl
     <h2>Top up your Fren</h2>
     <p class="muted" style="margin-top:6px">Send USDC to one of these addresses from an exchange or your own wallet. Pick the same network on both sides, or the money gets lost. It shows up above in a minute or two.</p>
     <div class="addrs" id="addrs"></div>
+    <div id="card-box" hidden><h3 style="margin-top:18px">Or pay by card</h3><p class="muted" id="card-note"></p><div class="row"><a class="btn" id="card-btn" target="_blank" rel="noopener">Pay by card</a></div></div>
   </section>
 
   <section class="card" id="wait-card" hidden>
@@ -478,6 +479,14 @@ export const DASHBOARD_PAGE = `<!doctype html><html lang="en"><head>${HEAD}<titl
     w.dataset.done = "1";
   }
 
+  function renderCard(d) {
+    const c = d.card;
+    $("card-box").hidden = !c;
+    if (!c) return;
+    $("card-btn").href = c.url;
+    $("card-note").textContent = "Test mode: " + c.provider + " opens a practice checkout, no real card is charged. USDC lands in your Base wallet, shown above in a minute or two.";
+  }
+
   function renderWaiting(d) {
     $("wait-card").hidden = !d.waiting.length;
     const w = $("waits");
@@ -583,7 +592,7 @@ export const DASHBOARD_PAGE = `<!doctype html><html lang="en"><head>${HEAD}<titl
 
   function render(d) {
     D = d;
-    renderBalance(d); renderTopUp(d); renderWaiting(d); renderPositions(d); renderHistory(d); renderSafety(d); renderSignIn(d);
+    renderBalance(d); renderTopUp(d); renderCard(d); renderWaiting(d); renderPositions(d); renderHistory(d); renderSafety(d); renderSignIn(d);
     if (!keysShown) renderKeys(d);
     $("chat-card").hidden = !d.chat;
   }
