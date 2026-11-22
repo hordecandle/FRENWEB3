@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { DEFAULT_LIMITS, Limits, type Plan, type ResolvedStep } from "@fren/core";
+import { Limits, startingLimits, type Plan, type ResolvedStep } from "@fren/core";
 
 /**
  * Single-file local state (SQLite), so a user's whole setup is one folder they
@@ -136,7 +136,7 @@ export class Store {
 
   getLimits(): Limits {
     const raw = this.getKv("limits");
-    return raw ? Limits.parse(JSON.parse(raw)) : DEFAULT_LIMITS;
+    return raw ? Limits.parse(JSON.parse(raw)) : startingLimits();
   }
 
   setLimits(limits: Limits) {

@@ -116,3 +116,14 @@ describe("limits", () => {
     expect(isTightening(Limits.parse({ paused: true }), DEFAULT_LIMITS)).toBe(false);
   });
 });
+
+describe("novice starting limits (opt-in)", () => {
+  it("are stricter than the defaults on every dial, and only used when FREN_NOVICE_DEFAULTS=1", async () => {
+    const { DEFAULT_LIMITS, NOVICE_LIMITS, startingLimits } = await import("./limits.js");
+    expect(startingLimits({})).toBe(DEFAULT_LIMITS);
+    expect(startingLimits({ FREN_NOVICE_DEFAULTS: "1" })).toBe(NOVICE_LIMITS);
+    expect(isTightening(DEFAULT_LIMITS, NOVICE_LIMITS)).toBe(true);
+    expect(NOVICE_LIMITS).toMatchObject({ maxLeverage: 3, autoApproveUsd: 0, maxTradeUsd: 100, maxDailyUsd: 300, maxOpenPositions: 3 });
+    expect(NOVICE_LIMITS.allowedVenues).not.toContain("derive");
+  });
+});
