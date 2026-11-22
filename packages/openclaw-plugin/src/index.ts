@@ -8,7 +8,7 @@ import { LoopGuard, type ToolContext, type TurnContext } from "./guard.js";
 import planSchema from "./plan-schema.json" with { type: "json" };
 import {
   SANDBOX_BUSY,
-  SANDBOX_MISSING,
+  sandboxMissing,
   SandboxBusy,
   SandboxUnavailable,
   formatRun,
@@ -77,6 +77,11 @@ export const PICTURE_NOTE = "It is already in their chat with the link under it:
 
 export const SCREENSHOT_MISSING =
   "Fren's browser isn't installed on this server yet. Tell the owner in one line that /fren_update installs it, and use fren_chart for price charts meanwhile.";
+
+/** The browser runs in the sandbox, and the sandbox is Linux-only. */
+export const SCREENSHOT_NOT_HERE =
+  "Screenshots of web pages aren't possible on this computer: Fren's browser lives in the code sandbox, which only exists on a Linux server. Tell the owner in one line, don't suggest /fren_update, and use fren_chart for price charts.";
+const screenshotMissing = () => (process.platform === "linux" ? SCREENSHOT_MISSING : SCREENSHOT_NOT_HERE);
 
 /** Pictures a sandbox run saved in $FREN_OUT, sent to the owner's chat. Returns a line for the model. */
 async function sendImages(client: EngineClient, r: RunCodeResult): Promise<string> {
@@ -355,7 +360,7 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; 
         try {
           r = await runWhenFree({ lang: "node", code, timeoutSec: 90 }, opts.sandboxSocket ? { socket: opts.sandboxSocket } : {});
         } catch (err) {
-          if (err instanceof SandboxUnavailable) return SCREENSHOT_MISSING;
+          if (err instanceof SandboxUnavailable) return screenshotMissing();
           if (err instanceof SandboxBusy) return SANDBOX_BUSY;
           throw err;
         }
@@ -410,7 +415,7 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; 
           const sent = await sendImages(client, r);
           return formatRun(r) + sent;
         } catch (err) {
-          if (err instanceof SandboxUnavailable) return SANDBOX_MISSING;
+          if (err instanceof SandboxUnavailable) return sandboxMissing();
           if (err instanceof SandboxBusy) return SANDBOX_BUSY;
           throw err;
         }
