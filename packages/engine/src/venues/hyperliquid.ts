@@ -64,6 +64,64 @@ export function buildPerpOpenOrders(m: PerpMarket, leg: PerpOpenLeg, mid: number
   return { isBuy, size, notionalUsd: Number(size) * mid, orders, grouping: orders.length > 1 ? "normalTpsl" : "na", stopPx, takeProfitPx };
 }
 
+/** Hyperliquid refuses any order worth less than this ("Order must have minimum value of $10"). */
+export const HL_MIN_ORDER_USD = 10;
+/** Room for the price to move between the plan and the fill, so a plan that passed here isn't refused there. */
+const HL_MIN_CUSHION = 1.02;
+
+/** The smallest order of a plan in dollars, as Hyperliquid values it: the entry at the price it may fill at, stops and targets at their trigger. */
+function smallestOrderUsd(plan: PerpOrderPlan, mid: number): number {
+  const size = Number(plan.size);
+  const values = plan.orders.map((o) => ("trigger" in o.t ? Number(o.t.trigger.triggerPx) : Math.min(mid, Number(o.p))) * size);
+  return Math.min(...values);
+}
+
+/**
+ * Hyperliquid's $10 minimum, checked before the owner is asked and before any money moves.
+ * The order size is rounded down to the market's step (BTC: 0.00001), so $5 at 2x can land
+ * under $10. Returns null when it passes, otherwise the plain reason with the margin, or the
+ * leverage, at which it would go through.
+ */
+export function perpMinimumProblem(m: PerpMarket, leg: PerpOpenLeg, mid: number, maxLeverage = m.maxLeverage): string | null {
+  const floor = HL_MIN_ORDER_USD * HL_MIN_CUSHION;
+  const passes = (l: PerpOpenLeg) => {
+    try {
+      return smallestOrderUsd(buildPerpOpenOrders(m, l, mid), mid) >= floor;
+    } catch {
+      return false;
+    }
+  };
+  if (passes(leg)) return null;
+  const margin = leg.sizing.type === "margin" ? leg.sizing.usd : leg.sizing.usd / leg.leverage;
+  const withMargin = (usd: number): PerpOpenLeg => ({ ...leg, sizing: { type: "margin", usd } });
+  let needMargin: number | null = null;
+  for (let usd = Math.ceil(margin * 2) / 2; usd <= margin + 200; usd += 0.5) {
+    if (passes(withMargin(usd))) {
+      needMargin = usd;
+      break;
+    }
+  }
+  let needLeverage: number | null = null;
+  for (let lev = Math.floor(leg.leverage) + 1; lev <= Math.min(maxLeverage, m.maxLeverage); lev++) {
+    if (passes({ ...withMargin(margin), leverage: lev })) {
+      needLeverage = lev;
+      break;
+    }
+  }
+  const asIs = (() => {
+    try {
+      return fmtUsd(smallestOrderUsd(buildPerpOpenOrders(m, leg, mid), mid));
+    } catch {
+      return null;
+    }
+  })();
+  const fixes = [
+    ...(needMargin !== null ? [`put in ${fmtUsd(needMargin)} at ${leg.leverage}x`] : []),
+    ...(needLeverage !== null ? [`keep ${fmtUsd(margin)} and use ${needLeverage}x`] : []),
+  ];
+  return `Hyperliquid's minimum order is ${fmtUsd(HL_MIN_ORDER_USD)}${asIs ? `, and this one comes to about ${asIs}` : ""}${leg.stopPrice !== undefined || leg.stopLossPct !== undefined ? " (its stop counts too)" : ""}. Nothing was moved or opened.${fixes.length ? ` It goes through if you ${fixes.join(", or ")}.` : ""}`;
+}
+
 function trigger(m: PerpMarket, isBuy: boolean, size: string, px: number, tpsl: "tp" | "sl"): OrderWire {
   // Market trigger: the limit is only a slippage bound, so give it 10% room.
   const limit = formatPrice(px * (isBuy ? 1.1 : 0.9), m.szDecimals, "perp");
@@ -175,6 +233,9 @@ export class HyperliquidVenue implements VenueAdapter {
       return { index, step: canonical, symbol: m.name, spendUsd: 0, notionalUsd: 0 };
     }
     const margin = leg.sizing.type === "margin" ? leg.sizing.usd : leg.sizing.usd / leg.leverage;
+    // The exchange's $10 minimum, before the owner is asked and before anything moves.
+    const tooSmall = perpMinimumProblem(m, canonical.leg as PerpOpenLeg, m.midPx, this.o.store.getLimits().maxLeverage);
+    if (tooSmall) throw new VenueError(tooSmall);
     const base: ResolvedStep = {
       index,
       step: canonical,
@@ -199,13 +260,17 @@ export class HyperliquidVenue implements VenueAdapter {
   async fundingPlan(m: PerpMarket, margin: number, leverage: number): Promise<PerpFunding> {
     // Margin, the taker fee both ways and a small cushion so the order isn't refused by cents.
     const needUsd = roundUpCents(margin + margin * leverage * 0.001 + 0.25);
+    // The cushion is for money Fren moves anyway. Money already sitting on Hyperliquid that
+    // covers the margin and the fees is used as is: a few cents short of the cushion must not
+    // send another $5 deposit (22.11: $5.26 on Hyperliquid, Fren offered to move $5 more).
+    const bareUsd = roundUpCents(margin + margin * leverage * 0.001);
     const freeUsd = Number((await this.clearinghouse(m.dex)).withdrawable) || 0;
-    let short = Math.max(0, needUsd - freeUsd);
+    let short = freeUsd + 1e-9 >= bareUsd ? 0 : Math.max(0, needUsd - freeUsd);
     let fromMainUsd = 0;
     if (short > 0 && m.dex) {
       const main = Number((await this.clearinghouse("")).withdrawable) || 0;
       fromMainUsd = roundUpCents(Math.min(short, Math.max(0, main)));
-      short = Math.max(0, short - fromMainUsd);
+      short = freeUsd + fromMainUsd + 1e-9 >= bareUsd ? 0 : Math.max(0, short - fromMainUsd);
     }
     let depositUsd = 0;
     let solanaUsd = 0;
@@ -247,6 +312,8 @@ export class HyperliquidVenue implements VenueAdapter {
     }
     if (f.depositUsd > 0) notes.push(`To pay for it, Fren first moves ${fmtUsd(f.depositUsd)} USDC from your Arbitrum wallet into your Hyperliquid account (it takes about a minute).`);
     if (f.fromMainUsd > 0) notes.push(`${m.name} trades on Hyperliquid's ${m.dex} market, so Fren moves ${fmtUsd(f.fromMainUsd)} USDC there inside your Hyperliquid account.`);
+    // Say it out loud, so nobody wonders whether Fren sees the money already there.
+    if (!notes.length && f.freeUsd > 0) notes.push(`Paid from the ${fmtUsd(f.freeUsd)} USDC already on your Hyperliquid account; nothing is moved in.`);
     return notes;
   }
 
@@ -444,7 +511,8 @@ export class HyperliquidVenue implements VenueAdapter {
     const { action, signature, nonce } = await this.signer().hlWithdrawToSelf({ amountUsd, isTestnet: this.o.isTestnet });
     const res = await postJson<OrderResponse>(this.o.fetchFn, `${this.o.apiUrl}/exchange`, { action, nonce, signature });
     if (res.status !== "ok") throw new VenueError(`Hyperliquid refused the withdrawal: ${typeof res.response === "string" ? res.response : JSON.stringify(res.response)}`);
-    return `✅ Withdrawal of ${fmtUsd(amountUsd)} USDC to ${String(action.destination)} on Arbitrum requested (Hyperliquid keeps 1 USDC as its fee).`;
+    const explorer = this.o.isTestnet ? "https://sepolia.arbiscan.io/address/" : "https://arbiscan.io/address/";
+    return `✅ Withdrew ${fmtUsd(amountUsd)} USDC from Hyperliquid to your Arbitrum wallet. About ${fmtUsd(amountUsd - 1)} arrives within about 5 minutes (Hyperliquid keeps $1). ${explorer}${String(action.destination)}`;
   }
 
   /** USDC Hyperliquid would let this account withdraw right now (main dex). */
@@ -456,6 +524,9 @@ export class HyperliquidVenue implements VenueAdapter {
   private async liveOpen(leg: PerpOpenLeg, ctx: ExecContext): Promise<ExecResult> {
     const m = await this.market(leg.market);
     const margin = leg.sizing.type === "margin" ? leg.sizing.usd : leg.sizing.usd / leg.leverage;
+    // Checked again at the current price: a waiting entry or a slow /ok must not move money for an order the exchange refuses.
+    const tooSmall = perpMinimumProblem(m, leg, m.midPx, Number.POSITIVE_INFINITY);
+    if (tooSmall) throw new VenueError(tooSmall);
     const moved = await this.fund(m, margin, leg.leverage);
     await this.ensureAgent();
     await this.send(

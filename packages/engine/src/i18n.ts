@@ -18,6 +18,9 @@ interface Rule {
   uk: Fn;
 }
 
+const stepRu = (p: string) => p.replace(/^Step (\d+): /, "Шаг $1: ");
+const stepUk = (p: string) => p.replace(/^Step (\d+): /, "Крок $1: ");
+
 const rules: Rule[] = [
   // approvals
   { re: /^Confirm this plan:$/, ru: () => "Подтверди план:", uk: () => "Підтверди план:" },
@@ -49,6 +52,21 @@ const rules: Rule[] = [
   { re: /^✅ Limits updated\.$/, ru: () => "✅ Лимиты обновлены.", uk: () => "✅ Ліміти оновлено." },
   { re: /^✅ Fren is back on\. The watcher is running again\.$/, ru: () => "✅ Fren снова включён. Наблюдение работает.", uk: () => "✅ Fren знову ввімкнено. Спостереження працює." },
   { re: /^📝 Paper mode$/, ru: () => "📝 Тестовый режим (paper)", uk: () => "📝 Тестовий режим (paper)" },
+  // Hyperliquid: minimum order, money already there, withdrawals (22.11)
+  { re: /^((?:Step \d+: )?)Hyperliquid's minimum order is (\$[\d.,]+)(?:, and this one comes to about (\$[\d.,]+))?( \(its stop counts too\))?\. Nothing was moved or opened\.(?: It goes through if you (?:put in (\$[\d.,]+) at (\d+)x)?(?:, or )?(?:keep (\$[\d.,]+) and use (\d+)x)?\.)?$/,
+    ru: (p, min, now, st, m, ml, k, kl) => `${stepRu(p)}Минимальный заказ на Hyperliquid ${min}${now ? `, а этот выходит примерно на ${now}` : ""}${st ? " (стоп тоже считается)" : ""}. Ничего не переведено и не открыто.${m || k ? ` Пройдёт, если ${[m ? `вложить ${m} с плечом ${ml}x` : "", k ? `оставить ${k} и взять плечо ${kl}x` : ""].filter(Boolean).join(" или ")}.` : ""}`,
+    uk: (p, min, now, st, m, ml, k, kl) => `${stepUk(p)}Мінімальне замовлення на Hyperliquid ${min}${now ? `, а це виходить приблизно на ${now}` : ""}${st ? " (стоп теж рахується)" : ""}. Нічого не переказано й не відкрито.${m || k ? ` Пройде, якщо ${[m ? `вкласти ${m} з плечем ${ml}x` : "", k ? `залишити ${k} і взяти плече ${kl}x` : ""].filter(Boolean).join(" або ")}.` : ""}` },
+  { re: /^(\s*↪ )Paid from the (\$[\d.,]+) USDC already on your Hyperliquid account; nothing is moved in\.$/, ru: (p, a) => `${p}Платится из ${a} USDC, которые уже лежат на твоём счёте Hyperliquid; ничего не переводится.`, uk: (p, a) => `${p}Оплачується з ${a} USDC, що вже лежать на твоєму рахунку Hyperliquid; нічого не переказується.` },
+  { re: /^(\s*↪ )To pay for it, Fren first moves (\$[\d.,]+) USDC from your Arbitrum wallet into your Hyperliquid account \(it takes about a minute\)\.$/, ru: (p, a) => `${p}Чтобы оплатить, Fren сначала переведёт ${a} USDC с твоего кошелька Arbitrum на счёт Hyperliquid (около минуты).`, uk: (p, a) => `${p}Щоб оплатити, Fren спершу переказує ${a} USDC з твого гаманця Arbitrum на рахунок Hyperliquid (близько хвилини).` },
+  { re: /^Withdraw (everything free \((\$[\d.,]+)\)|\$[\d.,]+) USDC from Hyperliquid to your own Arbitrum wallet (\S+)\? Hyperliquid keeps (\$[\d.,]+), so about (\$[\d.,]+) arrives, usually within 5 minutes\.$/,
+    ru: (w, all, to, fee, net) => `Вывести ${all ? `всё свободное (${all})` : w} USDC с Hyperliquid на твой кошелёк Arbitrum ${to}? Hyperliquid берёт ${fee}, придёт около ${net}, обычно за 5 минут.`,
+    uk: (w, all, to, fee, net) => `Вивести ${all ? `усе вільне (${all})` : w} USDC з Hyperliquid на твій гаманець Arbitrum ${to}? Hyperliquid бере ${fee}, прийде близько ${net}, зазвичай за 5 хвилин.` },
+  { re: /^✅ Withdrew (\$[\d.,]+) USDC from Hyperliquid to your Arbitrum wallet\. About (\$[\d.,]+) arrives within about 5 minutes \(Hyperliquid keeps \$1\)\. (\S+)$/, ru: (a, n, l) => `✅ Вывел ${a} USDC с Hyperliquid на твой кошелёк Arbitrum. Придёт около ${n} примерно за 5 минут (Hyperliquid берёт $1). ${l}`, uk: (a, n, l) => `✅ Вивів ${a} USDC з Hyperliquid на твій гаманець Arbitrum. Прийде близько ${n} приблизно за 5 хвилин (Hyperliquid бере $1). ${l}` },
+  { re: /^There's (\$[\d.,]+) free on your Hyperliquid account; a withdrawal has to be more than Hyperliquid's (\$[\d.,]+) fee\.$/, ru: (a, f) => `На счёте Hyperliquid свободно ${a}; вывод должен быть больше комиссии Hyperliquid ${f}.`, uk: (a, f) => `На рахунку Hyperliquid вільно ${a}; виведення має бути більшим за комісію Hyperliquid ${f}.` },
+  { re: /^Only (\$[\d.,]+) is free on your Hyperliquid account \(money held by open bets can't leave\)\. Withdraw that, or close a bet first\.$/, ru: (a) => `На счёте Hyperliquid свободно только ${a} (деньги под открытыми ставками вывести нельзя). Выведи столько или сначала закрой ставку.`, uk: (a) => `На рахунку Hyperliquid вільно лише ${a} (гроші під відкритими ставками вивести не можна). Виведи стільки або спершу закрий ставку.` },
+  { re: /^❌ Only (\$[\d.,]+) is free on Hyperliquid now, not more than its (\$[\d.,]+) fee\. Nothing was withdrawn\.$/, ru: (a, f) => `❌ Сейчас на Hyperliquid свободно только ${a}, не больше комиссии ${f}. Ничего не выведено.`, uk: (a, f) => `❌ Зараз на Hyperliquid вільно лише ${a}, не більше за комісію ${f}. Нічого не виведено.` },
+  { re: /^Practice mode has nothing on Hyperliquid to withdraw\. Switch to live first\.$/, ru: () => "В тренировке на Hyperliquid нечего выводить. Сначала включи режим live.", uk: () => "У тренуванні на Hyperliquid нічого виводити. Спершу ввімкни режим live." },
+  { re: /^Can't read your Hyperliquid balance right now\. Try again in a minute\.$/, ru: () => "Сейчас не получается прочитать баланс Hyperliquid. Попробуй через минуту.", uk: () => "Зараз не вдається прочитати баланс Hyperliquid. Спробуй за хвилину." },
   // plan lines
   { re: /^📝 Practice mode, no real money$/, ru: () => "📝 Тренировка, настоящих денег нет", uk: () => "📝 Тренування, справжніх грошей немає" },
   { re: /^(\s*)🧯 The most you can lose: (\$[\d.,]+), the money this puts in\.(?: Your stop should cut it at about (\$[\d.,]+)\.)?( If the price crashes, other money you keep on Hyperliquid can be used to keep it open\.)?$/,
