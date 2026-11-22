@@ -20,7 +20,7 @@ import { RELAY_DEPOSIT_MAX_SOL_LAMPORTS, RELAY_SOLANA_CHAIN_ID, RelayVenue } fro
 import { SolanaToArbitrum } from "./venues/cctp.js";
 import { DeriveVenue } from "./venues/derive.js";
 import { PolymarketVenue } from "./venues/polymarket.js";
-import { polymarketGeoblock, SdkPolymarketData, SdkPolymarketTrader } from "./venues/polymarket-sdk.js";
+import { ClobMarketList, polymarketGeoblock, SdkPolymarketData, SdkPolymarketTrader } from "./venues/polymarket-sdk.js";
 import { AaveUsdc } from "./venues/aave.js";
 import { JupiterLendUsdc, KaminoUsdc } from "./venues/solana-lend.js";
 import { YieldVenue, type YieldProtocolAdapter } from "./venues/yield.js";
@@ -135,7 +135,7 @@ export function buildFren({ config, store, signer, fetchFn = fetch, exec }: Buil
     // live bets only run on mainnet.
     polymarket: new PolymarketVenue({
       store,
-      data: new SdkPolymarketData(),
+      data: new SdkPolymarketData(new ClobMarketList(fetchFn)),
       trader: signer && !isTestnet ? new SdkPolymarketTrader(signer) : null,
       geoblocked: polymarketGeoblock(fetchFn),
       ...(config.restrictedRegion !== undefined ? { ownerRestricted: config.restrictedRegion } : {}),
