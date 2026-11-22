@@ -214,3 +214,27 @@ describe("ETH in paper mode", () => {
     expect((await t.fren.submit(sellEth("arbitrum", { type: "fraction", fraction: 1 }))).text).toMatch(/You hold no paper ETH on Arbitrum/);
   });
 });
+
+describe("selling an ERC-20, live", () => {
+  it("approves exactly the raw balance it sells (no float rounding), so the swap isn't short of allowance", async () => {
+    // 18-decimal balance too big for a double: qty * 1e18 would lose the last digits.
+    const HELD_TOKENS = 26_481_568_016_940_300_690n; // 26.48156801694030069 tokens
+    const key = `base:${BASE_DOG.toLowerCase()}`;
+    const { signer, sent } = recordingSigner({ [key]: HELD_TOKENS, "base:native": ETH(0.01) });
+    const t = buildTestFren({ signer, live: true, evmBalances: { [key]: HELD_TOKENS, "base:native": ETH(0.01) } });
+    await t.fren.changeLimits("autoApproveUsd=0");
+    const maxApprove = "0x095ea7b3" + ROUTER.slice(2).padStart(64, "0") + "f".repeat(64);
+    t.fake.relaySteps = (body) => [
+      { id: "approve", kind: "transaction", items: [{ status: "incomplete", data: { from: body.user, to: BASE_DOG, data: maxApprove, value: "0", chainId: body.originChainId } }] },
+      { id: "swap", kind: "transaction", items: [{ status: "incomplete", data: { from: body.user, to: ROUTER, data: "0xcd6e13f7", value: "0", chainId: body.originChainId, gas: "592417" } }] },
+    ];
+    const res = await t.fren.submit({
+      request: "sell all my dog",
+      steps: [{ leg: { kind: "swap", venue: "relay", chain: "base", side: "sell", token: BASE_DOG, amount: { type: "fraction", fraction: 1 } } }],
+    });
+    if (res.verdict === "needs_code") await t.fren.approve(codeFrom(t.notifier.sent));
+    const approval = sent.find((s) => s.data.startsWith("0x095ea7b3"));
+    expect(approval).toBeDefined();
+    expect(BigInt("0x" + approval!.data.slice(-64))).toBe(HELD_TOKENS);
+  });
+});

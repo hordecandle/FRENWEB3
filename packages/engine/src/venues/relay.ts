@@ -640,6 +640,7 @@ export class RelayVenue implements SpotVenueAdapter {
     let usd: number;
     /** Wei this trade may send: the ETH sold or paid, or nothing. */
     let nativeSale = 0n;
+    let sellRaw: bigint | null = null;
     let paid: string[] = [];
 
     if (leg.side === "buy") {
@@ -707,6 +708,7 @@ export class RelayVenue implements SpotVenueAdapter {
       }
       if (amount <= 0n) throw new VenueError(`That's too little ${t.symbol} to sell.`);
       if (native) nativeSale = amount;
+      sellRaw = amount;
       origin = t.chain;
       const home: EvmChain = this.chain(t.chain).usdc ? t.chain : "arbitrum";
       quote = await this.quote({
@@ -720,7 +722,8 @@ export class RelayVenue implements SpotVenueAdapter {
       usd = Number(quote.details?.currencyOut?.amount ?? "0") / 1e6;
     }
 
-    const spendRaw = leg.side === "buy" ? BigInt(Math.round(usd * 1e6)) : BigInt(Math.round(qty * 10 ** t.decimals));
+    // A sale approves exactly the raw amount it sells. Going through a float (qty * 10**18) drops the last digits, the approval ends a few wei short and the swap reverts with "insufficient allowance".
+    const spendRaw = leg.side === "buy" ? BigInt(Math.round(usd * 1e6)) : (sellRaw ?? BigInt(Math.round(qty * 10 ** t.decimals)));
     const hashes = await this.runSteps(quote, origin, owner, spendRaw, nativeSale);
     const lastHash = hashes.at(-1);
     if (t.address !== NATIVE_ETH) this.rememberToken(t);
