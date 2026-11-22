@@ -20,6 +20,9 @@ export async function startDemo(port: number, host = "0.0.0.0") {
   await fren.submit({ request: "buy $250 of SOL", steps: [{ leg: { kind: "swap", venue: "jupiter", side: "buy", token: sol, amount: { type: "usd", usd: 250 } } }] });
   await fren.submit({ request: "put $100 into JUP", steps: [{ leg: { kind: "swap", venue: "jupiter", side: "buy", token: jup, amount: { type: "usd", usd: 100 } } }] });
   await fren.submit({ request: "bet $120 that ETH goes up, 3x boost, stop if I lose 20%", steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "ETH", side: "long", sizing: { type: "margin", usd: 120 }, leverage: 3, stopLossPct: 20 } }] });
+  // Two more, so the history is long enough to fold (the page shows the last few and a "Show all").
+  await fren.submit({ request: "buy $40 of SOL", steps: [{ leg: { kind: "swap", venue: "jupiter", side: "buy", token: sol, amount: { type: "usd", usd: 40 } } }] });
+  await fren.submit({ request: "put $60 into JUP", steps: [{ leg: { kind: "swap", venue: "jupiter", side: "buy", token: jup, amount: { type: "usd", usd: 60 } } }] });
   // Prices moved a bit since.
   t.fake.main.find((m) => m.name === "ETH")!.mid = 4_150;
   t.fake.tokens.find((x) => x.symbol === "JUP")!.usdPrice = 1.08;
@@ -29,7 +32,7 @@ export async function startDemo(port: number, host = "0.0.0.0") {
 
   const start = Date.now() - 50 * 60_000;
   const answers: [RegExp, string][] = [
-    [/hold|have|balance|money/i, "You hold about $250 of SOL, $108 of JUP and a bet that ETH goes up, which is a little ahead. Everything is on practice money."],
+    [/hold|have|balance|money/i, "You hold about $290 of SOL, $173 of JUP and a bet that ETH goes up, which is a little ahead. Everything is on practice money."],
     [/stop|pause/i, "To stop me, press Pause Fren in the dashboard or send /fren_stop here. It works at once."],
     [/buy|long|short|sell/i, "Before I do it I'll show you what I'd buy and the most you can lose. Then you reply /ok, or press Approve on the dashboard."],
   ];
