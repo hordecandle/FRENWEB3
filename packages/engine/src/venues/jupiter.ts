@@ -1,6 +1,6 @@
 import { ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
 import { JITO_TIP_ACCOUNTS } from "@fren/signer";
-import { price as fmtPrice, shortToken, usd as fmtUsd, type PlanStep, type ResolvedStep, type SwapLeg } from "@fren/core";
+import { price as fmtPrice, shortToken, usd as fmtUsd, type PlanStep, type ResolvedStep, type SwapLeg, swapSlippageBps } from "@fren/core";
 import type { SignerApi } from "@fren/signer";
 import { getJson, HttpError, postJson, type Fetch } from "../http.js";
 import type { Store } from "../store.js";
@@ -394,12 +394,12 @@ export class JupiterVenue implements SpotVenueAdapter {
     if (leg.side === "buy") {
       if (leg.amount.type === "tokens") throw new VenueError('Say how much USDC to spend on a buy: amount {type:"usd"}.');
       const usd = leg.amount.type === "usd" ? leg.amount.usd : store.paperUsdc() * leg.amount.fraction;
-      if (usd > store.paperUsdc()) throw new VenueError(`Paper balance is ${fmtUsd(store.paperUsdc())}.`);
+      if (usd > store.paperUsdc()) throw new VenueError(`Practice balance is ${fmtUsd(store.paperUsdc())}.`);
       const qty = usd / px;
       store.setPaperUsdc(store.paperUsdc() - usd);
       store.setPaperHolding({ ...held, amount: held.amount + qty, costUsd: held.costUsd + usd });
       store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "jupiter", symbol: t.symbol, action: "buy", size: qty, price: px, usd, spendUsd: usd, mode: "paper" });
-      return { text: `📝 Paper: Bought ${fmtQty(qty)} ${t.symbol} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
+      return { text: `📝 Practice: Bought ${fmtQty(qty)} ${t.symbol} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
     }
     if (leg.amount.type === "tokens" && leg.amount.tokens > held.amount + 1e-12) {
       throw new VenueError(`You hold ${fmtQty(held.amount)} paper ${t.symbol}, not ${leg.amount.tokens}.`);
@@ -411,7 +411,7 @@ export class JupiterVenue implements SpotVenueAdapter {
     store.setPaperUsdc(store.paperUsdc() + usd);
     store.setPaperHolding({ ...held, amount: held.amount - qty, costUsd: held.costUsd * (1 - qty / held.amount) });
     store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "jupiter", symbol: t.symbol, action: "sell", size: qty, price: px, usd, spendUsd: 0, mode: "paper" });
-    return { text: `📝 Paper: Sold ${fmtQty(qty)} ${t.symbol} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
+    return { text: `📝 Practice: Sold ${fmtQty(qty)} ${t.symbol} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
   }
 
   // -- live ------------------------------------------------------------------
@@ -429,6 +429,10 @@ export class JupiterVenue implements SpotVenueAdapter {
     return (await this.owner()).toBase58();
   }
 
+  async solLamports(): Promise<number> {
+    return this.connection.getBalance(await this.owner());
+  }
+
   /**
    * Sign (the signer checks the programs and simulates SOL loss), send and
    * confirm a transaction an API built for this wallet. Returns the signature.
@@ -436,6 +440,38 @@ export class JupiterVenue implements SpotVenueAdapter {
   async sendApiTransaction(txBase64: string, maxSolSpendLamports: number): Promise<string> {
     const lastValidBlockHeight = (await this.connection.getBlockHeight("confirmed")) + 150;
     return this.signAndSend(txBase64, maxSolSpendLamports, 0, lastValidBlockHeight);
+  }
+
+  /**
+   * Make sure the wallet has its associated token account for an SPL mint
+   * (plain Token program), creating it if not. Some protocols' transactions
+   * (Jupiter Lend's first deposit) assume the account exists and fail with
+   * AccountNotInitialized (3012) otherwise. Costs ~0.002 SOL of rent, once.
+   */
+  async ensureTokenAccount(mint: string): Promise<void> {
+    const owner = await this.owner();
+    const m = new PublicKey(mint);
+    const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    const ATA_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+    const [ata] = PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM.toBuffer(), m.toBuffer()], ATA_PROGRAM);
+    if (await this.connection.getAccountInfo(ata)) return;
+    const ix: TransactionInstruction = {
+      programId: ATA_PROGRAM,
+      keys: [
+        { pubkey: owner, isSigner: true, isWritable: true },
+        { pubkey: ata, isSigner: false, isWritable: true },
+        { pubkey: owner, isSigner: false, isWritable: false },
+        { pubkey: m, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        { pubkey: TOKEN_PROGRAM, isSigner: false, isWritable: false },
+      ],
+      // CreateIdempotent: succeeds if someone created it in the meantime.
+      data: Buffer.from([1]),
+    };
+    const { blockhash } = await this.connection.getLatestBlockhash("confirmed");
+    const msg = new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions: [ix] }).compileToV0Message();
+    const txBase64 = Buffer.from(new VersionedTransaction(msg).serialize()).toString("base64");
+    await this.sendApiTransaction(txBase64, 5_000_000);
   }
 
   /** Raw (integer) balance of an SPL token in the wallet, summed across accounts. */
@@ -505,7 +541,7 @@ export class JupiterVenue implements SpotVenueAdapter {
     }
     let quote: JupQuote;
     try {
-      quote = await this.quote(inputMint, outputMint, amount, leg.maxSlippageBps);
+      quote = await this.quote(inputMint, outputMint, amount, swapSlippageBps(leg));
     } catch (err) {
       // Young pump.fun coins trade only on their bonding curve, which Jupiter may not route yet.
       const curve = this.o.pumpFun ? await this.o.pumpFun.curve(t.mint).catch(() => null) : null;
@@ -634,7 +670,7 @@ export class JupiterVenue implements SpotVenueAdapter {
   private async curveSwap(leg: SwapLeg, t: TokenInfo, curve: PumpCurve, owner: PublicKey, amount: bigint, tip: number, ctx: ExecContext, paidSolPx = 0): Promise<ExecResult> {
     const pump = this.o.pumpFun!;
     if (curve.quote === "other") throw new VenueError(`${t.symbol}'s curve is priced in another coin, which Fren can't trade yet.`);
-    const slippagePct = leg.maxSlippageBps / 100;
+    const slippagePct = swapSlippageBps(leg) / 100;
     const user = owner.toBase58();
 
     if (leg.side === "buy") {

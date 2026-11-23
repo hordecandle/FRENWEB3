@@ -23,16 +23,23 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
 
   const routes: Record<string, (body: Record<string, unknown>, url: URL) => Promise<unknown>> = {
     "GET /health": async () => ({ ok: true }),
-    "GET /wallet": async () => fren.wallet(),
-    "GET /status": async () => ({ text: await fren.status() }),
-    "GET /markets": async (_b, url) => ({ text: await fren.searchMarkets(url.searchParams.get("q") ?? "") }),
+    "GET /wallet": async () => {
+      const w = await fren.wallet();
+      return { ...w, text: fren.localize(w.text) };
+    },
+    "GET /status": async () => ({ text: fren.localize(await fren.status()) }),
+    "GET /markets": async (_b, url) => {
+      const bet = Number(url.searchParams.get("bet"));
+      return { text: await fren.searchMarkets(url.searchParams.get("q") ?? "", Number.isFinite(bet) && bet > 0 ? Math.min(bet, 1_000_000) : undefined) };
+    },
     "GET /yield": async () => ({ text: await fren.yieldRates() }),
-    "GET /limits": async () => ({ limits: fren.limits(), text: describeLimits(fren.limits()) }),
+    "GET /limits": async () => ({ limits: fren.limits(), text: fren.localize(describeLimits(fren.limits())) }),
     "GET /events": async (_b, url) => ({ events: fren.recentEvents(Number(url.searchParams.get("since") ?? 0)) }),
     // The plugin asks before every agent turn; without a budget (old callers) it keeps its own count.
     "GET /agent/guard": async () => (budget ? { guard: budget.limits(), usedToday: budget.usedToday() } : { guard: null }),
     "POST /agent/turn": async () => (budget ? budget.take() : { allow: true, used: 0, limit: 0 }),
     "POST /plans": async (b) => fren.submit(b.plan),
+    "GET /agent/context": async () => ({ text: fren.agentContext() }),
     "POST /approve": async (b) => fren.approveWithReceipt(String(b.code ?? "")),
     "POST /limits": async (b) => fren.changeLimits(String(b.args ?? "")),
     "POST /resume": async () => fren.requestResume(),
@@ -40,12 +47,13 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     "POST /close_all": async () => fren.requestCloseAll(),
     "POST /cancel": async (b) => ({ text: await fren.cancel(String(b.planId ?? "")) }),
     "POST /deposit/hyperliquid": async (b) => fren.depositWithReceipt(Number(b.amountUsd)),
-    "GET /settings": async () => ({ settings: fren.settings(), text: describeSettings(fren.settings(), fren.receiptRoute) }),
+    "POST /withdraw/hyperliquid": async (b) => fren.requestHlWithdraw(b.amountUsd === undefined || b.amountUsd === null ? "all" : Number(b.amountUsd)),
+    "GET /settings": async () => ({ settings: fren.settings(), text: fren.localize(describeSettings(fren.settings(), fren.receiptRoute)) }),
     "POST /settings": async (b) => {
       const changes: { images?: boolean } = {};
       if (b.images !== undefined) changes.images = parseOnOff(b.images);
       const settings = fren.setSettings(changes);
-      return { settings, text: describeSettings(settings, fren.receiptRoute) };
+      return { settings, text: fren.localize(describeSettings(settings, fren.receiptRoute)) };
     },
     /** A picture for the owner's chat (a screenshot or an image the agent made in the sandbox). */
     "POST /owner/image": async (b) => {
@@ -77,7 +85,9 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     /** /fren_update: asks the server's root updater to install the latest Fren in place. */
     "POST /update": async () => (opts.updater ? opts.updater.request() : { text: "Updates aren't set up on this machine." }),
     "POST /dashboard/link": async () =>
-      opts.dashboard ? opts.dashboard.sendLink() : { text: "The dashboard isn't set up on this machine. It comes with the VPS install (install.sh --server --web)." },
+      opts.dashboard ? opts.dashboard.sendLink() : { text: fren.localize("The dashboard isn't running on this machine. Restart Fren, or set FREN_DASHBOARD=on.") },
+    /** `fren dashboard`: opens the browser here or sends the link to the owner's chat; never returns the link (the AI holds this token too). */
+    "POST /dashboard/open": async () => (opts.dashboard ? opts.dashboard.openForOwner() : { text: fren.localize("The dashboard isn't running on this machine. Restart Fren, or set FREN_DASHBOARD=on.") }),
     "POST /fund": async (b) => {
       const venue = String(b.venue);
       if (venue !== "derive" && venue !== "polymarket") throw new Error('venue must be "derive" or "polymarket".');
@@ -92,6 +102,8 @@ export function createApi(fren: Fren, token: string, budget?: AgentBudget, opts:
     };
     if (!authed(req)) return send(401, { error: "unauthorized" });
     const url = new URL(req.url ?? "/", "http://localhost");
+    // The plugin says which language the owner writes in, so what Fren sends itself matches it.
+    fren.setOwnerLang(req.headers["x-fren-lang"]);
     const handler = routes[`${req.method} ${url.pathname}`];
     if (!handler) return send(404, { error: "not found" });
     try {

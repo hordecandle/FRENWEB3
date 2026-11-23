@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fakeSandboxSocket } from "../../engine/src/sandbox-testing.js";
 import plugin from "./index.js";
-import { SANDBOX_MISSING, SandboxBusy, formatRun, runInSandbox, runWhenFree, type RunCodeResult } from "./sandbox.js";
+import { SANDBOX_MISSING, SANDBOX_NOT_HERE, SandboxBusy, sandboxMissing, formatRun, runInSandbox, runWhenFree, type RunCodeResult } from "./sandbox.js";
 
 /** The agent's run-code tool: a script in, what it printed out, through the sandbox's socket. */
 
@@ -56,6 +56,12 @@ describe("fren_run_code", () => {
 
   it("says plainly when this machine has no sandbox yet", async () => {
     expect(await run({ language: "bash", code: "echo hi" }, { tokenFile, sandboxSocket: join(dir, "nothing-here.sock") })).toBe(SANDBOX_MISSING);
+  });
+
+  it("on a Mac it says honestly that code can't run there, and doesn't send the owner to /fren_update", () => {
+    expect(sandboxMissing("linux")).toBe(SANDBOX_MISSING);
+    expect(sandboxMissing("darwin")).toBe(SANDBOX_NOT_HERE);
+    expect(SANDBOX_NOT_HERE).toMatch(/don't suggest \/fren_update/);
   });
 
   it("is only there for the owner", () => {

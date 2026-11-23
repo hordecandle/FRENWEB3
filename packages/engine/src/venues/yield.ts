@@ -20,6 +20,8 @@ export interface YieldProtocolAdapter {
   deposited(): Promise<number>;
   /** Live: lend this much USDC from the wallet. Returns a link to the transaction. */
   deposit(usd: number): Promise<string>;
+  /** Live, before /ok: throw a VenueError when this deposit can't go through (e.g. no SOL for rent). */
+  checkDeposit?(usd: number): Promise<void>;
   /** Live: take back this much USDC (or everything) to the wallet. Returns what came back and a link. */
   withdraw(usd: number | "all"): Promise<{ usd: number; link: string }>;
 }
@@ -118,6 +120,8 @@ export class YieldVenue implements VenueAdapter {
     if (leg.action === "deposit") {
       const { p, apy, usd } = await this.pick(leg, mode);
       if (!(usd > 0)) throw new VenueError("There's no USDC to lend.");
+      // Only a first step is checked before /ok: an earlier step may be buying the SOL (execute checks again).
+      if (mode !== "paper" && index === 0 && p.checkDeposit) await p.checkDeposit(usd);
       const notes = [
         `Earns about ${apy === null ? "an unknown rate" : pct(apy)} a year on ${fmtUsd(usd)}, variable. You can take it back any time; Fren also takes it back on its own when a trade needs the cash.`,
       ];
@@ -184,14 +188,14 @@ export class YieldVenue implements VenueAdapter {
   private async paperDeposit(p: YieldProtocolAdapter, leg: EarnLeg, ctx: ExecContext): Promise<ExecResult> {
     const store = this.o.store;
     const usd = leg.amount.type === "usd" ? leg.amount.usd : store.paperUsdc() * leg.amount.fraction;
-    if (usd > store.paperUsdc() + 1e-9) throw new VenueError(`Paper balance is ${fmtUsd(store.paperUsdc())}.`);
+    if (usd > store.paperUsdc() + 1e-9) throw new VenueError(`Practice balance is ${fmtUsd(store.paperUsdc())}.`);
     const cur = await this.paperTouch(p);
     store.setPaperUsdc(store.paperUsdc() - usd);
     const name = yieldProtocolName[p.id] ?? p.id;
     store.setPaperHolding({ mint: PAPER_PREFIX + p.id, symbol: name, amount: cur.amount + usd, costUsd: cur.costUsd + usd });
     store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "yield", symbol: name, action: "deposit", size: usd, price: 1, usd, spendUsd: 0, mode: "paper" });
     const apy = Number(store.getKv(`yield_apy:${p.id}`) ?? 0);
-    return { text: `📝 Paper: Lent ${fmtUsd(usd)} USDC on ${name} at ${pct(apy)} a year` };
+    return { text: `📝 Practice: Lent ${fmtUsd(usd)} USDC on ${name} at ${pct(apy)} a year` };
   }
 
   private paperWithdraw(p: YieldProtocolAdapter, take: number | "all", ctx: ExecContext): { usd: number; text: string } {
@@ -209,7 +213,7 @@ export class YieldVenue implements VenueAdapter {
     store.setPaperUsdc(store.paperUsdc() + usd);
     store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "yield", symbol: name, action: "withdraw", size: usd, price: 1, usd, spendUsd: 0, mode: "paper" });
     const interest = earned > 0.005 ? `, including ${fmtUsd(earned)} of interest` : "";
-    return { usd, text: `📝 Paper: Took ${fmtUsd(usd)} USDC back from ${name}${interest}` };
+    return { usd, text: `📝 Practice: Took ${fmtUsd(usd)} USDC back from ${name}${interest}` };
   }
 
   // -- live ----------------------------------------------------------------------
@@ -218,6 +222,7 @@ export class YieldVenue implements VenueAdapter {
     const cash = await this.o.walletUsdc(p.chain);
     const usd = leg.amount.type === "usd" ? leg.amount.usd : Math.floor(cash * leg.amount.fraction * 1e6) / 1e6;
     if (usd > cash + 1e-6) throw new VenueError(`Your wallet has ${fmtUsd(cash)} USDC on ${chainLabel[p.chain]}; this needs ${fmtUsd(usd)}.`);
+    if (p.checkDeposit) await p.checkDeposit(usd);
     const link = await p.deposit(usd);
     const name = yieldProtocolName[p.id] ?? p.id;
     this.o.store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "yield", symbol: name, action: "deposit", size: usd, price: 1, usd, spendUsd: 0, mode: "live", ref: link });

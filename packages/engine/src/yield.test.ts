@@ -57,7 +57,7 @@ describe("USDC yield", () => {
     expect(res.verdict).toBe("needs_code");
     expect(res.text).toMatch(/Lend \$3,000 of USDC on Jupiter Lend \(Solana\)/);
     expect(res.text).toMatch(/Earns about 5\.69% a year on \$3,000/);
-    expect(await t.fren.approve(codeFrom(t.notifier.sent))).toMatch(/📝 Paper: Lent \$3,000 USDC on Jupiter Lend \(Solana\) at 5\.69% a year/);
+    expect(await t.fren.approve(codeFrom(t.notifier.sent))).toMatch(/📝 Practice: Lent \$3,000 USDC on Jupiter Lend \(Solana\) at 5\.69% a year/);
     expect(t.store.paperUsdc()).toBe(7_000);
     expect(t.store.spentTodayUsd("paper")).toBe(0);
     expect(await t.fren.status()).toMatch(/\$3,000 USDC lent on Jupiter Lend \(Solana\)/);
@@ -67,7 +67,7 @@ describe("USDC yield", () => {
     expect(await t.fren.status()).toMatch(/\$3,171 USDC lent on Jupiter Lend \(Solana\) \(\+\$171 interest\)/);
     const out = await t.fren.submit(earn("withdraw", { type: "fraction", fraction: 1 }));
     expect(out.verdict).toBe("executed");
-    expect(out.text).toMatch(/📝 Paper: Took \$3,171 USDC back from Jupiter Lend \(Solana\), including \$171 of interest/);
+    expect(out.text).toMatch(/📝 Practice: Took \$3,171 USDC back from Jupiter Lend \(Solana\), including \$171 of interest/);
     expect(t.store.paperUsdc()).toBeCloseTo(10_170.7, 0);
     expect(await t.fren.status()).not.toMatch(/lent on/);
   });
@@ -79,7 +79,7 @@ describe("USDC yield", () => {
     expect(t.store.paperUsdc()).toBeCloseTo(100, 6);
     await t.fren.submit({ request: "buy", steps: [{ leg: { kind: "swap", venue: "jupiter", side: "buy", token: "JUP", amount: { type: "usd", usd: 400 } } }] });
     const out = await t.fren.approve(codeFrom(t.notifier.sent));
-    expect(out).toMatch(/↩️ Not enough idle USDC, so first:\n📝 Paper: Took \$300 USDC back from Jupiter Lend \(Solana\)\n📝 Paper: Bought 400 JUP for \$400/);
+    expect(out).toMatch(/↩️ Not enough idle USDC, so first:\n📝 Practice: Took \$300 USDC back from Jupiter Lend \(Solana\)\n📝 Practice: Bought 400 JUP for \$400/);
   });
 
   it("withdraws only what's there", async () => {
@@ -100,6 +100,8 @@ describe("live USDC yield", () => {
     const sol = (await signer.addresses()).solana;
     expect(t.fake.lendCalls[0]).toEqual({ path: "/earn/deposit", body: { asset: USDC_MINT, signer: sol, amount: "1000000000" } });
     expect(t.solanaSent[0]).toEqual({ txBase64: "jup-tx-1", maxSolSpendLamports: 10_000_000 });
+    // First deposit: the jlUSDC token account must be ensured before the API's transaction (else error 3012).
+    expect(t.ensuredAccounts).toEqual(["9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D"]);
 
     const back = await t.fren.submit(earn("withdraw", { type: "fraction", fraction: 1 }));
     expect(back.text).toMatch(/✅ Took \$1,000 USDC back from Jupiter Lend \(Solana\)/);
@@ -118,6 +120,55 @@ describe("live USDC yield", () => {
     });
     expect(t.solanaSent[0]!.maxSolSpendLamports).toBe(50_000_000);
     expect(await t.fren.yieldRates()).toMatch(/Kamino \(Solana\): 4\.68% · you have \$300 here/);
+  });
+
+  // Live run 22.11: 0.0244 SOL on the wallet, the bot asked for /ok, and the
+  // first Kamino deposit (~0.033 SOL of rent for new accounts) couldn't land.
+  it("says before /ok that a first Kamino deposit needs SOL for rent, in the owner's language", async () => {
+    const { signer } = chainSigner({});
+    const t = buildTestFren({ signer, live: true });
+    t.fake.solanaUsdc = 12;
+    t.fake.solanaLamports = 24_439_310;
+    const res = await t.fren.submit(earn("deposit", { type: "usd", usd: 2 }, "kamino"));
+    expect(res.text).toMatch(/needs about 0\.035 SOL for rent and fees; your Solana wallet has 0\.0244 SOL\. Nothing was moved\. Add about 0\.0106 SOL, or lend on Jupiter Lend instead\./);
+    expect(codeFrom(t.notifier.sent)).toBe("");
+    expect(t.fake.lendCalls).toHaveLength(0);
+    t.fren.setOwnerLang("ru");
+    const ru = await t.fren.submit(earn("deposit", { type: "usd", usd: 2 }, "kamino"));
+    expect(ru.text).toMatch(/Первый вклад в Kamino открывает счёт, на ренту и комиссии нужно около 0\.035 SOL, а на кошельке Solana 0\.0244 SOL\. Ничего не переведено\./);
+  });
+
+  it("lets a plan buy the SOL first, and checks the rent again when the Kamino step runs", async () => {
+    const { signer } = chainSigner({});
+    const t = buildTestFren({ signer, live: true });
+    t.fake.solanaUsdc = 12;
+    t.fake.solanaLamports = 24_439_310;
+    const plan = {
+      request: "buy SOL, then Kamino",
+      steps: [
+        { leg: { kind: "swap", venue: "jupiter", side: "buy", token: "SOL", amount: { type: "usd", usd: 1.5 } } },
+        { leg: { kind: "earn", venue: "yield", action: "deposit", amount: { type: "usd", usd: 2 }, protocol: "kamino" } },
+      ],
+    };
+    const first = (await t.fren.submit(plan)).text;
+    const code = codeFrom(t.notifier.sent);
+    const out = code ? await t.fren.approve(code) : first; // small plans may run without a code
+    // Step 1 was tried, so the plan wasn't refused up front; the Kamino step stopped itself
+    // (the fake swap brings no SOL) before anything was sent.
+    expect(out).toMatch(/Buy \$1\.50 of SOL on Jupiter/);
+    expect(out).toMatch(/❌ Lend \$2\.00 of USDC on Kamino \(Solana\): Kamino's first deposit opens an account that needs about 0\.035 SOL/);
+    expect(t.fake.lendCalls.filter((c) => c.path === "/ktx/klend/deposit")).toHaveLength(0);
+  });
+
+  it("doesn't ask for rent SOL once the Kamino account is open", async () => {
+    const { signer } = chainSigner({});
+    const t = buildTestFren({ signer, live: true });
+    t.fake.solanaUsdc = 12;
+    t.fake.kaminoLent = 1;
+    t.fake.solanaLamports = 5_000_000;
+    const res = await t.fren.submit(earn("deposit", { type: "usd", usd: 2 }, "kamino"));
+    expect(res.text).not.toMatch(/rent/);
+    expect(res.text + (t.notifier.sent.at(-1) ?? "")).toMatch(/Kamino/);
   });
 
   it("picks Aave when the USDC is on Arbitrum, approving the exact amount and supplying for the wallet itself", async () => {

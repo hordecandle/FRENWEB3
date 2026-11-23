@@ -3,7 +3,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { isolatedMarker } from "./setup.js";
 import { SignerProcess, type SignerApi } from "@fren/signer";
 import { createApi } from "./api.js";
+import { ResendMailer } from "./dashboard-auth.js";
+import { OpenClawChat } from "./dashboard-chat.js";
 import { Dashboard } from "./dashboard.js";
+import { keystoreVault } from "./keys-vault.js";
 import { Connection } from "@solana/web3.js";
 import { deriveApiUrl, hyperliquidApiUrl, jupiterApiUrl, jupiterLendApiUrl, frenPaths, loadConfig, relayApiUrl, type FrenConfig, type FrenPaths } from "./config.js";
 import { Fren } from "./engine.js";
@@ -18,7 +21,7 @@ import { RELAY_DEPOSIT_MAX_SOL_LAMPORTS, RELAY_SOLANA_CHAIN_ID, RelayVenue } fro
 import { SolanaToArbitrum } from "./venues/cctp.js";
 import { DeriveVenue } from "./venues/derive.js";
 import { PolymarketVenue } from "./venues/polymarket.js";
-import { polymarketGeoblock, SdkPolymarketData, SdkPolymarketTrader } from "./venues/polymarket-sdk.js";
+import { ClobMarketList, polymarketGeoblock, SdkPolymarketData, SdkPolymarketTrader } from "./venues/polymarket-sdk.js";
 import { AaveUsdc } from "./venues/aave.js";
 import { JupiterLendUsdc, KaminoUsdc } from "./venues/solana-lend.js";
 import { YieldVenue, type YieldProtocolAdapter } from "./venues/yield.js";
@@ -133,7 +136,7 @@ export function buildFren({ config, store, signer, fetchFn = fetch, exec }: Buil
     // live bets only run on mainnet.
     polymarket: new PolymarketVenue({
       store,
-      data: new SdkPolymarketData(),
+      data: new SdkPolymarketData(new ClobMarketList(fetchFn)),
       trader: signer && !isTestnet ? new SdkPolymarketTrader(signer) : null,
       geoblocked: polymarketGeoblock(fetchFn),
       ...(config.restrictedRegion !== undefined ? { ownerRestricted: config.restrictedRegion } : {}),
@@ -177,19 +180,38 @@ export async function startDaemon(paths: FrenPaths = frenPaths()) {
   });
   // The web dashboard runs where the installer put an HTTPS address in front of it (VPS).
   const dashUrl = dashboardUrl();
-  const dashboard = dashUrl ? new Dashboard(fren, { publicUrl: dashUrl }) : null;
+  // The page's chat is the owner's own OpenClaw conversation; email login needs a Resend key.
+  const mailKey = process.env.FREN_RESEND_API_KEY;
+  // On the owner's own computer the dashboard listens on 127.0.0.1 only, plain http (FREN_DASHBOARD=off turns it off).
+  const dashPort = Number(process.env.FREN_DASHBOARD_PORT ?? 7422);
+  const localDash = !dashUrl && process.env.FREN_DASHBOARD !== "off";
+  const dashboard = dashUrl || localDash
+    ? new Dashboard(fren, {
+        publicUrl: dashUrl ?? `http://127.0.0.1:${dashPort}`,
+        local: !dashUrl,
+        chat: new OpenClawChat({ bin: process.env.OPENCLAW_BIN ?? "openclaw" }),
+        mailer: mailKey ? new ResendMailer(mailKey, process.env.FREN_MAIL_FROM ?? "Fren <login@getfren.xyz>") : null,
+        // Keys block: show/copy one key for 30 s after SHOW + a Telegram code. FREN_DASHBOARD_KEYS=off keeps them terminal-only.
+        keys: process.env.FREN_DASHBOARD_KEYS === "off" ? null : keystoreVault(paths.keystore, paths.passphrase),
+      })
+    : null;
   const dashServer = dashboard?.server() ?? null;
   if (dashServer) {
-    const port = Number(process.env.FREN_DASHBOARD_PORT ?? 7422);
-    await new Promise<void>((res) => dashServer.listen(port, "127.0.0.1", res));
-    console.log(`dashboard on http://127.0.0.1:${port}, public at ${dashUrl}`);
+    await new Promise<void>((res, rej) => {
+      dashServer.once("error", rej);
+      dashServer.listen(dashPort, "127.0.0.1", res);
+    }).catch((err: Error) => console.error(`dashboard: ${err.message}`));
+    console.log(`dashboard on http://127.0.0.1:${dashPort}${dashUrl ? `, public at ${dashUrl}` : " (this computer only)"}`);
   }
   const updater = new Updater(paths.home);
   // /fren_update: say how it went as soon as the result lands and the chat line is up.
   const updates = new UpdateReporter(updater, (text) => fren.tellOwner(text));
   const checkUpdates = () => void updates.check().catch(() => {});
   setInterval(checkUpdates, 20_000).unref();
-  const server = createApi(fren, token, budget, { dashboard, updater, onGatewayUp: () => setTimeout(checkUpdates, 5000) });
+  const server = createApi(fren, token, budget, { dashboard, updater, onGatewayUp: () => {
+      setTimeout(checkUpdates, 5000);
+      setTimeout(() => void dashboard?.welcomeLink().catch(() => {}), 8000);
+    } });
   await new Promise<void>((res) => server.listen(config.api.port, config.api.host, res));
 
   const timer = setInterval(() => {

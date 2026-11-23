@@ -268,11 +268,11 @@ export class DeriveVenue implements VenueAdapter {
       const contracts = this.contractsFor(budget, ask, inst, num(t.I));
       if (contracts < num(inst.minimum_amount)) throw new VenueError(`${fmtUsd(budget)} is under Derive's minimum for ${what}.`);
       const cost = this.costOf(contracts, ask, inst, num(t.I));
-      if (cost > store.paperUsdc()) throw new VenueError(`Paper balance is ${fmtUsd(store.paperUsdc())}.`);
+      if (cost > store.paperUsdc()) throw new VenueError(`Practice balance is ${fmtUsd(store.paperUsdc())}.`);
       store.setPaperUsdc(store.paperUsdc() - cost);
       store.setPaperHolding({ ...held, amount: held.amount + contracts, costUsd: held.costUsd + cost });
       store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "derive", symbol: leg.instrument, action: "buy", size: contracts, price: ask, usd: cost, spendUsd: cost, mode: "paper" });
-      return { text: `📝 Paper: Bought ${dec(contracts)} contracts of the ${what} for ${fmtUsd(cost)} (${fmtPrice(ask)} each plus fees)` };
+      return { text: `📝 Practice: Bought ${dec(contracts)} contracts of the ${what} for ${fmtUsd(cost)} (${fmtPrice(ask)} each plus fees)` };
     }
     const bid = num(t.b);
     if (bid <= 0) throw new VenueError(`Nobody is buying ${what} right now.`);
@@ -283,7 +283,7 @@ export class DeriveVenue implements VenueAdapter {
     store.setPaperUsdc(store.paperUsdc() + proceeds);
     store.setPaperHolding({ ...held, amount: held.amount - contracts, costUsd: held.costUsd * (1 - contracts / held.amount) });
     store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "derive", symbol: leg.instrument, action: "sell", size: contracts, price: bid, usd: proceeds, spendUsd: 0, mode: "paper" });
-    return { text: `📝 Paper: Sold ${dec(contracts)} contracts of the ${what} for ${fmtUsd(proceeds)} (${fmtPrice(bid)} each less fees)` };
+    return { text: `📝 Practice: Sold ${dec(contracts)} contracts of the ${what} for ${fmtUsd(proceeds)} (${fmtPrice(bid)} each less fees)` };
   }
 
   /**
@@ -313,8 +313,8 @@ export class DeriveVenue implements VenueAdapter {
       const pnl = payout - h.costUsd;
       lines.push(
         payout > 0
-          ? `🏁 Paper: ${describeOption(name)} settled at ${fmtPrice(settle)}. Paid ${fmtUsd(payout)} on ${dec(h.amount)} contracts (${pnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(pnl))}).`
-          : `🏁 Paper: ${describeOption(name)} expired worthless (${o.asset} settled at ${fmtPrice(settle)}). Lost ${fmtUsd(h.costUsd)}.`,
+          ? `🏁 Practice: ${describeOption(name)} settled at ${fmtPrice(settle)}. Paid ${fmtUsd(payout)} on ${dec(h.amount)} contracts (${pnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(pnl))}).`
+          : `🏁 Practice: ${describeOption(name)} expired worthless (${o.asset} settled at ${fmtPrice(settle)}). Lost ${fmtUsd(h.costUsd)}.`,
       );
     }
     return lines;

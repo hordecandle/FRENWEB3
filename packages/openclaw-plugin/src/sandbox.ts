@@ -103,6 +103,15 @@ export const SANDBOX_BUSY = "The sandbox is running three scripts already and no
 export const SANDBOX_MISSING =
   "The code sandbox isn't set up on this machine. On a Fren server the owner sends /fren_update once and it's installed; tell them that in one line, and answer without running code meanwhile.";
 
+/** On a Mac or Windows there is no sandbox to install: it is a systemd unit with its own user (engine sandbox.ts). */
+export const SANDBOX_NOT_HERE =
+  "Running code isn't possible on this computer: Fren's code sandbox only exists on a Linux server. Tell the owner that in one line, don't suggest /fren_update (it won't add it here), and answer without running code.";
+
+/** What the model hears when there's no sandbox, honest about whether one can be installed here. */
+export function sandboxMissing(platform: string = process.platform): string {
+  return platform === "linux" ? SANDBOX_MISSING : SANDBOX_NOT_HERE;
+}
+
 /** The result as the model reads it: how it ended, then what it printed. */
 export function formatRun(r: RunCodeResult, maxChars = MAX_REPLY_CHARS): string {
   if (r.error && r.exitCode === undefined) return `Sandbox error: ${r.error}`;

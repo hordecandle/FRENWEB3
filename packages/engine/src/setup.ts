@@ -128,6 +128,8 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
   ${running ? "✓ Your Fren is live." : "✓ Your Fren is set up. Start the two commands above, then it's live."}
   ${where}. Try "what's my wallet", "long BTC 5x with $20", "stop everything".
 
+  Your dashboard (balance in dollars, history, a short tour) is ready too: a login link arrives in the chat right after you say gm, or type "fren dashboard" in this terminal.
+
   Paper mode: real prices, pretend money, until you switch to live.
   When you're ready for real money, send it: /limits mode=live
 `);
@@ -294,8 +296,30 @@ export const LOOP_GUARD: [string, string][] = [
   ["tools.exec.notifyOnExit", "false"],
   ["plugins.entries.fren.hooks.allowConversationAccess", "true"],
 ];
+/**
+ * The Telegram menu shows only Fren's commands. OpenClaw's own built-ins and skills (81 entries on
+ * 2026.11.4) crowd it out; with native menu entries off they still work when typed (commands.text),
+ * and Fren's plugin commands keep their handlers. Undo: `openclaw config unset
+ * channels.telegram.commands.native` and `... unset channels.telegram.customCommands`.
+ */
+export const TELEGRAM_MENU = [
+  { command: "ok", description: "Approve what Fren asked about" },
+  { command: "positions", description: "Positions and watched conditions" },
+  { command: "wallet", description: "Wallet addresses and how to top up" },
+  { command: "fren_dashboard", description: "Login link to your dashboard" },
+  { command: "limits", description: "Show or change limits" },
+  { command: "fren_stop", description: "Pause Fren, cancel what waits" },
+  { command: "resume", description: "Turn Fren back on" },
+  { command: "close_all", description: "Close every leveraged position" },
+  { command: "fren_images", description: "Charts on receipts on or off" },
+  { command: "fren_update", description: "Update Fren" },
+];
 export const LOOP_GUARD_CHANNEL: Record<"telegram" | "whatsapp", [string, string][]> = {
-  telegram: [["channels.telegram.groupPolicy", JSON.stringify("disabled")]],
+  telegram: [
+    ["channels.telegram.groupPolicy", JSON.stringify("disabled")],
+    ["channels.telegram.commands.native", "false"],
+    ["channels.telegram.customCommands", JSON.stringify(TELEGRAM_MENU)],
+  ],
   whatsapp: [
     ["channels.whatsapp.groupPolicy", JSON.stringify("disabled")],
     // Fren's own number writing to itself is never a message from the owner.
@@ -307,7 +331,7 @@ export async function applyLoopGuard(deps: Pick<SetupDeps, "run" | "openclawBin"
   for (const [path, value] of LOOP_GUARD) {
     await (LOOP_GUARD_IF_SUPPORTED.has(path) ? setConfigIfSupported : setConfig)(deps, path, value);
   }
-  for (const ch of channels) for (const [path, value] of LOOP_GUARD_CHANNEL[ch]) await setConfig(deps, path, value);
+  for (const ch of channels) for (const [path, value] of LOOP_GUARD_CHANNEL[ch]) await (LOOP_GUARD_IF_SUPPORTED.has(path) ? setConfigIfSupported : setConfig)(deps, path, value);
 }
 
 /**
@@ -464,7 +488,8 @@ Make your bot with @BotFather (takes a minute):
 
   const owner = await findTelegramOwner(deps, token, bot);
   io.say("Linking your bot to OpenClaw, about a minute, keep this window open…");
-  const line = await configureTelegram(deps, token, owner.id);
+  const line = await configureTelegram(deps, token, owner.id, owner.lang);
+  rememberOwnerLang(deps, owner.lang);
   io.say(`✓ Telegram linked: only ${owner.name} can use @${bot}`);
   return line;
 }
@@ -484,7 +509,8 @@ Waiting for you to press Create (up to 15 minutes)…`);
       const bot = await telegramBot(deps.fetchFn, r.token);
       if (!bot) throw new Error("Telegram didn't accept the new bot's token");
       io.say(`Got it: @${bot}. Linking it to OpenClaw, about a minute, keep this window open…`);
-      const line = await configureTelegram(deps, r.token, r.owner.id);
+      const line = await configureTelegram(deps, r.token, r.owner.id, r.owner.lang);
+      rememberOwnerLang(deps, r.owner.lang);
       io.say(`✓ Telegram linked: only ${r.owner.name} can use @${bot}. Open it and press Start.`);
       return line;
     }
@@ -494,14 +520,14 @@ Waiting for you to press Create (up to 15 minutes)…`);
 }
 
 /** You are the only one who can talk to the bot, and the owner for /ok, /stop and /limits. */
-export async function configureTelegram(deps: Pick<SetupDeps, "run" | "openclawBin" | "fetchFn">, token: string, ownerId: string) {
+export async function configureTelegram(deps: Pick<SetupDeps, "run" | "openclawBin" | "fetchFn">, token: string, ownerId: string, lang?: string) {
   await setConfig(deps, "channels.telegram.allowFrom", JSON.stringify([ownerId]));
   await setConfig(deps, "channels.telegram.dmPolicy", "allowlist");
   await setConfig(deps, "commands.ownerAllowFrom", JSON.stringify([`telegram:${ownerId}`]));
   await setConfig(deps, "agents.defaults.typingMode", JSON.stringify("instant")); // "typing…" right away, not after the model's first token
   for (const [path, value] of LOOP_GUARD_CHANNEL.telegram) await setConfig(deps, path, value);
   await mustRun(deps, deps.openclawBin, ["channels", "add", "--channel", "telegram", "--token", token], "add the Telegram channel");
-  await telegram(deps.fetchFn, token, "sendMessage", { chat_id: ownerId, text: "✅ Fren found you. Setup is finishing; I'll be ready in a minute." });
+  await telegram(deps.fetchFn, token, "sendMessage", { chat_id: ownerId, text: FOUND_YOU[langOf(lang)] });
   return { telegram: { botToken: token, ownerChatId: ownerId } };
 }
 
@@ -513,15 +539,41 @@ export async function telegramBot(fetchFn: Fetch, token: string): Promise<string
 /** One look for a private message to the bot (long-polls up to `waitS`). */
 export async function pollTelegramOwner(fetchFn: Fetch, token: string, offset: number, waitS = 20) {
   const r = await telegram<TgUpdate[]>(fetchFn, token, "getUpdates", { offset, timeout: waitS, allowed_updates: ["message"] });
-  if (!r.ok) return { busy: r.error_code === 409, offset, candidates: [] as { id: string; name: string }[] };
-  const candidates: { id: string; name: string }[] = [];
+  if (!r.ok) return { busy: r.error_code === 409, offset, candidates: [] as TgCandidate[] };
+  const candidates: TgCandidate[] = [];
   for (const u of r.result) {
     offset = u.update_id + 1;
     const from = u.message?.from;
     if (!from || from.is_bot || u.message?.chat.type !== "private") continue;
-    candidates.push({ id: String(from.id), name: tgName(from) });
+    candidates.push({ id: String(from.id), name: tgName(from), ...(from.language_code ? { lang: from.language_code } : {}) });
   }
   return { busy: false, offset, candidates };
+}
+
+export interface TgCandidate {
+  id: string;
+  name: string;
+  /** The language of their Telegram app (language_code), e.g. "ru". */
+  lang?: string;
+}
+
+/**
+ * The owner's language from their Telegram app, so the very first things Fren writes by
+ * itself (the dashboard link, /status) aren't English for a Russian owner. Only until they
+ * write to Fren: the plugin learns it from their words then, and this never overwrites that.
+ */
+const langOf = (code: string | undefined): "en" | "ru" | "uk" => (/^uk/i.test(code ?? "") ? "uk" : /^(?:ru|be)/i.test(code ?? "") ? "ru" : "en");
+const FOUND_YOU = {
+  en: "✅ Fren found you. Setup is finishing; I'll be ready in a minute.",
+  ru: "✅ Fren тебя нашёл. Настройка заканчивается, через минуту буду готов.",
+  uk: "✅ Fren тебе знайшов. Налаштування завершується, за хвилину буду готовий.",
+};
+
+export function rememberOwnerLang(deps: Pick<SetupDeps, "exists" | "writeFile" | "paths">, code: string | undefined): void {
+  if (!code) return;
+  const file = join(deps.paths.home, "owner-lang");
+  if (deps.exists(file)) return;
+  deps.writeFile(file, langOf(code));
 }
 
 function tgName(from: { first_name: string; last_name?: string; username?: string }): string {
@@ -538,7 +590,7 @@ export async function ackTelegram(fetchFn: Fetch, token: string, offset: number)
  * has to look it up. Falls back to asking when OpenClaw is already reading
  * this bot (Telegram allows one reader) or nothing arrives.
  */
-export async function findTelegramOwner(deps: Pick<SetupDeps, "io" | "fetchFn" | "sleep">, token: string, bot: string): Promise<{ id: string; name: string }> {
+export async function findTelegramOwner(deps: Pick<SetupDeps, "io" | "fetchFn" | "sleep">, token: string, bot: string): Promise<TgCandidate> {
   const { io } = deps;
   io.say(`Now open your bot and press Start, so Fren knows it's you: https://t.me/${bot}`);
   let offset = 0;
@@ -571,7 +623,7 @@ export async function findTelegramOwner(deps: Pick<SetupDeps, "io" | "fetchFn" |
 
 interface TgUpdate {
   update_id: number;
-  message?: { chat: { type: string }; from?: { id: number; is_bot: boolean; first_name: string; last_name?: string; username?: string } };
+  message?: { chat: { type: string }; from?: { id: number; is_bot: boolean; first_name: string; last_name?: string; username?: string; language_code?: string } };
 }
 
 type TgResult<T> = { ok: true; result: T } | { ok: false; error_code: number; description?: string };
@@ -643,7 +695,7 @@ async function setConfig(deps: Pick<SetupDeps, "run" | "openclawBin">, path: str
  * already where we want it. OpenClaw 2026.11.5 dropped agents.defaults.heartbeat
  * (and refuses the key), so on it there is no heartbeat to turn off.
  */
-export const LOOP_GUARD_IF_SUPPORTED = new Set(["agents.defaults.heartbeat.every"]);
+export const LOOP_GUARD_IF_SUPPORTED = new Set(["agents.defaults.heartbeat.every", "channels.telegram.commands.native", "channels.telegram.customCommands"]);
 
 async function setConfigIfSupported(deps: Pick<SetupDeps, "run" | "openclawBin">, path: string, value: string): Promise<void> {
   const r = await deps.run(deps.openclawBin, ["config", "set", path, value], {});

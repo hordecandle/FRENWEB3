@@ -1,14 +1,13 @@
 import { createSigner, generateKeys } from "@fren/signer";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createApi } from "./api.js";
-import type { MemoryNotifier } from "./notify.js";
 import { buildTestFren } from "./testing.js";
 
 function setup(opts: { privateLine?: boolean; live?: boolean } = {}) {
   return buildTestFren({ ...opts, signer: opts.live ? createSigner(generateKeys()) : null });
 }
 
-const codeFrom = (notifier: MemoryNotifier) => /\/ok ([A-Z0-9]{6})/.exec(notifier.sent.at(-1) ?? "")?.[1] ?? "";
+const codeFrom = (t: { store: { livePending(): { code: string }[] } }) => t.store.livePending().at(-1)?.code ?? "";
 
 const goldLong = (margin: number, leverage: number, extra: Record<string, unknown> = {}) => ({
   request: `long gold ${leverage}x with $${margin}`,
@@ -28,22 +27,22 @@ describe("paper trading end to end", () => {
   it("runs a small trade straight away", async () => {
     const res = await t.fren.submit(goldLong(50, 10));
     expect(res.verdict).toBe("executed");
-    expect(res.text).toContain("Paper mode");
-    expect(res.text).toMatch(/Longed 0\.125 xyz:GOLD at \$4,000/);
+    expect(res.text).toContain("Practice mode");
+    expect(res.text).toMatch(/Bet on GOLD going up: 0\.125 GOLD at \$4,000/);
     expect(t.store.paperUsdc()).toBeCloseTo(9_950);
   });
 
   it("asks for a private code above the auto-approve level, and the code never reaches the model", async () => {
     const res = await t.fren.submit(goldLong(300, 20, { stopLossPct: 50 }));
     expect(res.verdict).toBe("needs_code");
-    const code = codeFrom(t.notifier);
+    const code = codeFrom(t);
     expect(code).toHaveLength(6);
     expect(res.text).not.toContain(code);
     expect(res.ownerCode).toBeUndefined();
     expect(t.store.paperPositions()).toHaveLength(0);
 
     const out = await t.fren.approve(code);
-    expect(out).toMatch(/Longed .* xyz:GOLD/);
+    expect(out).toMatch(/Bet on GOLD going up/);
     expect(out).toMatch(/stop \$3,900/);
     expect(t.store.paperPositions()[0]).toMatchObject({ symbol: "xyz:GOLD", side: "long", leverage: 20 });
     expect(await t.fren.approve(code)).toMatch(/wrong or expired/);
@@ -58,10 +57,10 @@ describe("paper trading end to end", () => {
 
   it("refuses leverage the market doesn't offer and explains why", async () => {
     await t.fren.changeLimits("maxLeverage=100");
-    await t.fren.approve(codeFrom(t.notifier));
+    await t.fren.approve(codeFrom(t));
     const res = await t.fren.submit(goldLong(50, 100));
     expect(res.verdict).toBe("rejected");
-    expect(res.text).toMatch(/xyz:GOLD allows at most 20x/);
+    expect(res.text).toMatch(/GOLD allows at most a 20× boost/);
   });
 
   it("suggests close matches for an unknown market", async () => {
@@ -80,7 +79,7 @@ describe("paper trading end to end", () => {
         },
       ],
     });
-    expect(res.text).toMatch(/Watching: Short SOL/);
+    expect(res.text).toMatch(/Watching: Bet .* that SOL goes down/);
     await t.fren.tick();
     expect(t.store.paperPositions()).toHaveLength(0);
     expect(await t.fren.status()).toMatch(/⏳ SOL funding > 0.02%\/h \(now 0.0100%\/h\)/);
@@ -88,7 +87,7 @@ describe("paper trading end to end", () => {
     t.fake.setFunding("SOL", 0.03);
     await t.fren.tick();
     expect(t.store.paperPositions()[0]).toMatchObject({ symbol: "SOL", side: "short" });
-    expect(t.notifier.sent.at(-1)).toMatch(/Triggered[\s\S]*✅ SOL funding[\s\S]*Shorted/);
+    expect(t.notifier.sent.at(-1)).toMatch(/Triggered[\s\S]*✅ SOL funding[\s\S]*Bet on SOL going down/);
     await t.fren.tick();
     expect(t.store.paperPositions()[0]!.size).toBeCloseTo(1.25);
   });
@@ -98,7 +97,7 @@ describe("paper trading end to end", () => {
     t.fake.setMid("xyz:GOLD", 3_900);
     await t.fren.tick();
     expect(t.store.paperPositions()).toHaveLength(0);
-    expect(t.notifier.sent.at(-1)).toMatch(/Stop hit, closed long xyz:GOLD at \$3,900, PnL -\$12.50/);
+    expect(t.notifier.sent.at(-1)).toMatch(/Stop hit, closed the GOLD up bet at \$3,900, result -\$12.50/);
   });
 
   it("kill switch pauses and leaves positions open; /close_all closes them; resume needs the owner's code", async () => {
@@ -109,12 +108,12 @@ describe("paper trading end to end", () => {
     expect(stopped).not.toMatch(/Closed long/);
     expect(t.store.paperPositions()).toHaveLength(1);
     const closed = await t.fren.requestCloseAll();
-    expect(closed.text).toMatch(/Closed long xyz:GOLD/);
+    expect(closed.text).toMatch(/Closed the GOLD up bet/);
     expect(t.store.paperPositions()).toHaveLength(0);
     expect((await t.fren.submit(goldLong(10, 2))).verdict).toBe("rejected");
 
     await t.fren.requestResume();
-    expect(await t.fren.approve(codeFrom(t.notifier))).toMatch(/back on/);
+    expect(await t.fren.approve(codeFrom(t))).toMatch(/back on/);
     expect((await t.fren.submit(goldLong(10, 2))).verdict).toBe("executed");
   });
 
@@ -123,14 +122,14 @@ describe("paper trading end to end", () => {
     const loosen = await t.fren.changeLimits("maxTradeUsd=5000");
     expect(loosen.codeSentPrivately).toBe(true);
     expect(t.fren.limits().maxTradeUsd).toBe(50);
-    await t.fren.approve(codeFrom(t.notifier));
+    await t.fren.approve(codeFrom(t));
     expect(t.fren.limits().maxTradeUsd).toBe(5000);
   });
 
   it("a loosen-limits code from before /stop does not switch Fren back on (H3)", async () => {
     const loosen = await t.fren.changeLimits("maxTradeUsd=5000");
     expect(loosen.codeSentPrivately).toBe(true);
-    const oldCode = codeFrom(t.notifier);
+    const oldCode = codeFrom(t);
     await t.fren.stop();
     expect(t.fren.limits().paused).toBe(true);
     expect(await t.fren.approve(oldCode)).toMatch(/wrong or expired/);
@@ -139,13 +138,13 @@ describe("paper trading end to end", () => {
     expect((await t.fren.submit(goldLong(10, 2))).verdict).toBe("rejected");
     // Back on only with /resume and its own code.
     await t.fren.requestResume();
-    await t.fren.approve(codeFrom(t.notifier));
+    await t.fren.approve(codeFrom(t));
     expect(t.fren.limits().paused).toBe(false);
   });
 
   it("a loosen code applies only its own field: an earlier tightening elsewhere survives (H3)", async () => {
     await t.fren.changeLimits("maxTradeUsd=5000");
-    const code = codeFrom(t.notifier);
+    const code = codeFrom(t);
     await t.fren.changeLimits("maxLeverage=2");
     expect(t.fren.limits().maxLeverage).toBe(2);
     await t.fren.approve(code);
@@ -155,7 +154,7 @@ describe("paper trading end to end", () => {
 
   it("a code that was already pending cannot un-stop even if it slipped past /stop", async () => {
     await t.fren.changeLimits("maxTradeUsd=5000");
-    const code = codeFrom(t.notifier);
+    const code = codeFrom(t);
     await t.fren.stop();
     // Simulate an old build's code being re-issued with a full snapshot incl. paused=false.
     t.store.putPending({ code: "OLDONE", kind: "limits", payload: JSON.stringify({ ...t.fren.limits(), paused: false }), expiresAt: new Date(Date.now() + 60_000).toISOString() });
@@ -166,7 +165,7 @@ describe("paper trading end to end", () => {
 
   it("five wrong /ok codes in a row drop every waiting code and warn the owner (C1)", async () => {
     await t.fren.changeLimits("maxTradeUsd=5000");
-    const real = codeFrom(t.notifier);
+    const real = codeFrom(t);
     for (let i = 0; i < 4; i++) expect(await t.fren.approve("ZZZZZZ")).toMatch(/wrong or expired/);
     expect(await t.fren.approve("ZZZZZZ")).toMatch(/Too many wrong codes/);
     expect(t.notifier.sent.at(-1)).toMatch(/wrong \/ok codes in a row/);
@@ -178,10 +177,10 @@ describe("paper trading end to end", () => {
   it("a right code resets the wrong-code count", async () => {
     for (let i = 0; i < 4; i++) await t.fren.approve("ZZZZZZ");
     await t.fren.changeLimits("maxTradeUsd=5000");
-    await t.fren.approve(codeFrom(t.notifier));
+    await t.fren.approve(codeFrom(t));
     expect(t.fren.limits().maxTradeUsd).toBe(5000);
     await t.fren.changeLimits("maxTradeUsd=6000");
-    const code = codeFrom(t.notifier);
+    const code = codeFrom(t);
     for (let i = 0; i < 4; i++) await t.fren.approve("ZZZZZZ");
     await t.fren.approve(code);
     expect(t.fren.limits().maxTradeUsd).toBe(6000);

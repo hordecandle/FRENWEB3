@@ -80,17 +80,17 @@ describe("ETH hits $4,000 by a date: option vs Polymarket", () => {
     expect(res.text).toMatch(/Buy \$600 of the ETH \$4,000 call expiring .* on Derive/);
     expect(res.text).toMatch(/break-even \$4,120/);
     const out = await t.fren.approve(codeFrom(t.notifier.sent));
-    expect(out).toMatch(/📝 Paper: Bought 4\.95 contracts of the ETH \$4,000 call expiring .* for \$600 \(\$120 each plus fees\)/);
+    expect(out).toMatch(/📝 Practice: Bought 4\.95 contracts of the ETH \$4,000 call expiring .* for \$600 \(\$120 each plus fees\)/);
     expect(await t.fren.status()).toMatch(/4\.95 contracts of the ETH \$4,000 call expiring .* worth \$569/);
 
     const sell = await t.fren.submit({ request: "sell half", steps: [{ leg: { kind: "option", venue: "derive", side: "sell", instrument: t.call, amount: { type: "fraction", fraction: 0.5 } } }] });
-    expect(sell.text).toMatch(/Paper: Sold 2\.47 contracts of the ETH \$4,000 call .* for \$\d+/);
+    expect(sell.text).toMatch(/Practice: Sold 2\.47 contracts of the ETH \$4,000 call .* for \$\d+/);
 
     const before = t.store.paperUsdc();
     t.fake.settleOption(t.call, 4_500);
     const expiry = Date.now() + 55 * DAY;
     const lines = await t.derive.settlePaper(new Date(expiry + DAY));
-    expect(lines[0]).toMatch(/🏁 Paper: ETH \$4,000 call .* settled at \$4,500\. Paid \$1,240 on 2\.48 contracts/);
+    expect(lines[0]).toMatch(/🏁 Practice: ETH \$4,000 call .* settled at \$4,500\. Paid \$1,240 on 2\.48 contracts/);
     expect(t.store.paperUsdc() - before).toBeCloseTo(1_240, 6);
     expect(await t.fren.status()).not.toMatch(/call expiring/);
   });
@@ -102,11 +102,11 @@ describe("ETH hits $4,000 by a date: option vs Polymarket", () => {
     expect(res.text).toMatch(/Bet \$300 on "Yes" for "Will Ethereum reach \$4,000 by December 31\?" on Polymarket at up to 33¢ a share/);
     const out = await t.fren.approve(codeFrom(t.notifier.sent));
     expect(await t.fren.status()).toMatch(/1000 shares of Yes · Will Ethereum reach \$4,000 by December 31\? worth \$290/);
-    expect(out).toMatch(/📝 Paper: Bought 1,000 "Yes" shares in "Will Ethereum reach \$4,000 by December 31\?" for \$300 at 30¢ each/);
+    expect(out).toMatch(/📝 Practice: Bought 1,000 "Yes" shares in "Will Ethereum reach \$4,000 by December 31\?" for \$300 at 30¢ each/);
     const before = t.store.paperUsdc();
     t.poly.resolve("eth-4k", "Yes");
     await t.fren.tick();
-    expect(t.notifier.sent.at(-1)).toMatch(/🏁 Paper: "Will Ethereum reach \$4,000 by December 31\?" resolved "Yes"\. Your 1,000 shares paid \$1,000/);
+    expect(t.notifier.sent.at(-1)).toMatch(/🏁 Practice: "Will Ethereum reach \$4,000 by December 31\?" resolved "Yes"\. Your 1,000 shares paid \$1,000/);
     expect(t.store.paperUsdc() - before).toBeCloseTo(1_000, 6);
     expect(await t.fren.status()).not.toMatch(/shares of/);
   });
@@ -220,7 +220,7 @@ describe("live bets on Polymarket", () => {
 describe("funding Derive and Polymarket", () => {
   it("does nothing in paper mode", async () => {
     const t = betWorld({ signer: recordingSigner().signer });
-    expect((await t.fren.requestFunding("derive", 500)).text).toMatch(/Paper mode trades Derive from your paper balance/);
+    expect((await t.fren.requestFunding("derive", 500)).text).toMatch(/Practice mode trades Derive from your practice balance/);
   });
 
   it("bridges Arbitrum USDC to Polymarket's deposit wallet, only after the owner's code", async () => {

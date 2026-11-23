@@ -31,7 +31,45 @@ export function qty(n: number): string {
 }
 
 function pctMove(p: number): string {
-  return `${p >= 1 ? p.toFixed(1) : p.toPrecision(2)}%`;
+  return `${p >= 1 ? Number(p.toFixed(1)) : Number(p.toPrecision(2))}%`;
+}
+
+/** "xyz:ANT" reads as ANT: the market prefix is plumbing. */
+export function marketName(m: string): string {
+  return m.includes(":") ? m.slice(m.indexOf(":") + 1) : m;
+}
+
+/** "$20", "$7.50": a rough dollar amount, said the way people say it. */
+function about(n: number): string {
+  return n >= 10 ? `$${Math.round(n).toLocaleString("en-US")}` : usd(n);
+}
+
+/**
+ * A long or short in words a newcomer reads the same way: a bet that the
+ * price goes up or down, a boost instead of leverage, and what the stop and
+ * target mean in price and in dollars. No "margin", "position" or "ROE".
+ */
+export function perpParts(leg: Extract<Leg, { kind: "perp_open" }>, resolved?: Pick<ResolvedStep, "symbol">): { head: string; exits: string[] } {
+  const where = venueName[leg.venue] ?? leg.venue;
+  const market = marketName(resolved?.symbol ?? leg.market);
+  const margin = leg.sizing.type === "margin" ? leg.sizing.usd : leg.sizing.usd / leg.leverage;
+  const up = leg.side === "long";
+  const head = `Bet ${usd(margin)} that ${market} goes ${up ? "up" : "down"}, ${leg.leverage}× boost on ${where}`;
+  const exits: string[] = [];
+  if (leg.stopLossPct !== undefined) {
+    exits.push(`Stop: if ${market} ${up ? "falls" : "rises"} ~${pctMove(leg.stopLossPct / leg.leverage)}, Fren closes it and you lose about ${about((margin * leg.stopLossPct) / 100)} (-${leg.stopLossPct}% of what you put in)`);
+  } else if (leg.stopLossUsd !== undefined) {
+    exits.push(`Stop: Fren closes it once you're down about ${about(leg.stopLossUsd)}`);
+  }
+  if (leg.stopPrice !== undefined) exits.push(`Stop: if ${market} reaches ${price(leg.stopPrice)}, Fren closes it`);
+  if (leg.takeProfitPct !== undefined) {
+    exits.push(`Take profit: if ${market} ${up ? "rises" : "falls"} ~${pctMove(leg.takeProfitPct / leg.leverage)}, Fren closes it and you win about ${about((margin * leg.takeProfitPct) / 100)}`);
+  } else if (leg.takeProfitUsd !== undefined) {
+    exits.push(`Take profit: Fren closes it once you're up about ${about(leg.takeProfitUsd)}`);
+  }
+  if (leg.takeProfitPrice !== undefined) exits.push(`Take profit: if ${market} reaches ${price(leg.takeProfitPrice)}, Fren closes it`);
+  if (exits.length === 0) exits.push("No stop: nothing closes it for you");
+  return { head, exits };
 }
 
 const venueName: Record<string, string> = { hyperliquid: "Hyperliquid", jupiter: "Jupiter", relay: "Relay", derive: "Derive", polymarket: "Polymarket", yield: "yield" };
@@ -92,24 +130,12 @@ export function describeLeg(leg: Leg, resolved?: Pick<ResolvedStep, "symbol" | "
   const where = venueName[leg.venue] ?? leg.venue;
   switch (leg.kind) {
     case "perp_open": {
-      const margin = leg.sizing.type === "margin" ? leg.sizing.usd : leg.sizing.usd / leg.leverage;
-      const notional = resolved?.notionalUsd ?? margin * leg.leverage;
-      const exits: string[] = [];
-      if (leg.stopLossPct !== undefined) {
-        exits.push(`stop at -${leg.stopLossPct}% of margin, -${usd((margin * leg.stopLossPct) / 100)} (${pctMove(leg.stopLossPct / leg.leverage)} price move)`);
-      }
-      if (leg.stopPrice !== undefined) exits.push(`stop at ${price(leg.stopPrice)}`);
-      if (leg.takeProfitPct !== undefined) {
-        exits.push(`take profit at +${leg.takeProfitPct}%, +${usd((margin * leg.takeProfitPct) / 100)} (${pctMove(leg.takeProfitPct / leg.leverage)} price move)`);
-      }
-      if (leg.takeProfitPrice !== undefined) exits.push(`take profit at ${price(leg.takeProfitPrice)}`);
-      const tail = exits.length ? `, ${exits.join(", ")}` : "";
-      const market = resolved?.symbol ?? leg.market;
-      return `${leg.side === "long" ? "Long" : "Short"} ${market} on ${where}: ${usd(margin)} margin at ${leg.leverage}x (${usd(notional)} position)${tail}`;
+      const p = perpParts(leg, resolved);
+      return [p.head, ...p.exits].join(". ");
     }
     case "perp_close": {
       const share = leg.fraction >= 1 ? "Close" : `Close ${Math.round(leg.fraction * 100)}% of`;
-      return `${share} your ${resolved?.symbol ?? leg.market} position on ${where}`;
+      return `${share} your ${resolved?.symbol ?? leg.market} bet on ${where}`;
     }
     case "swap": {
       const token = shortToken(resolved?.symbol ?? leg.token);
@@ -180,9 +206,13 @@ export function describeConditionStatus(s: ConditionStatus): string {
 }
 
 export function describeStep(step: PlanStep, resolved?: ResolvedStep): string {
-  const leg = describeLeg(step.leg, resolved);
-  if (step.when.length === 0) return leg;
-  return `${leg}, when ${step.when.map(describeCondition).join(" and ")}`;
+  const when = step.when.length ? `, when ${step.when.map(describeCondition).join(" and ")}` : "";
+  if (step.leg.kind === "perp_open") {
+    // The condition belongs to the bet, before the stop and target sentences.
+    const p = perpParts(step.leg, resolved);
+    return [p.head + when, ...p.exits].join(". ");
+  }
+  return `${describeLeg(step.leg, resolved)}${when}`;
 }
 
 export function describeDecision(decision: PolicyDecision, resolved: ResolvedStep[]): string {
@@ -198,4 +228,47 @@ export function describeDecision(decision: PolicyDecision, resolved: ResolvedSte
   }
   for (const reason of decision.reasons) lines.push(`❌ ${reason}`);
   return lines.join("\n");
+}
+
+/**
+ * The most a plan can lose, in dollars, before the owner says yes. Every trade
+ * that puts money in shows it, in words anyone reads the same way.
+ */
+export interface MaxLoss {
+  /** Everything the plan puts in: the worst case. */
+  usd: number;
+  /** About where the stop cuts the loss, when every leg that puts money in has one. */
+  withStopUsd: number | null;
+  /** A long or short on Hyperliquid: other money kept there backs it too. */
+  borrowed: boolean;
+}
+
+export function maxLoss(resolved: ResolvedStep[]): MaxLoss | null {
+  let total = 0;
+  let stop = 0;
+  let allStopped = true;
+  let borrowed = false;
+  for (const r of resolved) {
+    if (!(r.spendUsd > 0)) continue;
+    total += r.spendUsd;
+    const leg = r.step.leg;
+    if (leg.kind === "perp_open") {
+      borrowed = true;
+      if (leg.stopLossUsd !== undefined) stop += Math.min(leg.stopLossUsd, r.spendUsd);
+      else if (leg.stopLossPct !== undefined) stop += (r.spendUsd * Math.min(leg.stopLossPct, 100)) / 100;
+      else allStopped = false;
+    } else allStopped = false;
+  }
+  if (!(total > 0)) return null;
+  return { usd: total, withStopUsd: allStopped ? stop : null, borrowed };
+}
+
+/** "The most you can lose: $50 ..." or null when the plan puts no money in. */
+export function describeMaxLoss(resolved: ResolvedStep[]): string | null {
+  const m = maxLoss(resolved);
+  if (!m) return null;
+  let line = `🧯 The most you can lose: ${usd(m.usd)}, the money this puts in.`;
+  if (m.withStopUsd !== null) line += ` Your stop should cut it at about ${usd(m.withStopUsd)}.`;
+  if (m.borrowed) line += " If the price crashes, other money you keep on Hyperliquid can be used to keep it open.";
+  return line;
 }

@@ -38,16 +38,26 @@ function toMarket(m: Market): PolyMarket {
 export class SdkPolymarketData implements PolymarketData {
   private readonly client: PublicClient = createPublicClient();
 
+  /** `fallback` answers search and market lookups when the SDK's host can't be reached. */
+  constructor(private readonly fallback?: Pick<PolymarketData, "search" | "market">) {}
+
   async search(query: string): Promise<PolyMarket[]> {
-    const page = await this.client.search({ q: query, eventsStatus: "active", pageSize: 10 }).firstPage();
-    return page.items.events.flatMap((e) => e.markets).map(toMarket);
+    try {
+      const page = await this.client.search({ q: query, eventsStatus: "active", pageSize: 10 }).firstPage();
+      return page.items.events.flatMap((e) => e.markets).map(toMarket);
+    } catch (e) {
+      if (!this.fallback) throw e;
+      return this.fallback.search(query);
+    }
   }
 
   async market(slug: string): Promise<PolyMarket | null> {
     try {
       return toMarket(await this.client.fetchMarket({ slug }));
     } catch {
-      return null;
+      // The fallback reaching the market list and not finding the slug means "no such market";
+      // the fallback not reaching it at all is a dead network, and says so instead.
+      return this.fallback ? this.fallback.market(slug) : null;
     }
   }
 
@@ -145,5 +155,121 @@ export function polymarketGeoblock(fetchFn: Fetch): () => Promise<GeoCheck> {
       ...(typeof body.country === "string" ? { country: body.country } : {}),
       ...(typeof body.region === "string" ? { region: body.region } : {}),
     };
+  };
+}
+
+/** One market as Polymarket's order-book host (clob.polymarket.com) lists it. */
+interface ClobMarket {
+  question?: string;
+  market_slug?: string;
+  condition_id?: string;
+  description?: string;
+  end_date_iso?: string | null;
+  active?: boolean;
+  closed?: boolean;
+  archived?: boolean;
+  accepting_orders?: boolean;
+  enable_order_book?: boolean;
+  tokens?: { token_id?: string; outcome?: string; price?: number | null; winner?: boolean }[];
+}
+
+const SEARCH_STOP = new Set(["the", "will", "and", "for", "market", "markets", "polymarket", "price", "bet", "bets", "yes", "with", "from", "after", "before", "what", "about"]);
+
+/**
+ * Market search without the SDK's search host (gamma-api.polymarket.com).
+ * Some home ISPs cut that host at TLS (22.11, Timofey's Mac in UA:
+ * SSL_ERROR_SYSCALL) while the order-book host answers, and the order book is
+ * where quotes come from anyway. Lists every open market (~8k, a few pages),
+ * keeps it for `ttlMs`, and matches the words of the query in the question.
+ */
+export class ClobMarketList implements Pick<PolymarketData, "search" | "market"> {
+  private cache: { at: number; markets: PolyMarket[] } | null = null;
+  private loading: Promise<PolyMarket[]> | null = null;
+
+  constructor(
+    private readonly fetchFn: Fetch,
+    private readonly o: { base?: string; ttlMs?: number; maxPages?: number; now?: () => number } = {},
+  ) {}
+
+  private now(): number {
+    return this.o.now ? this.o.now() : Date.now();
+  }
+
+  private async all(): Promise<PolyMarket[]> {
+    const ttl = this.o.ttlMs ?? 10 * 60_000;
+    if (this.cache && this.now() - this.cache.at < ttl) return this.cache.markets;
+    if (!this.loading) {
+      this.loading = this.load()
+        .then((markets) => {
+          this.cache = { at: this.now(), markets };
+          return markets;
+        })
+        .finally(() => {
+          this.loading = null;
+        });
+    }
+    return this.loading;
+  }
+
+  private async load(): Promise<PolyMarket[]> {
+    const base = this.o.base ?? "https://clob.polymarket.com";
+    const out: PolyMarket[] = [];
+    let cursor = "";
+    for (let page = 0; page < (this.o.maxPages ?? 20); page++) {
+      const url = `${base}/sampling-markets${cursor ? `?next_cursor=${encodeURIComponent(cursor)}` : ""}`;
+      // Cloudflare in front of the host refuses requests without a user agent.
+      const res = await this.fetchFn(url, { headers: { accept: "application/json", "user-agent": "fren" } });
+      if (!res.ok) throw new VenueError(`Polymarket's market list answered ${res.status}.`);
+      const body = (await res.json()) as { data?: ClobMarket[]; next_cursor?: string };
+      for (const m of body.data ?? []) {
+        const pm = fromClob(m);
+        if (pm) out.push(pm);
+      }
+      cursor = body.next_cursor ?? "";
+      if (!cursor || cursor === "LTE=") break;
+    }
+    return out;
+  }
+
+  async search(query: string): Promise<PolyMarket[]> {
+    const words = query
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}$]+/u)
+      .filter((w) => w.length > 2 && !SEARCH_STOP.has(w));
+    if (!words.length) return [];
+    const need = Math.max(1, Math.ceil(words.length / 2));
+    // Whole words: "fed" must not match "Federal".
+    const res = words.map((w) => new RegExp(`(?<![\\p{L}\\p{N}])${w.replace(/[$]/g, "\\$&")}(?!\\p{L})`, "iu"));
+    const scored = (await this.all())
+      .filter((m) => !m.closed && m.acceptingOrders)
+      .map((m) => ({ m, h: res.filter((r) => r.test(m.question)).length }))
+      .filter((x) => x.h >= need);
+    const end = (m: PolyMarket) => (m.endDate ? new Date(m.endDate).getTime() : Infinity);
+    scored.sort((a, b) => b.h - a.h || end(a.m) - end(b.m));
+    return scored.slice(0, 20).map((x) => x.m);
+  }
+
+  async market(slug: string): Promise<PolyMarket | null> {
+    const s = slug.trim();
+    return (await this.all()).find((m) => m.slug === s) ?? null;
+  }
+}
+
+function fromClob(m: ClobMarket): PolyMarket | null {
+  const slug = m.market_slug || m.condition_id;
+  if (!slug || !m.question) return null;
+  const outcomes = (m.tokens ?? [])
+    .filter((t) => t.token_id && t.outcome)
+    .map((t) => ({ label: t.outcome!, assetId: String(t.token_id), price: typeof t.price === "number" ? t.price : null }));
+  const closed = Boolean(m.closed) || Boolean(m.archived);
+  return {
+    slug,
+    question: m.question,
+    endDate: m.end_date_iso ?? null,
+    closed,
+    acceptingOrders: m.accepting_orders !== false && m.enable_order_book !== false && m.active !== false,
+    resolved: closed && (m.tokens ?? []).some((t) => t.winner === true),
+    outcomes,
+    ...(m.description ? { rules: m.description.slice(0, 400) } : {}),
   };
 }

@@ -43,10 +43,12 @@ export async function quoteBet(venues: { derive: DeriveVenue; polymarket: Polyma
   if (Number.isNaN(by.getTime())) throw new Error(`"${q.by}" isn't a date.`);
   if (by.getTime() < Date.now()) throw new Error("That date has passed.");
 
-  const [optionOrWhy, prediction] = await Promise.all([
+  const [optionOrWhy, predictionOrDown] = await Promise.all([
     venues.derive.bestOptionOrWhy({ asset, target: q.target, direction: q.direction, by, budgetUsd: q.budgetUsd }).catch(() => ({ why: "Derive didn't answer." })),
-    venues.polymarket.bestMarket({ assetNames: NAMES[asset] ?? [asset], target: q.target, direction: q.direction, by, budgetUsd: q.budgetUsd }).catch(() => null),
+    venues.polymarket.bestMarket({ assetNames: NAMES[asset] ?? [asset], target: q.target, direction: q.direction, by, budgetUsd: q.budgetUsd }).catch(() => "down" as const),
   ]);
+  const polyDown = predictionOrDown === "down";
+  const prediction = polyDown ? null : predictionOrDown;
   const optionMiss = "why" in optionOrWhy ? optionOrWhy.why : null;
   const option = "why" in optionOrWhy ? null : optionOrWhy;
 
@@ -82,7 +84,8 @@ export async function quoteBet(venues: { derive: DeriveVenue; polymarket: Polyma
         },
       ],
     };
-  } else lines.push(`2) Polymarket: no open market on ${asset} ${q.direction === "above" ? "reaching" : "falling to"} ${fmtPrice(q.target)} around that date.`);
+  } else if (polyDown) lines.push("2) Polymarket didn't answer. Try again in a minute.");
+  else lines.push(`2) Polymarket: no open market on ${asset} ${q.direction === "above" ? "reaching" : "falling to"} ${fmtPrice(q.target)} around that date.`);
 
   if (option && prediction) {
     lines.push(

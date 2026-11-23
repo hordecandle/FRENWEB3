@@ -1,11 +1,14 @@
 import { Type, type TSchema } from "typebox";
+import { readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { definePluginEntry, type OpenClawPluginApi, type OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
-import { EngineClient, type OwnerResult } from "./client.js";
+import { EngineClient, setClientLang, type OwnerResult } from "./client.js";
 import { LoopGuard, type ToolContext, type TurnContext } from "./guard.js";
 import planSchema from "./plan-schema.json" with { type: "json" };
 import {
   SANDBOX_BUSY,
-  SANDBOX_MISSING,
+  sandboxMissing,
   SandboxBusy,
   SandboxUnavailable,
   formatRun,
@@ -31,6 +34,7 @@ export const TOOL_NAMES = [
   "fren_close_all",
   "fren_limits",
   "fren_deposit_hyperliquid",
+  "fren_withdraw_hyperliquid",
   "fren_bet_quote",
   "fren_fund",
   "fren_yield",
@@ -60,7 +64,12 @@ const text = (t: string) => ({ content: [{ type: "text" as const, text: t }], de
 export const RECEIPT_NOTE =
   "(Fren already sent the owner this result as a receipt in the chat, with the numbers, proof links and a chart when images are on. Don't repeat it or paste any links: reply in one short line, or answer only what they asked.)";
 
-export function withReceiptNote(res: { text: string; receiptSent?: boolean }): string {
+/** The plan and its code are already in the chat as Fren's own message; the model must not retell them. */
+export const CODE_NOTE =
+  "(The confirmation message, with the plan and the code, is already in the owner's chat. Don't repeat the plan or the code: add at most one short line, entirely in the language the owner writes in.)";
+
+export function withReceiptNote(res: { text: string; receiptSent?: boolean; codeSentPrivately?: boolean }): string {
+  if (res.codeSentPrivately) return `${res.text}\n\n${CODE_NOTE}`;
   return res.receiptSent ? `${res.text}\n\n${RECEIPT_NOTE}` : res.text;
 }
 
@@ -69,6 +78,11 @@ export const PICTURE_NOTE = "It is already in their chat with the link under it:
 
 export const SCREENSHOT_MISSING =
   "Fren's browser isn't installed on this server yet. Tell the owner in one line that /fren_update installs it, and use fren_chart for price charts meanwhile.";
+
+/** The browser runs in the sandbox, and the sandbox is Linux-only. */
+export const SCREENSHOT_NOT_HERE =
+  "Screenshots of web pages aren't possible on this computer: Fren's browser lives in the code sandbox, which only exists on a Linux server. Tell the owner in one line, don't suggest /fren_update, and use fren_chart for price charts.";
+const screenshotMissing = () => (process.platform === "linux" ? SCREENSHOT_MISSING : SCREENSHOT_NOT_HERE);
 
 /** Pictures a sandbox run saved in $FREN_OUT, sent to the owner's chat. Returns a line for the model. */
 async function sendImages(client: EngineClient, r: RunCodeResult): Promise<string> {
@@ -96,7 +110,13 @@ async function deliverOwnerCode(res: OwnerResult, ctx: OpenClawPluginToolContext
   if (!res.ownerCode) return withReceiptNote(res);
   const send = ctx.delivery?.send;
   if (send) {
-    await send({ text: `🔐 Your Fren code: ${res.ownerCode}\nReply /ok ${res.ownerCode} to approve. Never share it.` });
+    await send({
+      text: say3(
+        `🔐 Fren is waiting for your OK. Reply /ok to approve (code ${res.ownerCode}, never share it).`,
+        `🔐 Fren ждёт твоего «ок». Ответь /ok, чтобы одобрить (код ${res.ownerCode}, никому его не показывай).`,
+        `🔐 Fren чекає на твоє «ок». Відповідай /ok, щоб схвалити (код ${res.ownerCode}, нікому його не показуй).`,
+      ),
+    });
     return `${res.text}\n(The code was sent to the user directly; you do not have it and cannot approve on their behalf.)`;
   }
   return `${res.text}\nNo private channel is set up, so ask the user to run /fren_code to see the code.`;
@@ -107,16 +127,60 @@ async function deliverOwnerCode(res: OwnerResult, ctx: OpenClawPluginToolContext
  * /fren_stop skips the model, so the engine needs it to write the pause message in the
  * owner's language. Null until the owner has written something.
  */
-let lastLang: "en" | "ru" | "uk" | null = null;
+type Lang = "en" | "ru" | "uk";
+/** Kept next to the engine's token, so a gateway restart doesn't switch a Russian owner to English. */
+const langFile = () => join(process.env.FREN_HOME ?? join(homedir(), ".fren"), "owner-lang");
+// Tests (vitest) never touch the real owner's file.
+const keepLang = !process.env.VITEST;
+function savedLang(): Lang | null {
+  if (!keepLang) return null;
+  try {
+    const l = readFileSync(langFile(), "utf8").trim();
+    return l === "en" || l === "ru" || l === "uk" ? l : null;
+  } catch {
+    return null;
+  }
+}
+let lastLang: Lang | null = savedLang();
+setClientLang(lastLang);
 export function noteLang(body: unknown) {
   const text = typeof body === "string" ? body : "";
   if (text.trim().startsWith("/")) return;
   const letters = text.match(/\p{L}/gu) ?? [];
   if (letters.length < 3) return;
   const cyr = letters.filter((c) => /[\u0400-\u04FF]/.test(c)).length;
-  lastLang = cyr / letters.length < 0.5 ? "en" : /[іїєґІЇЄҐ]/.test(text) ? "uk" : "ru";
+  const l: Lang = cyr / letters.length < 0.5 ? "en" : /[іїєґІЇЄҐ]/.test(text) ? "uk" : "ru";
+  if (l !== lastLang && keepLang)
+    try {
+      writeFileSync(langFile(), l, { mode: 0o600 });
+    } catch {
+      /* the next message tries again */
+    }
+  lastLang = l;
+  setClientLang(lastLang);
 }
+/** Under what was done after /ok, when the receipt with the details is already in the chat. */
+const OK_NOTE = { en: "Details and links are in the receipt I sent just before this.", ru: "Детали и ссылки в чеке, который я прислал перед этим сообщением.", uk: "Деталі й посилання в чеку, який я надіслав перед цим повідомленням." };
+const APPROVED = { en: "✅ Done.", ru: "✅ Готово.", uk: "✅ Готово." };
+/**
+ * The reply to /ok: what was done, with the sum and the link (the result lines of the
+ * engine's text, already in the owner's language), then where the details are. Never just
+ * "receipt above": the owner must see from this message alone what happened.
+ */
+export function approvedReply(text: string, lang: Lang | null): string {
+  const done = text
+    .split("\n")
+    .filter((l) => /^\s*(?:✅|❌|📝|⚡|👀|⏳)/u.test(l))
+    .slice(0, 4)
+    .map((l) => l.trim());
+  return `${done.length ? done.join("\n") : APPROVED[lang ?? "en"]}\n${OK_NOTE[lang ?? "en"]}`;
+}
+/** One owner-facing line in the language Fren talks to the owner in. */
+const say3 = (en: string, ru: string, uk: string) => (lastLang === "ru" ? ru : lastLang === "uk" ? uk : en);
+const frenError = (err: unknown) => `${say3("Fren error", "Ошибка Fren", "Помилка Fren")}: ${(err as Error).message}`;
 const langBody = () => (lastLang ? { lang: lastLang } : {});
+const localizeDashboardHint = () =>
+  lastLang === "ru" ? "Отправь /fren_dashboard, пришлю ссылку на дашборд." : lastLang === "uk" ? "Надішли /fren_dashboard, надішлю посилання на дашборд." : "Send /fren_dashboard and I'll send you the dashboard link.";
 
 export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; screenshotHelper?: string } = {}): ToolSpec[] {
   return [
@@ -131,16 +195,23 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; 
       name: "fren_markets",
       label: "Find a market",
       description:
-        "Search Hyperliquid perps (crypto, gold, stocks, indices), Solana tokens (pump.fun included) and tokens on Base, Robinhood Chain and Arbitrum. Call this before fren_trade whenever you are not sure of the exact symbol, mint or contract address.",
-      parameters: Type.Object({ query: Type.String({ description: 'What the user called it: "gold", "nasdaq", "BTC", "bonk", or a contract address.' }) }),
-      run: async (p) => (await client.call<{ text: string }>("GET", `/markets?q=${encodeURIComponent(String(p.query))}`)).text,
+        "Search Hyperliquid perps (crypto, gold, stocks, indices), Solana tokens (pump.fun included), tokens on Base, Robinhood Chain and Arbitrum, and Polymarket bets on events (\"Fed December\", \"bitcoin November\", elections). Call this before fren_trade whenever you are not sure of the exact symbol, mint, contract address or Polymarket slug. When the user asks for Polymarket, use a Polymarket market from here; never swap in a Derive option.",
+      parameters: Type.Object({
+        query: Type.String({ description: 'What the user called it: "gold", "nasdaq", "BTC", "bonk", a contract address, or event words like "Fed December".' }),
+        betUsd: Type.Optional(Type.Number({ exclusiveMinimum: 0, description: "For Polymarket: quote what this many dollars buys on Yes in the top markets." })),
+      }),
+      run: async (p) => {
+        const bet = typeof p.betUsd === "number" && p.betUsd > 0 ? `&bet=${p.betUsd}` : "";
+        return (await client.call<{ text: string }>("GET", `/markets?q=${encodeURIComponent(String(p.query))}${bet}`)).text;
+      },
     },
     {
       name: "fren_trade",
       label: "Trade",
       description: [
         "Propose a trading plan built from the user's request. Fren checks it against the user's limits, then either executes it,",
-        "asks the user for a confirmation code, or refuses with reasons. Relay the returned text to the user as-is, including its \"📝 Paper mode\" or live marker: never drop it, the user must always see whether money is real.",
+        "asks the user for a confirmation code, or refuses with reasons. Relay the returned text to the user as-is, including its \"📝 Practice mode, no real money\" or live marker: never drop it, the user must always see whether money is real.",
+        "If you add a word of your own, describe a stop exactly as the returned plan does (how far the price moves, the dollars lost, the % of what was put in), never in other terms like \"of margin\", so the owner reads one explanation.",
         "One plan can hold several legs; legs with `when` conditions wait for the watcher.",
         'To snipe a launch, add when: [{type:"tradable", venue, chain, token}] with the same contract address.',
         "Never invent token addresses: use one the user gave or one fren_markets returned.",
@@ -184,7 +255,7 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; 
       name: "fren_limits",
       label: "Limits",
       description:
-        "Change the user's trading limits with key=value pairs: maxTradeUsd, maxDailyUsd, maxLeverage, maxOpenPositions, autoApproveUsd, mode (paper|live). Tightening applies at once; loosening sends the user a code. Pass an empty string to read the current limits.",
+        "Change the user's trading limits with key=value pairs: maxTradeUsd, maxDailyUsd, maxLeverage, maxOpenPositions, autoApproveUsd, defaultStopLossPct (stop put on bets that come without one, % of margin; 0 = off), mode (paper|live). Tightening applies at once; loosening sends the user a code. Pass an empty string to read the current limits.",
       parameters: Type.Object({ args: Type.String({ description: 'e.g. "maxTradeUsd=2000 maxLeverage=40"' }) }),
       run: async (p, ctx) => {
         const args = String(p.args ?? "").trim();
@@ -199,6 +270,14 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; 
         "Move USDC into the user's own Hyperliquid account: from their Arbitrum address when it has the USDC, otherwise straight from their Solana USDC. Not needed before a long or short: fren_trade moves the margin into Hyperliquid by itself. Use this only when the user asks to deposit, and never tell them to deposit first.",
       parameters: Type.Object({ amountUsd: Type.Number({ minimum: 5 }) }),
       run: async (p) => withReceiptNote(await client.call<OwnerResult>("POST", "/deposit/hyperliquid", { amountUsd: p.amountUsd })),
+    },
+    {
+      name: "fren_withdraw_hyperliquid",
+      label: "Withdraw from Hyperliquid",
+      description:
+        "Move USDC out of the user's Hyperliquid account back to their own Arbitrum address (the only place it can go). Leave amountUsd out to take everything that is free. Hyperliquid keeps 1 USDC as its fee and pays out in a few minutes. The owner always approves it with a code. Use it when they ask to withdraw, take money back, or get it off Hyperliquid; never tell them to do it by hand.",
+      parameters: Type.Object({ amountUsd: Type.Optional(Type.Number({ exclusiveMinimum: 1, description: "Dollars to withdraw; leave out for everything free." })) }),
+      run: async (p, ctx) => deliverOwnerCode(await client.call<OwnerResult>("POST", "/withdraw/hyperliquid", p.amountUsd === undefined ? {} : { amountUsd: p.amountUsd }), ctx),
     },
     {
       name: "fren_bet_quote",
@@ -308,7 +387,7 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; 
         try {
           r = await runWhenFree({ lang: "node", code, timeoutSec: 90 }, opts.sandboxSocket ? { socket: opts.sandboxSocket } : {});
         } catch (err) {
-          if (err instanceof SandboxUnavailable) return SCREENSHOT_MISSING;
+          if (err instanceof SandboxUnavailable) return screenshotMissing();
           if (err instanceof SandboxBusy) return SANDBOX_BUSY;
           throw err;
         }
@@ -363,7 +442,7 @@ export function toolSpecs(client: EngineClient, opts: { sandboxSocket?: string; 
           const sent = await sendImages(client, r);
           return formatRun(r) + sent;
         } catch (err) {
-          if (err instanceof SandboxUnavailable) return SANDBOX_MISSING;
+          if (err instanceof SandboxUnavailable) return sandboxMissing();
           if (err instanceof SandboxBusy) return SANDBOX_BUSY;
           throw err;
         }
@@ -387,7 +466,7 @@ function registerTools(api: OpenClawPluginApi, client: EngineClient, opts: { san
             try {
               return text(await spec.run(params ?? {}, ctx));
             } catch (err) {
-              return text(`Fren error: ${(err as Error).message}`);
+              return text(frenError(err));
             }
           },
         };
@@ -431,19 +510,18 @@ export function isOwner(ctx: { senderIsOwner?: boolean; isAuthorizedSender?: boo
 }
 
 function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
-  const ownerOnly = "Only the owner of this Fren can do that.";
   const guard = async (isOwner: boolean | undefined, run: () => Promise<string>) => {
-    if (isOwner !== true) return { text: ownerOnly };
+    if (isOwner !== true) return { text: say3("Only the owner of this Fren can do that.", "Это может только владелец этого Fren.", "Це може лише власник цього Fren.") };
     try {
       return { text: await run() };
     } catch (err) {
-      return { text: `Fren error: ${(err as Error).message}` };
+      return { text: frenError(err) };
     }
   };
 
   api.registerCommand({
     name: "ok",
-    description: "Approve a Fren plan or settings change with the code Fren sent you.",
+    description: "Approve what Fren asked you about. Several waiting: /ok lists them, /ok 2 picks one, /ok all approves all.",
     acceptsArgs: true,
     requireAuth: true,
     exposeSenderIsOwner: true,
@@ -451,8 +529,8 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
       guard(isOwner(ctx), async () => {
         const code = (ctx.args ?? "").trim();
         const res = await client.call<OwnerResult>("POST", "/approve", { code });
-        // The receipt with the numbers and links is already in the chat, just above this reply.
-        return res.receiptSent ? "✅ Approved. Your receipt is just above." : res.text;
+        // The receipt with the numbers and links is already in the chat; this reply still says what was done.
+        return res.receiptSent ? approvedReply(res.text, lastLang) : res.text;
       }),
   });
 
@@ -530,7 +608,7 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
     exposeSenderIsOwner: true,
     handler: (ctx) =>
       guard(isOwner(ctx), async () => {
-        const r = await client.call<{ text: string; link?: string }>("POST", "/dashboard/link");
+        const r = await client.call<{ text: string; link?: string }>("POST", "/dashboard/link", langBody());
         return r.link ? `${r.text}\n${r.link}` : r.text;
       }),
   });
@@ -564,16 +642,62 @@ function registerCommands(api: OpenClawPluginApi, client: EngineClient) {
   });
 }
 
+/**
+ * OpenClaw's own /dashboard (it sits in the Telegram menu and can't be switched off)
+ * asks the AI to build a "session dashboard" with its control-ui skill. The owner means
+ * Fren's dashboard, so that turn gets the Fren login link instead, with no AI call.
+ */
+export function isDashboardRequest(body: unknown): boolean {
+  if (typeof body !== "string") return false;
+  const b = body.trim();
+  if (/^\/dashboard(?:@\w+)?\s*$/i.test(b)) return true;
+  return /Create a dashboard for this session\./.test(b) && /control[-_]ui/i.test(b);
+}
+
 /** Caps on agent turns and tool calls, see guard.ts. Older hosts without api.on just don't get them. */
-export function registerLoopGuard(api: Pick<OpenClawPluginApi, "on">, guard: LoopGuard) {
+export function registerLoopGuard(api: Pick<OpenClawPluginApi, "on">, guard: LoopGuard, client?: Pick<EngineClient, "call">) {
   if (typeof api.on !== "function") return;
   // A hook that throws would let the turn through (claim hooks fail open), so decide inside.
   api.on("before_agent_reply", async (event, ctx) => {
-    noteLang((event as { cleanedBody?: string }).cleanedBody);
-    return guard.beforeReply(ctx as TurnContext);
+    const body = (event as { cleanedBody?: string }).cleanedBody;
+    const turn = ctx as TurnContext;
+    if (client && isDashboardRequest(body) && (!turn.trigger || turn.trigger === "user")) {
+      const gate = await guard.beforeReply(turn);
+      if (gate) return gate;
+      try {
+        // The link itself goes to the owner's private line; the chat only hears where it is.
+        const r = await client.call<{ text: string; link?: string }>("POST", "/dashboard/link", langBody());
+        return { handled: true as const, reply: { text: r.link ? localizeDashboardHint() : r.text }, reason: "fren: /dashboard is the Fren dashboard" };
+      } catch (err) {
+        return { handled: true as const, reply: { text: frenError(err) }, reason: "fren: /dashboard failed" };
+      }
+    }
+    noteLang(body);
+    return guard.beforeReply(turn);
   }, { priority: 100 });
   api.on("before_tool_call", async (event, ctx) => guard.beforeTool({ ...(ctx as ToolContext), toolName: event.toolName, runId: event.runId ?? ctx.runId }), { priority: 100 });
   api.on("agent_end", async (_event, ctx) => guard.endRun(ctx));
+}
+
+/**
+ * Before every answer the model gets the engine's live state: what waits for /ok and how
+ * the last request ended. Its memory of the chat goes stale (the dashboard's Approve button
+ * and expiry happen outside the chat), and it used to say a request "still waits" after it
+ * had run. Best effort: a slow or missing engine just leaves the turn as it was.
+ */
+export function registerStateContext(api: Pick<OpenClawPluginApi, "on">, client: Pick<EngineClient, "call">, waitMs = 3000) {
+  if (typeof api.on !== "function") return;
+  api.on("before_prompt_build", async () => {
+    try {
+      const r = await Promise.race([
+        client.call<{ text?: string }>("GET", "/agent/context"),
+        new Promise<null>((res) => setTimeout(() => res(null), waitMs).unref?.()),
+      ]);
+      return r?.text ? { prependContext: r.text } : undefined;
+    } catch {
+      return undefined;
+    }
+  });
 }
 
 /**
@@ -613,8 +737,9 @@ export default definePluginEntry({
     const mode = api.registrationMode;
     if (mode !== "cli-metadata" && mode !== "setup-only" && mode !== "tool-discovery") {
       registerCommands(api, client);
-      registerLoopGuard(api, new LoopGuard(client));
+      registerLoopGuard(api, new LoopGuard(client), client);
       registerReadySignal(api, client);
+      registerStateContext(api, client);
     }
   },
 });

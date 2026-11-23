@@ -33,7 +33,7 @@ describe("a buy of a token that can't trade yet waits for it", () => {
     t.fake.relayNoRoute = () => false;
     t.fake.evmTokens.push({ chainId: 8453, address: NEW_BASE, symbol: "NEW", name: "New", decimals: 18, verified: false, price: 0.01 });
     await t.fren.snipeTick();
-    expect(t.notifier.sent.at(-1)).toMatch(/⚡ Triggered[\s\S]*Paper: Bought 5,000 NEW on Base for \$50\.00/);
+    expect(t.notifier.sent.at(-1)).toMatch(/⚡ Triggered[\s\S]*Practice: Bought 5,000 NEW on Base for \$50\.00/);
     expect(t.store.getPlan(res.planId!)!.status).toBe("done");
   });
 
@@ -79,7 +79,7 @@ describe("a buy of a token that can't trade yet waits for it", () => {
     // The pool is live and Jupiter routes it.
     t.fake.tokens.push({ id: MIGRATING, symbol: "MIGR", decimals: 6, isVerified: false, usdPrice: 0.00001 });
     await t.fren.snipeTick();
-    expect(t.notifier.sent.at(-1)).toMatch(/⚡ Triggered[\s\S]*Paper: Bought 5,000,000 MIGR for \$50\.00/);
+    expect(t.notifier.sent.at(-1)).toMatch(/⚡ Triggered[\s\S]*Practice: Bought 5,000,000 MIGR for \$50\.00/);
   });
 });
 

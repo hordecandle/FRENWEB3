@@ -6,6 +6,7 @@ import {
   chainName,
   price as fmtPrice,
   shortToken,
+  swapSlippageBps,
   usd as fmtUsd,
   type EvmChain,
   type PlanStep,
@@ -536,12 +537,12 @@ export class RelayVenue implements SpotVenueAdapter {
     if (leg.side === "buy") {
       if (leg.amount.type === "tokens") throw new VenueError('Say how much USDC to spend on a buy: amount {type:"usd"}.');
       const usd = leg.amount.type === "usd" ? leg.amount.usd : store.paperUsdc() * leg.amount.fraction;
-      if (usd > store.paperUsdc()) throw new VenueError(`Paper balance is ${fmtUsd(store.paperUsdc())}.`);
+      if (usd > store.paperUsdc()) throw new VenueError(`Practice balance is ${fmtUsd(store.paperUsdc())}.`);
       const qty = usd / px;
       store.setPaperUsdc(store.paperUsdc() - usd);
       store.setPaperHolding({ ...held, amount: held.amount + qty, costUsd: held.costUsd + usd });
       store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "relay", symbol: t.symbol, action: "buy", size: qty, price: px, usd, spendUsd: usd, mode: "paper" });
-      return { text: `📝 Paper: Bought ${fmtQty(qty)} ${t.symbol} on ${where} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
+      return { text: `📝 Practice: Bought ${fmtQty(qty)} ${t.symbol} on ${where} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
     }
     if (leg.amount.type === "tokens" && leg.amount.tokens > held.amount + 1e-12) {
       throw new VenueError(`You hold ${fmtQty(held.amount)} paper ${t.symbol} on ${where}, not ${leg.amount.tokens}.`);
@@ -553,7 +554,7 @@ export class RelayVenue implements SpotVenueAdapter {
     store.setPaperUsdc(store.paperUsdc() + usd);
     store.setPaperHolding({ ...held, amount: held.amount - qty, costUsd: held.costUsd * (1 - qty / held.amount) });
     store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "relay", symbol: t.symbol, action: "sell", size: qty, price: px, usd, spendUsd: 0, mode: "paper" });
-    return { text: `📝 Paper: Sold ${fmtQty(qty)} ${t.symbol} on ${where} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
+    return { text: `📝 Practice: Sold ${fmtQty(qty)} ${t.symbol} on ${where} for ${fmtUsd(usd)} at ${fmtPrice(px)}` };
   }
 
   // -- live ------------------------------------------------------------------
@@ -640,6 +641,7 @@ export class RelayVenue implements SpotVenueAdapter {
     let usd: number;
     /** Wei this trade may send: the ETH sold or paid, or nothing. */
     let nativeSale = 0n;
+    let sellRaw: bigint | null = null;
     let paid: string[] = [];
 
     if (leg.side === "buy") {
@@ -660,7 +662,7 @@ export class RelayVenue implements SpotVenueAdapter {
         from: { chain: origin, currency: pay.currency },
         to: { chain: t.chain, currency: t.address },
         amountRaw: pay.amountRaw,
-        slippageBps: leg.maxSlippageBps,
+        slippageBps: swapSlippageBps(leg),
         // No USDC on Robinhood Chain to swap for gas later, so bring some ETH along.
         topupGas: !this.chain(t.chain).usdc,
       }).catch((err: unknown) => {
@@ -707,6 +709,7 @@ export class RelayVenue implements SpotVenueAdapter {
       }
       if (amount <= 0n) throw new VenueError(`That's too little ${t.symbol} to sell.`);
       if (native) nativeSale = amount;
+      sellRaw = amount;
       origin = t.chain;
       const home: EvmChain = this.chain(t.chain).usdc ? t.chain : "arbitrum";
       quote = await this.quote({
@@ -714,13 +717,14 @@ export class RelayVenue implements SpotVenueAdapter {
         from: { chain: t.chain, currency: t.address },
         to: { chain: home, currency: this.chain(home).usdc! },
         amountRaw: amount,
-        slippageBps: leg.maxSlippageBps,
+        slippageBps: swapSlippageBps(leg),
       });
       qty = Number(amount) / 10 ** t.decimals;
       usd = Number(quote.details?.currencyOut?.amount ?? "0") / 1e6;
     }
 
-    const spendRaw = leg.side === "buy" ? BigInt(Math.round(usd * 1e6)) : BigInt(Math.round(qty * 10 ** t.decimals));
+    // A sale approves exactly the raw amount it sells. Going through a float (qty * 10**18) drops the last digits, the approval ends a few wei short and the swap reverts with "insufficient allowance".
+    const spendRaw = leg.side === "buy" ? BigInt(Math.round(usd * 1e6)) : (sellRaw ?? BigInt(Math.round(qty * 10 ** t.decimals)));
     const hashes = await this.runSteps(quote, origin, owner, spendRaw, nativeSale);
     const lastHash = hashes.at(-1);
     if (t.address !== NATIVE_ETH) this.rememberToken(t);

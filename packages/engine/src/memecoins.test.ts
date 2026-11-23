@@ -38,7 +38,7 @@ describe("tokens on Base and Robinhood Chain", () => {
     expect(res.verdict).toBe("executed");
     expect(res.text).toMatch(/not on a verified token list/);
     const out = res.text;
-    expect(out).toMatch(/Paper: Bought 5,000 DOG on Base for \$50.00/);
+    expect(out).toMatch(/Practice: Bought 5,000 DOG on Base for \$50.00/);
 
     const status = await t.fren.status();
     expect(status).toMatch(/5,000 DOG \(Base\) worth \$50.00/);
@@ -48,7 +48,7 @@ describe("tokens on Base and Robinhood Chain", () => {
       request: "sell half my dog",
       steps: [{ leg: { kind: "swap", venue: "relay", chain: "base", side: "sell", token: BASE_DOG, amount: { type: "fraction", fraction: 0.5 } } }],
     });
-    expect(sell.text).toMatch(/Paper: Sold 2,500 DOG on Base for \$25.00/);
+    expect(sell.text).toMatch(/Practice: Sold 2,500 DOG on Base for \$25.00/);
   });
 
   it("buys a verified Base token by ticker but refuses an unverified ticker", async () => {
@@ -69,7 +69,7 @@ describe("tokens on Base and Robinhood Chain", () => {
   it("a 0x contract sent to Jupiter trades on its own chain instead", async () => {
     const t = buildTestFren();
     const res = await t.fren.submit(swap({ venue: "jupiter", chain: "base", token: BASE_DOG }));
-    expect(res.text).toMatch(/Paper: Bought 5,000 DOG on Base for \$50.00/);
+    expect(res.text).toMatch(/Practice: Bought 5,000 DOG on Base for \$50.00/);
   });
 
   it("a 0x contract with no chain: Fren finds the chain itself", async () => {
@@ -92,7 +92,7 @@ describe("tokens on Base and Robinhood Chain", () => {
     const t = buildTestFren();
     const res = await t.fren.submit(swap({ venue: "relay", chain: "base", token: "PumpCoin1111111111111111111111111111111pump" }));
     expect(res.verdict).toBe("executed");
-    expect(res.text).toMatch(/Paper: Bought .* SHIT for \$50.00/);
+    expect(res.text).toMatch(/Practice: Bought .* SHIT for \$50.00/);
     expect(res.text).not.toMatch(/on Base/);
   });
 
@@ -152,7 +152,7 @@ describe("pump.fun and launch snipes", () => {
     t.pump.addCurve(NEW_COIN, 0.000_000_05);
     t.fake.jupUnroutable.add(NEW_COIN);
     await t.fren.snipeTick();
-    expect(t.notifier.sent.at(-1)).toMatch(/Triggered[\s\S]*✅ NewCoi…pump starts trading[\s\S]*Paper: Bought 5,000,000 NewCoi…pump for \$50.00/);
+    expect(t.notifier.sent.at(-1)).toMatch(/Triggered[\s\S]*✅ NewCoi…pump starts trading[\s\S]*Practice: Bought 5,000,000 NewCoi…pump for \$50.00/);
     expect(t.store.paperHoldings()[0]).toMatchObject({ mint: NEW_COIN });
   });
 

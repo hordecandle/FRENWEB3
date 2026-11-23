@@ -1,0 +1,186 @@
+import { describe, expect, it } from "vitest";
+import { humanError, localize, localizeReceipt } from "./i18n.js";
+
+const plan = "Confirm this plan:\n🟡 Lend $3.00 of USDC on Jupiter Lend (Solana)\n   ⚠️ Earns about 4.05% a year on $3.00, variable. You can take it back any time; Fren also takes it back on its own when a trade needs the cash.";
+
+describe("localize", () => {
+  it("leaves English alone", () => {
+    expect(localize(plan, "en")).toBe(plan);
+    expect(localize(plan, undefined)).toBe(plan);
+  });
+  it("turns a confirmation into one Russian message", () => {
+    const out = localize(`${plan}\n\nReply /ok within 10 min.`, "ru");
+    expect(out).toContain("Подтверди план:");
+    expect(out).toContain("Положить $3.00 USDC в Jupiter Lend (Solana)");
+    expect(out).toContain("Ответь /ok в течение 10 мин.");
+    expect(out).not.toMatch(/Confirm|Lend \$|Reply/);
+  });
+  it("buy, sell, long lines", () => {
+    expect(localize("🟡 Buy $3.00 of JUP on Jupiter", "ru")).toBe("🟡 Купить JUP на $3.00 (Jupiter)");
+    expect(localize("🟡 Sell 100% of your JUP on Jupiter", "uk")).toBe("🟡 Продати 100% твоїх JUP (Jupiter)");
+    expect(localize("🟡 Long ETH on Hyperliquid: $50 margin at 10x ($500 position), stop at -20% of margin, -$10.00 (2.0% price move)", "ru")).toBe(
+      "🟡 Лонг ETH на Hyperliquid: маржа $50, плечо 10x (позиция $500), стоп на -20% от маржи, -$10.00 (движение цены 2.0%)",
+    );
+  });
+  it("receipts: title, rows, header", () => {
+    const r = localizeReceipt({ header: "📝 Paper mode", steps: [{ icon: "✅", title: "Bought 13.877 JUP for $3.00 at $0.2162", rows: [], links: [{ label: "Chart on DexScreener", url: "https://x.y" }] }] }, "ru");
+    expect(r.steps[0]!.title).toBe("Куплено 13.877 JUP на $3.00 по $0.2162");
+    expect(r.steps[0]!.links[0]!.label).toBe("График на DexScreener");
+    expect(r.header).toContain("Тестовый режим");
+  });
+});
+
+describe("humanError", () => {
+  const raw = 'Simulation failed: {"InstructionError":[0,{"Custom":3012}]}';
+  it("no JSON, says money is untouched, in each language", () => {
+    expect(humanError(raw, "en")).toBe("An account this service needs isn't set up in your wallet yet. Nothing was sent, so your money is where it was.");
+    expect(humanError(raw, "ru")).toBe("В твоём кошельке ещё не создан служебный счёт, который нужен этому сервису. Ничего не отправлено, твои деньги на месте.");
+    expect(humanError(raw, "ru")).not.toMatch(/[{}]|3012/);
+  });
+  it("unknown codes and plain words", () => {
+    expect(humanError('Simulation failed: {"InstructionError":[1,{"Custom":9}]}', "en")).toContain("The network refused it");
+    expect(humanError("Some already plain sentence.", "ru")).toBe("Some already plain sentence.");
+  });
+  it("every venue's refusals come out as plain words in the owner's language", () => {
+    const cases: [string, RegExp][] = [
+      ['Hyperliquid refused: {"status":"err","response":"Insufficient margin to place order"}', /Hyperliquid не хватает/],
+      ['Hyperliquid refused: {"status":"ok","response":{"data":{"statuses":[{"error":"Order could not immediately match against any resting orders."}]}}}', /Никто не взял/],
+      ['Derive: {"code":11000,"message":"Insufficient collateral"}', /Derive не хватает денег/],
+      ['Polymarket refused: {"error":"not enough balance / allowance"}', /Polymarket не хватает/],
+      ['Relay: {"message":"No routes found","errorCode":"NO_SWAP_ROUTES"}', /Relay сейчас не нашёл/],
+      ["Error: Transaction failed on-chain: execution reverted", /отклонила транзакцию/],
+      ["Error: insufficient funds for gas * price + value", /комиссию сети/],
+      ['Simulation failed: {"InstructionError":[2,{"Custom":6001}]}', /Цена слишком сдвинулась/],
+      ['Kamino: {"error":"reserve full"}', /под процент/],
+    ];
+    for (const [raw, re] of cases) {
+      const out = humanError(raw, "ru");
+      expect(out).toMatch(re);
+      expect(out).not.toMatch(/[{}]|InstructionError/);
+      expect(humanError(raw, "en")).not.toMatch(/[{}]|InstructionError|[а-яё]/i);
+      expect(humanError(raw, "uk")).not.toMatch(/[{}]|[ыэё]/);
+    }
+  });
+  it("unknown raw text never leaks JSON", () => {
+    const out = humanError('Weird: {"x":1} 0xdeadbeefcafe', "ru");
+    expect(out).not.toMatch(/[{}]/);
+    expect(out).toMatch(/проверь баланс/);
+  });
+});
+
+import { buildTestFren } from "./testing.js";
+
+describe("what the owner saw in English on 22.11", () => {
+  it("result lines with links, practice lines and the /ok plan text come out in Russian", () => {
+    const ru = localize("✅ Moved $20.00 USDC from your Solana wallet into Hyperliquid through Relay · https://solscan.io/tx/abc", "ru");
+    expect(ru).toMatch(/^✅ /);
+    expect(ru).toContain("https://solscan.io/tx/abc");
+    expect(ru).not.toMatch(/Moved|wallet/);
+    expect(localize("The plan is in my message just above. Reply /ok to go ahead.", "ru")).toMatch(/^План в моём сообщении/);
+    expect(localize("2 requests are waiting for your OK:", "ru")).toBe("Твоего ок ждут запросов: 2");
+    expect(localize("Sent you a login link for your dashboard in a separate message. It works once, for 10 minutes.", "ru")).toMatch(/^Ссылку на дашборд/);
+    expect(localize("The dashboard isn't running on this machine. Restart Fren, or set FREN_DASHBOARD=on.", "uk")).toMatch(/^Дашборд/);
+  });
+
+  it("the stop is explained the same way in the plan and the bet: price move, dollars and % of what you put in", () => {
+    const ru = localize("❌ Bet $5.00 that BTC goes up, 2× boost on Hyperliquid. Stop: if BTC falls ~10%, Fren closes it and you lose about $1.00 (-20% of what you put in)", "ru");
+    expect(ru).toContain("Стоп: если BTC упадёт примерно на 10%, Fren закроет, и ты потеряешь около $1.00 (−20% от вложенного)");
+    const failed = localize("❌ Bet $5.00 that BTC goes up, 2× boost on Hyperliquid. Stop: if BTC falls ~10%, Fren closes it and you lose about $1.00 (-20% of what you put in): Сделка меньше минимума биржи в $10. Попробуй от $10.", "ru");
+    expect(failed).toBe("❌ Ставка $5.00, что BTC вырастет, усиление ×2 на Hyperliquid. Стоп: если BTC упадёт примерно на 10%, Fren закроет, и ты потеряешь около $1.00 (−20% от вложенного): Сделка меньше минимума биржи в $10. Попробуй от $10.");
+  });
+
+  it("venue errors: a reverted tx, the Hyperliquid $10 minimum, Solana 3012", () => {
+    const rev = humanError("Transaction reverted: 0x5f2a9c0b1d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0", "ru");
+    expect(rev).toMatch(/^Сеть отклонила транзакцию/);
+    const min = humanError("Order must have minimum value of $10. asset=0", "ru");
+    expect(min).toMatch(/\$10/);
+    expect(min).not.toMatch(/asset=|Order must/);
+    const c = humanError('Simulation failed: {"InstructionError":[2,{"Custom":3012}]}', "ru");
+    expect(c).not.toMatch(/3012|Custom|\{/);
+  });
+
+  it("a signer refusal that names a contract stays as it is", () => {
+    const own = "The contract 0x1111111111111111111111111111111111111111 is not on the signer's allow list.";
+    expect(humanError(own, "en")).toBe(own);
+  });
+});
+
+describe("the owner's language through the engine", () => {
+  const lend = { request: "lend", steps: [{ leg: { kind: "earn", venue: "yield", action: "deposit", amount: { type: "usd", usd: 5 } } }] };
+  it("the confirmation message is entirely Russian for a Russian owner, English otherwise", async () => {
+    const ru = buildTestFren({ live: true });
+    ru.fren.setOwnerLang("ru");
+    ru.fake.solanaUsdc = 50;
+    ru.store.setLimits({ ...ru.fren.limits(), autoApproveUsd: 0 });
+    await ru.fren.submit(lend);
+    const sent = ru.notifier.sent.at(-1) ?? "";
+    expect(sent).toContain("Подтверди план:");
+    expect(sent).toMatch(/Ответь \/ok в течение 10 мин\./);
+    expect(sent).not.toMatch(/[A-Z0-9]{6}/);
+    expect(sent).not.toMatch(/Confirm|Reply|Earns about/);
+    const en = buildTestFren({ live: true });
+    en.fake.solanaUsdc = 50;
+    en.store.setLimits({ ...en.fren.limits(), autoApproveUsd: 0 });
+    await en.fren.submit(lend);
+    expect(en.notifier.sent.at(-1)).toMatch(/Confirm this plan:[\s\S]*Reply \/ok/);
+  });
+  it("a failed step says why in plain words, with no raw JSON and no yield line", async () => {
+    for (const [lang, want] of [["ru", "Ничего не отправлено"], ["en", "Nothing was sent"]] as const) {
+      const t = buildTestFren({ live: true });
+      t.fake.solanaUsdc = 50;
+      t.store.setLimits({ ...t.fren.limits(), autoApproveUsd: 0 });
+      t.fren.setOwnerLang(lang);
+      await t.fren.submit(lend);
+      const venues = (t.fren as unknown as { venues: { jupiter: { execute: unknown }; yield: { execute: unknown } } }).venues;
+      venues.yield.execute = async () => {
+        throw new Error('Simulation failed: {"InstructionError":[0,{"Custom":3012}]}');
+      };
+      const code = t.store.livePending().at(-1)!.code;
+      const res = await t.fren.approveWithReceipt(code);
+      const all = [res.text, ...t.notifier.sent.slice(1)].join("\n");
+      expect(all).toContain(want);
+      expect(all).not.toMatch(/InstructionError|3012|Earns about|Доходность/);
+    }
+  });
+  it("the language survives a restart: it lives in the store, not in memory", () => {
+    const t = buildTestFren();
+    t.fren.setOwnerLang("ru");
+    expect(t.store.getKv("owner_lang")).toBe("ru");
+    expect(t.fren.localize("🔑 Your Fren dashboard:")).toBe("🔑 Твой дашборд Fren:");
+  });
+  it("a bad language value keeps the last good one", () => {
+    const t = buildTestFren({ live: true });
+    t.fren.setOwnerLang("ru");
+    t.fren.setOwnerLang("de");
+    t.fren.setOwnerLang(undefined);
+    expect((t.fren as unknown as { ownerLang: string }).ownerLang).toBe("ru");
+  });
+});
+
+describe("refusals that come back without money moving (PLAN 22.11 п. 9)", () => {
+  const CASES = [
+    "Step 1: 4k3Dyj…kX6Z doesn't exist on Solana yet, so I can't tell how its amounts work and won't guess. I can snipe pump.fun addresses (ending in \"pump\") before launch; for this one, send it again once the token is created.",
+    "Step 1: No Solana token found for NOTAMINT123. Send me the contract address.",
+    'Step 1: Polymarket has no market "will-fren-land-on-mars". Use the slug from fren_bet_quote or fren_markets.',
+    "   • Spends $900,000, over your per-trade cap of $100.",
+    "❌ Would bring today's spend to $900,000, over your daily cap of $300.",
+    "1) Option on Derive: nothing to buy for BTC near $10,000,000 around that date: nobody is selling the $80,000, $75,000 calls expiring Nov 23, 2026 right now.",
+    "1) Option on Derive: nothing to buy for BTC near $10,000,000 around that date: Derive didn't answer.",
+    "2) Polymarket: no open market on BTC reaching $10,000,000 around that date.",
+    "BTC above $10,000,000 by Nov 23, 2026, with $20.00.",
+    "Step 1: I couldn't confirm the price data for 4k3Dyj…kX6Z right now (Jupiter and the Solana RPC didn't answer), so I won't trade it. Try again in a minute.",
+  ];
+  const english = /\b(?:the|and|your|over|nothing|doesn't|couldn't|found|has|no|right now|Step|Option|above|Nov)\b/;
+  for (const lang of ["ru", "uk"] as const)
+    it(`every one reads in ${lang}`, () => {
+      for (const c of CASES) expect(localize(c, lang), c).not.toMatch(english);
+    });
+  it("raw HTTP and network failures become one plain sentence, never a URL or a code", () => {
+    for (const raw of ["GET https://lite-api.jup.ag/tokens/v2/search?query=x → 429", "fetch failed", "TypeError: fetch failed (connect ECONNREFUSED)", "getaddrinfo ENOTFOUND api.hyperliquid.xyz"])
+      for (const lang of ["en", "ru", "uk"] as const) {
+        const s = humanError(raw, lang);
+        expect(s).not.toMatch(/https?:|\b429\b|ECONN|ENOTFOUND|fetch failed/);
+        expect(s.split(/(?<=[.!?])\s/).length).toBeLessThanOrEqual(3);
+      }
+  });
+});

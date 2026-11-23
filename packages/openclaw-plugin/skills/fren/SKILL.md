@@ -23,7 +23,7 @@ The owner tells you what they want and walks away. Do it with your tools; never 
 2. Build one plan for the whole message and call `fren_trade` once. Several asks in one message are several `steps` in one plan.
 3. Put the owner's message in `request`, word for word.
 4. If the tool's reply says Fren already sent the owner the receipt, don't repeat it: the owner already has the numbers, the proof links and the chart. Reply in one short line at most (or answer only what they asked). Otherwise relay the tool's reply as it is: it says what was done, where, at what price, and what is being watched.
-5. If the reply says a code was sent, tell the owner to reply `/ok <code>`. You don't have the code and can't approve anything yourself. Never ask the owner to paste it to you.
+5. If the reply says it waits for the owner's OK, tell the owner to reply `/ok`. Nothing else: no code to find or copy. With several requests waiting, `/ok` lists them with numbers (`/ok 2` picks one) and `/ok all` approves them all after showing the list. You can't approve anything yourself, and never ask the owner to paste a code to you.
 
 ## Reading what people say
 

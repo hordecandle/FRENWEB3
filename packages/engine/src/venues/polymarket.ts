@@ -199,14 +199,14 @@ export class PolymarketVenue implements VenueAdapter {
     const book = await this.o.data.book(out.assetId);
     if (leg.side === "buy") {
       const budget = leg.amount.type === "usd" ? leg.amount.usd : store.paperUsdc() * leg.amount.fraction;
-      if (budget > store.paperUsdc()) throw new VenueError(`Paper balance is ${fmtUsd(store.paperUsdc())}.`);
+      if (budget > store.paperUsdc()) throw new VenueError(`Practice balance is ${fmtUsd(store.paperUsdc())}.`);
       const fill = walkBook(book.asks, { usd: budget }, leg.limitPrice ?? 0.99, "buy");
       if (fill.shares <= 0) throw new VenueError(`Nobody is selling "${out.label}" at that price right now.`);
       store.setPaperUsdc(store.paperUsdc() - fill.usd);
       store.setPaperHolding({ ...held, amount: held.amount + fill.shares, costUsd: held.costUsd + fill.usd });
       store.setKv(`poly_market:${out.assetId}`, m.slug);
       store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "polymarket", symbol: held.symbol, action: "buy", size: fill.shares, price: fill.avgPrice, usd: fill.usd, spendUsd: fill.usd, mode: "paper" });
-      return { text: `📝 Paper: Bought ${fmtShares(fill.shares)} "${out.label}" shares in "${m.question}" for ${fmtUsd(fill.usd)} at ${cents(fill.avgPrice)} each` };
+      return { text: `📝 Practice: Bought ${fmtShares(fill.shares)} "${out.label}" shares in "${m.question}" for ${fmtUsd(fill.usd)} at ${cents(fill.avgPrice)} each` };
     }
     const shares = leg.amount.type === "fraction" ? held.amount * leg.amount.fraction : Math.min(held.amount, leg.amount.usd / Math.max(book.bids[0]?.price ?? 1, 0.01));
     if (shares <= 0 || held.amount <= 0) throw new VenueError(`You hold no paper "${out.label}" shares in "${m.question}".`);
@@ -215,7 +215,7 @@ export class PolymarketVenue implements VenueAdapter {
     store.setPaperUsdc(store.paperUsdc() + fill.usd);
     store.setPaperHolding({ ...held, amount: held.amount - fill.shares, costUsd: held.costUsd * (1 - fill.shares / held.amount) });
     store.insertFill({ planId: ctx.planId, idx: ctx.idx, venue: "polymarket", symbol: held.symbol, action: "sell", size: fill.shares, price: fill.avgPrice, usd: fill.usd, spendUsd: 0, mode: "paper" });
-    return { text: `📝 Paper: Sold ${fmtShares(fill.shares)} "${out.label}" shares in "${m.question}" for ${fmtUsd(fill.usd)} at ${cents(fill.avgPrice)} each` };
+    return { text: `📝 Practice: Sold ${fmtShares(fill.shares)} "${out.label}" shares in "${m.question}" for ${fmtUsd(fill.usd)} at ${cents(fill.avgPrice)} each` };
   }
 
   /** Resolved paper bets pay $1 a winning share. Returns one line per settled bet. */
@@ -236,8 +236,8 @@ export class PolymarketVenue implements VenueAdapter {
       this.o.store.insertFill({ planId: null, idx: null, venue: "polymarket", symbol: h.symbol, action: "settle", size: h.amount, price: out.price, usd: payout, spendUsd: 0, mode: "paper" });
       lines.push(
         out.price > 0
-          ? `🏁 Paper: "${m.question}" resolved "${out.label}". Your ${fmtShares(h.amount)} shares paid ${fmtUsd(payout)} (cost ${fmtUsd(h.costUsd)}).`
-          : `🏁 Paper: "${m.question}" resolved against "${out.label}". Lost ${fmtUsd(h.costUsd)}.`,
+          ? `🏁 Practice: "${m.question}" resolved "${out.label}". Your ${fmtShares(h.amount)} shares paid ${fmtUsd(payout)} (cost ${fmtUsd(h.costUsd)}).`
+          : `🏁 Practice: "${m.question}" resolved against "${out.label}". Lost ${fmtUsd(h.costUsd)}.`,
       );
     }
     return lines;
@@ -339,11 +339,16 @@ export class PolymarketVenue implements VenueAdapter {
    */
   async bestMarket(q: { assetNames: string[]; target: number; direction: "above" | "below"; by: Date; budgetUsd: number }): Promise<PredictionQuote | null> {
     const seen = new Map<string, PolyMarket>();
+    let answered = false;
+    let lastErr: unknown;
     for (const name of q.assetNames) {
       for (const query of [`${name} ${q.target}`, `${name} price`]) {
-        for (const m of await this.o.data.search(query).catch(() => [])) seen.set(m.slug, m);
+        const found = await this.o.data.search(query).then((r) => ((answered = true), r), (e) => ((lastErr = e), [] as PolyMarket[]));
+        for (const m of found) seen.set(m.slug, m);
       }
     }
+    // Not one search got through: Polymarket is down or unreachable, not "no such market".
+    if (!answered && lastErr) throw lastErr;
     const targetForms = numberForms(q.target);
     const words = q.direction === "above" ? /\b(reach|hit|above|over|exceed|high|at least|≥|>)/i : /\b(dip|drop|fall|below|under|low|≤|<)/i;
     const candidates = [...seen.values()].filter(
@@ -378,6 +383,48 @@ export class PolymarketVenue implements VenueAdapter {
   /** Bets aren't leveraged; the kill switch leaves them. */
   async flatten(): Promise<string[]> {
     return [];
+  }
+
+  /**
+   * Open markets for free words ("bitcoin", "Fed December"), best word match
+   * first, as lines for fren_markets. With a budget, also what that buys on
+   * the first outcome ("Yes" when there is one), walking the real book.
+   * Throws when Polymarket can't be reached, so the caller can say so.
+   */
+  async searchLines(query: string, budgetUsd?: number, limit = 6): Promise<string[]> {
+    const q = query.replace(/\b(on\s+)?poly\s?markets?\b/gi, " ").replace(/\s+/g, " ").trim() || query.trim();
+    if (!q) return [];
+    const found = await this.o.data.search(q);
+    const words = q.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+    const hits = (m: PolyMarket) => words.filter((w) => m.question.toLowerCase().includes(w)).length;
+    const seen = new Set<string>();
+    const open = found
+      .filter((m) => !m.closed && m.acceptingOrders && !m.resolved && m.outcomes.length > 0 && !seen.has(m.slug) && Boolean(seen.add(m.slug)))
+      .map((m, i) => ({ m, i, h: hits(m) }))
+      .sort((a, b) => b.h - a.h || a.i - b.i)
+      .slice(0, limit)
+      .map((x) => x.m);
+    const lines: string[] = [];
+    for (const [i, m] of open.entries()) {
+      const prices = m.outcomes.map((o) => `${o.label} ${o.price != null ? cents(o.price) : "?"}`).join(" / ");
+      const end = m.endDate ? `, ends ${shortDate(new Date(m.endDate))}` : "";
+      lines.push(`• ${m.question}: ${prices}${end}. market "${m.slug}"`);
+      if (!budgetUsd || !(budgetUsd > 0) || i >= 3) continue;
+      const out = m.outcomes.find((o) => o.label.toLowerCase() === "yes") ?? m.outcomes[0]!;
+      const book = await this.o.data.book(out.assetId).catch(() => null);
+      const fill = book ? walkBook(book.asks, { usd: budgetUsd }, 0.99, "buy") : null;
+      if (!book || !fill || fill.shares <= 0) {
+        lines.push(`  ${fmtUsd(budgetUsd)} on ${out.label}: no sellers right now.`);
+      } else if (fill.shares < book.minOrderSize) {
+        lines.push(`  ${fmtUsd(budgetUsd)} on ${out.label}: too small, Polymarket's minimum here is ${fmtShares(book.minOrderSize)} shares.`);
+      } else {
+        const short = fill.usd < budgetUsd - 0.01 ? ` (only ${fmtUsd(fill.usd)} is for sale under 99¢)` : "";
+        lines.push(
+          `  ${fmtUsd(fill.usd)} on ${out.label} buys ${fmtShares(fill.shares)} shares at about ${cents(fill.avgPrice)}, pays ${fmtUsd(fill.shares)} if ${out.label}, else $0${short}.`,
+        );
+      }
+    }
+    return lines;
   }
 }
 

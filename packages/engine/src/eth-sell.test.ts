@@ -1,4 +1,5 @@
 import { checkEvmTransaction, createSigner, generateKeys, nativeValueLeavesReserve, type EvmTxRequest, type SignerApi } from "@fren/signer";
+import { swapSlippageBps } from "@fren/core";
 import { describe, expect, it } from "vitest";
 import { BASE_DOG, buildTestFren } from "./testing.js";
 import { NATIVE_ETH, NATIVE_SELL_GAS_ALLOWANCE_WEI } from "./venues/relay.js";
@@ -204,13 +205,63 @@ describe("ETH in paper mode", () => {
     const t = buildTestFren();
     t.store.setLimits({ ...t.store.getLimits(), autoApproveUsd: 100 }); // the default is $50; a $100 buy would ask for a code
     const buy = await t.fren.submit({ request: "buy eth", steps: [{ leg: { kind: "swap", venue: "relay", chain: "arbitrum", side: "buy", token: "ETH", amount: { type: "usd", usd: 100 } } }] });
-    expect(buy.text).toMatch(/Paper: Bought 0\.05000 ETH on Arbitrum for \$100 at \$2,000/);
+    expect(buy.text).toMatch(/Practice: Bought 0\.05000 ETH on Arbitrum for \$100 at \$2,000/);
     const sell = await t.fren.submit(sellEth("arbitrum", { type: "fraction", fraction: 0.5 }));
-    expect(sell.text).toMatch(/Paper: Sold 0\.02500 ETH on Arbitrum for \$50/);
+    expect(sell.text).toMatch(/Practice: Sold 0\.02500 ETH on Arbitrum for \$50/);
   });
 
   it("has no paper ETH to sell before buying any", async () => {
     const t = buildTestFren();
     expect((await t.fren.submit(sellEth("arbitrum", { type: "fraction", fraction: 1 }))).text).toMatch(/You hold no paper ETH on Arbitrum/);
+  });
+});
+
+describe("selling an ERC-20, live", () => {
+  it("approves exactly the raw balance it sells (no float rounding), so the swap isn't short of allowance", async () => {
+    // 18-decimal balance too big for a double: qty * 1e18 would lose the last digits.
+    const HELD_TOKENS = 26_481_568_016_940_300_690n; // 26.48156801694030069 tokens
+    const key = `base:${BASE_DOG.toLowerCase()}`;
+    const { signer, sent } = recordingSigner({ [key]: HELD_TOKENS, "base:native": ETH(0.01) });
+    const t = buildTestFren({ signer, live: true, evmBalances: { [key]: HELD_TOKENS, "base:native": ETH(0.01) } });
+    await t.fren.changeLimits("autoApproveUsd=0");
+    const maxApprove = "0x095ea7b3" + ROUTER.slice(2).padStart(64, "0") + "f".repeat(64);
+    t.fake.relaySteps = (body) => [
+      { id: "approve", kind: "transaction", items: [{ status: "incomplete", data: { from: body.user, to: BASE_DOG, data: maxApprove, value: "0", chainId: body.originChainId } }] },
+      { id: "swap", kind: "transaction", items: [{ status: "incomplete", data: { from: body.user, to: ROUTER, data: "0xcd6e13f7", value: "0", chainId: body.originChainId, gas: "592417" } }] },
+    ];
+    const res = await t.fren.submit({
+      request: "sell all my dog",
+      steps: [{ leg: { kind: "swap", venue: "relay", chain: "base", side: "sell", token: BASE_DOG, amount: { type: "fraction", fraction: 1 } } }],
+    });
+    if (res.verdict === "needs_code") await t.fren.approve(codeFrom(t.notifier.sent));
+    const approval = sent.find((s) => s.data.startsWith("0x095ea7b3"));
+    expect(approval).toBeDefined();
+    expect(BigInt("0x" + approval!.data.slice(-64))).toBe(HELD_TOKENS);
+  });
+});
+
+describe("slippage set up front (chat 22.11: an ARB sale reverted at 1%, went through at 3%)", () => {
+  it("a Relay sale allows 3% when the plan doesn't name one", async () => {
+    const { t, run } = await live({ "arbitrum:native": HELD });
+    await run(sellEth("arbitrum", { type: "fraction", fraction: 0.5 }));
+    expect(t.fake.relayQuotes.at(-1)).toMatchObject({ slippageTolerance: "300" });
+  });
+
+  it("the owner's own number wins, tighter or looser", async () => {
+    const { t, run } = await live({ "arbitrum:native": HELD });
+    const plan = (bps: number) => ({ request: "sell eth", steps: [{ leg: { kind: "swap", venue: "relay", chain: "arbitrum", side: "sell", token: "ETH", amount: { type: "fraction", fraction: 0.1 }, maxSlippageBps: bps } }] });
+    await run(plan(50));
+    expect(t.fake.relayQuotes.at(-1)).toMatchObject({ slippageTolerance: "50" });
+    await run(plan(500));
+    expect(t.fake.relayQuotes.at(-1)).toMatchObject({ slippageTolerance: "500" });
+  });
+
+  it("Jupiter keeps 1% by default; the plan schema still refuses over 50%", async () => {
+    const t = buildTestFren();
+    expect(swapSlippageBps({ venue: "jupiter" })).toBe(100);
+    expect(swapSlippageBps({ venue: "relay" })).toBe(300);
+    expect(swapSlippageBps({ venue: "jupiter", maxSlippageBps: 20 })).toBe(20);
+    const bad = await t.fren.submit({ request: "x", steps: [{ leg: { kind: "swap", venue: "relay", chain: "arbitrum", side: "sell", token: "ETH", amount: { type: "fraction", fraction: 1 }, maxSlippageBps: 9000 } }] });
+    expect(bad.verdict).toBe("invalid");
   });
 });

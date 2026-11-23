@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { frenPaths } from "./config.js";
-import { applyLoopGuard, findTelegramOwner, guardExisting, runSetup, systemdUnit, type Prompt, type Runner, type SetupDeps } from "./setup.js";
+import { applyLoopGuard, configureTelegram, findTelegramOwner, guardExisting, rememberOwnerLang, runSetup, systemdUnit, type Prompt, type Runner, type SetupDeps } from "./setup.js";
 
 const TOKEN = "123456789:AAtesttokentesttokentesttokentest";
 
@@ -242,6 +242,40 @@ describe("findTelegramOwner", () => {
   });
 });
 
+describe("rememberOwnerLang", () => {
+  const deps = (has: boolean) => {
+    const files = new Map<string, string>();
+    return { files, d: { exists: () => has, writeFile: (f: string, v: string) => void files.set(f, v), paths: frenPaths("/h/.fren") } };
+  };
+  it("keeps the owner's Telegram language so Fren speaks it before their first message", () => {
+    for (const [code, want] of [["uk", "uk"], ["ru-RU", "ru"], ["be", "ru"], ["en-GB", "en"], ["de", "en"]] as const) {
+      const { files, d } = deps(false);
+      rememberOwnerLang(d, code);
+      expect([...files.values()]).toEqual([want]);
+      expect([...files.keys()][0]).toMatch(/owner-lang$/);
+    }
+  });
+  it("never overrides a language the owner already spoke in", () => {
+    const { files, d } = deps(true);
+    rememberOwnerLang(d, "en");
+    rememberOwnerLang(deps(false).d, undefined);
+    expect(files.size).toBe(0);
+  });
+  it("the owner found in Telegram carries the app language", async () => {
+    const msg = { update_id: 3, message: { chat: { type: "private" }, from: { id: 42, is_bot: false, first_name: "Тим", language_code: "uk" } } };
+    const owner = await findTelegramOwner({ io: scriptedIo(["y"]), fetchFn: fakeTelegram([msg]).fetchFn, sleep: async () => {} }, TOKEN, "b");
+    expect(owner.lang).toBe("uk");
+  });
+  it("the first message in the chat is already in the owner's language", async () => {
+    const run: Runner = async () => ({ code: 0, stdout: "", stderr: "" });
+    for (const [lang, want] of [["ru", /нашёл/], ["uk", /знайшов/], [undefined, /found you/]] as const) {
+      const tg = fakeTelegram([]);
+      await configureTelegram({ run, openclawBin: "openclaw", fetchFn: tg.fetchFn }, TOKEN, "42", lang);
+      expect(String(tg.calls.find((c) => c.method === "sendMessage")?.body.text)).toMatch(want);
+    }
+  });
+});
+
 describe("systemdUnit", () => {
   it("runs as the given user on a server", () => {
     const u = systemdUnit({ node: "/usr/bin/node", cli: "/opt/fren/cli.js", pathEnv: "/usr/bin", frenHome: "/home/fren/.fren", user: "fren" });
@@ -265,6 +299,10 @@ describe("fren guard", () => {
     expect(runs).toContain(`openclaw config set agents.defaults.heartbeat.every "0m"`);
     expect(runs).toContain("openclaw config set agents.defaults.timeoutSeconds 600");
     expect(runs).toContain(`openclaw config set channels.telegram.groupPolicy "disabled"`);
+    // The Telegram menu: only Fren's commands, OpenClaw's 81 built-ins and skills out of it.
+    expect(runs).toContain("openclaw config set channels.telegram.commands.native false");
+    const menu = runs.find((r) => r.startsWith("openclaw config set channels.telegram.customCommands "))!;
+    expect(JSON.parse(menu.replace("openclaw config set channels.telegram.customCommands ", "")).map((c: { command: string }) => c.command)).toEqual(["ok", "positions", "wallet", "fren_dashboard", "limits", "fren_stop", "resume", "close_all", "fren_images", "fren_update"]);
     expect(runs.some((r) => r.startsWith("openclaw config set channels.whatsapp"))).toBe(false);
     expect(runs.at(-1)).toBe("openclaw daemon restart");
     expect(said.join("\n")).toMatch(/Loop guard on \(telegram\)/);

@@ -38,7 +38,7 @@ export interface ManagedBotSession {
 export interface ManagedBotResult {
   token: string;
   bot: { id: string; username: string };
-  owner: { id: string; name: string };
+  owner: { id: string; name: string; lang?: string };
 }
 
 /** Asks the broker for a creation link. The private key stays with the caller. */
@@ -61,7 +61,7 @@ export async function startManagedBot(fetchFn: Fetch, broker: string, name = "Fr
 export async function claimManagedBot(fetchFn: Fetch, s: ManagedBotSession): Promise<ManagedBotResult | null> {
   const r = await brokerCall<
     | { status: "waiting" }
-    | { status: "ready"; sealed: string; bot: { id: string; username: string }; owner: { id: string; name: string } }
+    | { status: "ready"; sealed: string; bot: { id: string; username: string }; owner: { id: string; name: string; lang?: string } }
   >(fetchFn, s.broker, "/v1/claim", { sid: s.sid, claim: s.claim });
   if (r.status === "waiting") return null;
   const token = privateDecrypt(
@@ -116,7 +116,7 @@ interface Session {
   username: string;
   /** Telegram user who opened the fallback /start link for this session. */
   userId?: string;
-  ready?: { sealed: string; bot: { id: string; username: string }; owner: { id: string; name: string } };
+  ready?: { sealed: string; bot: { id: string; username: string }; owner: { id: string; name: string; lang?: string } };
   expires: number;
 }
 
@@ -126,6 +126,7 @@ interface TgUser {
   first_name?: string;
   last_name?: string;
   username?: string;
+  language_code?: string;
   can_manage_bots?: boolean;
 }
 
@@ -182,7 +183,7 @@ export function createBotBroker(o: BrokerOptions): BotBroker {
         Buffer.from(token.result, "utf8"),
       ).toString("base64"),
       bot: { id: String(bot.id), username: bot.username ?? "" },
-      owner: { id: String(user.id), name: [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username || "you" },
+      owner: { id: String(user.id), name: [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username || "you", ...(user.language_code ? { lang: user.language_code } : {}) },
     };
     // Only the owner can open the bot, on Telegram's side too (Fren also allow-lists them).
     await tg("setManagedBotAccessSettings", { user_id: bot.id, is_access_restricted: true });

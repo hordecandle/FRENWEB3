@@ -32,7 +32,7 @@ describe("owner dashboard", () => {
     const { dash, notifier } = await start();
     const r = await dash.sendLink();
     expect(r.link).toBeUndefined();
-    expect(r.text).toMatch(/private message/);
+    expect(r.text).toMatch(/separate message/);
     expect(notifier.sent.at(-1)).toMatch(/^🔑 Your Fren dashboard:\nhttps:\/\/1-2-3-4\.sslip\.io\/login\?t=[\w-]{30,}/);
   });
 
@@ -128,5 +128,140 @@ describe("dashboard address", () => {
     delete process.env.FREN_DASHBOARD_URL;
     expect(dashboardUrl("/nonexistent")).toBeNull();
     if (old !== undefined) process.env.FREN_DASHBOARD_URL = old;
+  });
+});
+
+import { cardTopUp } from "./dashboard.js";
+describe("card top-up", () => {
+  const a = { evm: "0xabc", solana: "So1" };
+  it("is always offered, and says why it's off without the Transak key", () => {
+    expect(cardTopUp(a, {})).toMatchObject({ provider: "Transak", mode: "off", url: null, network: "solana", coin: "USDC" });
+    expect(cardTopUp(a, { FREN_CARD_ONRAMP: "live" }).mode).toBe("off");
+    expect(cardTopUp(null, { FREN_TRANSAK_KEY: "k" }).mode).toBe("off");
+  });
+  it("with the key: a sandbox link carrying the owner's own Solana address, no flag needed", () => {
+    const c = cardTopUp(a, { FREN_TRANSAK_KEY: "k" });
+    expect(c.mode).toBe("sandbox");
+    expect(c.url).toContain("global-stg.transak.com");
+    expect(c.url).toContain("walletAddress=So1");
+    expect(c.url).toContain("network=solana");
+    expect(c.url).toContain("cryptoCurrencyCode=USDC");
+  });
+  it("goes live only with the live flag, and falls back to Base when there's no Solana wallet", () => {
+    expect(cardTopUp(a, { FREN_TRANSAK_KEY: "k", FREN_CARD_ONRAMP: "live" })).toMatchObject({ mode: "live", url: expect.stringContaining("https://global.transak.com/") });
+    const c = cardTopUp({ evm: "0xabc" }, { FREN_TRANSAK_KEY: "k" });
+    expect(c.network).toBe("base");
+    expect(c.url).toContain("walletAddress=0xabc");
+  });
+});
+
+import { vi } from "vitest";
+const goldLong = (margin: number) => ({
+  request: `long gold 10x with $${margin}`,
+  steps: [{ leg: { kind: "perp_open", venue: "hyperliquid", market: "xyz:gold", side: "long", sizing: { type: "margin", usd: margin }, leverage: 10 } }],
+});
+/** Approve and Cancel on the page (round 3, 22.11: "why can't I approve it from the same box?"). Same guard as /ok: the page never sees the code, only a per-process reference. */
+describe("approve from the dashboard", () => {
+  afterEach(() => vi.useRealTimers());
+  async function waiting() {
+    const t = await start();
+    t.store.setLimits({ ...t.store.getLimits(), autoApproveUsd: 0 });
+    const cookie = await t.login();
+    expect((await t.fren.submit(goldLong(100))).verdict).toBe("needs_code");
+    const o = await (await t.get("/api/overview", cookie)).json();
+    return { ...t, cookie, o, w: o.waiting[0] };
+  }
+
+  it("shows what waits, with a reference instead of the code", async () => {
+    const { o, w, store } = await waiting();
+    expect(o.waiting).toHaveLength(1);
+    expect(w).toMatchObject({ kind: "plan", usd: 100 });
+    expect(w.label).toMatch(/GOLD/);
+    expect(w.ref).toMatch(/^[\w-]{20,}$/);
+    expect(JSON.stringify(o)).not.toContain(store.livePending()[0]!.code);
+  });
+
+  it("Approve runs it, tells the owner in Telegram, and the request is gone", async () => {
+    const { post, cookie, w, store, notifier } = await waiting();
+    const r = await post("/api/ok", cookie, { ref: w.ref, usd: w.usd });
+    expect(r.status).toBe(200);
+    expect((await r.json()).text).toMatch(/GOLD/);
+    expect(store.paperPositions()).toHaveLength(1);
+    expect(store.livePending()).toHaveLength(0);
+    expect(notifier.sent.some((m) => /approved it from the dashboard/.test(m))).toBe(true);
+  });
+
+  it("a changed amount is refused: the page must show what it approves", async () => {
+    const { post, cookie, w, store } = await waiting();
+    expect((await post("/api/ok", cookie, { ref: w.ref, usd: 1 })).status).toBe(409);
+    expect((await post("/api/ok", cookie, { ref: w.ref })).status).toBe(409);
+    expect(store.paperPositions()).toHaveLength(0);
+    expect(store.livePending()).toHaveLength(1);
+  });
+
+  it("the same reference twice runs nothing twice", async () => {
+    const { post, cookie, w, store } = await waiting();
+    expect((await post("/api/ok", cookie, { ref: w.ref, usd: w.usd })).status).toBe(200);
+    const again = await post("/api/ok", cookie, { ref: w.ref, usd: w.usd });
+    expect(again.status).toBe(400);
+    expect((await again.json()).error).toMatch(/isn't waiting any more/);
+    expect(store.paperPositions()).toHaveLength(1);
+  });
+
+  it("a request that ran out can't be approved", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { post, cookie, w, store } = await waiting();
+    vi.setSystemTime(Date.now() + 11 * 60_000);
+    expect((await post("/api/ok", cookie, { ref: w.ref, usd: w.usd })).status).toBe(400);
+    expect(store.paperPositions()).toHaveLength(0);
+    expect(store.livePending()).toHaveLength(0);
+  });
+
+  it("a made-up or foreign reference approves nothing and leaves the request waiting", async () => {
+    const { post, cookie, w, store } = await waiting();
+    for (const ref of ["", "x", w.ref.slice(1) + "A", 123, null, { a: 1 }]) expect((await post("/api/ok", cookie, { ref, usd: w.usd })).status).toBe(400);
+    expect(store.paperPositions()).toHaveLength(0);
+    expect(store.livePending()).toHaveLength(1);
+  });
+
+  it("needs the session and the custom header, like every action", async () => {
+    const { post, cookie, w, store } = await waiting();
+    expect((await post("/api/ok", cookie, { ref: w.ref, usd: w.usd }, {})).status).toBe(403);
+    expect((await post("/api/ok", "fren_dash=nope", { ref: w.ref, usd: w.usd })).status).toBe(401);
+    expect((await post("/api/cancel", cookie, { ref: w.ref }, {})).status).toBe(403);
+    expect(store.paperPositions()).toHaveLength(0);
+    expect(store.livePending()).toHaveLength(1);
+  });
+
+  it("limits tightened after the request are checked again at Approve", async () => {
+    const { post, cookie, w, store } = await waiting();
+    store.setLimits({ ...store.getLimits(), maxTradeUsd: 50 });
+    const r = await post("/api/ok", cookie, { ref: w.ref, usd: w.usd });
+    expect(r.status).toBe(200);
+    expect((await r.json()).text).toMatch(/Not doing this after all/);
+    expect(store.paperPositions()).toHaveLength(0);
+    expect(store.livePending()).toHaveLength(0);
+  });
+
+  it("Cancel drops it, closes the plan and tells the owner", async () => {
+    const { post, cookie, w, store, notifier } = await waiting();
+    const r = await post("/api/cancel", cookie, { ref: w.ref });
+    expect(r.status).toBe(200);
+    expect((await r.json()).text).toMatch(/Cancelled/);
+    expect(store.livePending()).toHaveLength(0);
+    expect(store.plansWithStatus("pending_confirm")).toHaveLength(0);
+    expect(store.paperPositions()).toHaveLength(0);
+    expect(notifier.sent.some((m) => /cancelled it from the dashboard/.test(m))).toBe(true);
+    expect((await post("/api/ok", cookie, { ref: w.ref, usd: w.usd })).status).toBe(400);
+  });
+
+  it("other kinds wait here too: loosening limits", async () => {
+    const t = await start();
+    const cookie = await t.login();
+    await t.fren.changeLimits("maxTradeUsd=5000");
+    const o = await (await t.get("/api/overview", cookie)).json();
+    expect(o.waiting[0]).toMatchObject({ kind: "limits", label: "Loosen your limits" });
+    expect((await t.post("/api/ok", cookie, { ref: o.waiting[0].ref, usd: o.waiting[0].usd })).status).toBe(200);
+    expect(t.fren.limits().maxTradeUsd).toBe(5000);
   });
 });

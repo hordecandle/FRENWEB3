@@ -19,6 +19,8 @@ import {
   telegramBot,
   type ModelProvider,
   type SetupDeps,
+  rememberOwnerLang,
+  type TgCandidate,
 } from "./setup.js";
 import { BrokerError, claimManagedBot, startManagedBot, type ManagedBotSession } from "./managed-bot.js";
 import { SETUP_PAGE } from "./setup-page.js";
@@ -47,7 +49,7 @@ type Line = { telegram?: { botToken: string; ownerChatId: string }; notify?: { c
 interface State {
   line?: Line;
   channel?: "telegram" | "whatsapp";
-  telegram?: { token: string; bot: string; offset: number; candidates: { id: string; name: string }[] };
+  telegram?: { token: string; bot: string; offset: number; candidates: TgCandidate[] };
   managed?: ManagedBotSession;
   whatsapp?: { number: string; proc?: ChildProcess; qr?: string; linked: boolean; error?: string };
   finished?: { network: string; addresses: { solana: string; evm: string; hlAgent: string } };
@@ -121,7 +123,8 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       const bot = await telegramBot(deps.fetchFn, r.token);
       if (!bot) throw new UserError("Telegram didn't accept the new bot's token. Press Create my bot again.");
       state.telegram = { token: r.token, bot, offset: 0, candidates: [] };
-      state.line = await configureTelegram(deps, r.token, r.owner.id);
+      state.line = await configureTelegram(deps, r.token, r.owner.id, r.owner.lang);
+      rememberOwnerLang(deps, r.owner.lang);
       state.channel = "telegram";
       return { ready: true, bot, owner: r.owner.name };
     },
@@ -142,7 +145,9 @@ export function createSetupServer(deps: SetupDeps, opts: WebSetupOptions): Serve
       const id = String(b.id ?? "").trim();
       if (!/^\d{1,15}$/.test(id)) throw new UserError("Use the number @userinfobot shows as Id, digits only.");
       await ackTelegram(deps.fetchFn, tg.token, tg.offset);
-      state.line = await configureTelegram(deps, tg.token, id);
+      const lang = tg.candidates.find((c) => c.id === id)?.lang;
+      state.line = await configureTelegram(deps, tg.token, id, lang);
+      rememberOwnerLang(deps, lang);
       state.channel = "telegram";
       return { ok: true };
     },

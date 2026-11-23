@@ -1,7 +1,7 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { DEFAULT_LIMITS, Limits, type Plan, type ResolvedStep } from "@fren/core";
+import { DEFAULT_LIMITS, Limits, startingLimits, type Plan, type ResolvedStep } from "@fren/core";
 
 /**
  * Single-file local state (SQLite), so a user's whole setup is one folder they
@@ -63,13 +63,17 @@ export interface PaperHolding {
   costUsd: number;
 }
 
-export type PendingKind = "plan" | "limits" | "resume" | "fund" | "closeall";
+export type PendingKind = "plan" | "limits" | "resume" | "fund" | "closeall" | "hlwithdraw";
 
 export interface PendingAction {
   code: string;
   kind: PendingKind;
   payload: string;
   expiresAt: string;
+  /** One line on what the code approves, for the list a bare /ok shows when several wait. */
+  label?: string;
+  /** Dollars it puts in or moves, when known (the total on /ok all). */
+  usd?: number;
 }
 
 const now = () => new Date().toISOString();
@@ -79,6 +83,9 @@ export class Store {
 
   constructor(path: string, paperStartingUsd = 10_000) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    // A brand-new install (no database file yet) starts on the safer limits; an
+    // install that already has one keeps what it had, even if it never set limits.
+    const freshInstall = path !== ":memory:" && !existsSync(path);
     this.db = new DatabaseSync(path);
     this.db.exec(`
       PRAGMA journal_mode = WAL;
@@ -112,6 +119,12 @@ export class Store {
       );
     `);
     if (this.getKv("paper_usdc") === null) this.setKv("paper_usdc", String(paperStartingUsd));
+    if (this.getKv("paper_start_usd") === null) this.setKv("paper_start_usd", String(paperStartingUsd));
+    if (freshInstall && this.getKv("limits") === null) this.setLimits(startingLimits());
+    // Older databases: the pending table had no label or amount (added 22.11 for /ok lists).
+    const cols = (this.db.prepare("PRAGMA table_info(pending)").all() as { name: string }[]).map((c) => c.name);
+    if (!cols.includes("label")) this.db.exec("ALTER TABLE pending ADD COLUMN label TEXT");
+    if (!cols.includes("usd")) this.db.exec("ALTER TABLE pending ADD COLUMN usd REAL");
   }
 
   // -- kv ------------------------------------------------------------------
@@ -166,6 +179,11 @@ export class Store {
 
   plansWithStatus(status: PlanStatus): PlanRecord[] {
     return (this.db.prepare("SELECT * FROM plans WHERE status = ? ORDER BY created_at").all(status) as Record<string, string>[]).map(toPlan);
+  }
+
+  /** Plans the owner went ahead with or that were turned down, newest first (no plans still waiting for a code). */
+  recentPlans(limit = 30): PlanRecord[] {
+    return (this.db.prepare("SELECT * FROM plans WHERE status != 'pending_confirm' ORDER BY created_at DESC, rowid DESC LIMIT ?").all(limit) as Record<string, string>[]).map(toPlan);
   }
 
   getSteps(planId: string): StepRecord[] {
@@ -235,6 +253,11 @@ export class Store {
 
   // -- paper ledger --------------------------------------------------------
 
+  /** What the practice account started with. */
+  paperStartUsd(): number {
+    return Number(this.getKv("paper_start_usd") ?? 10_000);
+  }
+
   paperUsdc(): number {
     return Number(this.getKv("paper_usdc") ?? 0);
   }
@@ -298,24 +321,37 @@ export class Store {
   // -- pending owner approvals -------------------------------------------
 
   putPending(p: PendingAction) {
-    this.db.prepare("INSERT INTO pending (code, kind, payload, expires_at) VALUES (?, ?, ?, ?)").run(p.code, p.kind, p.payload, p.expiresAt);
+    this.db
+      .prepare("INSERT INTO pending (code, kind, payload, expires_at, label, usd) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(p.code, p.kind, p.payload, p.expiresAt, p.label ?? null, p.usd ?? null);
   }
 
   takePending(code: string, at = new Date()): PendingAction | null {
-    const row = this.db.prepare("SELECT * FROM pending WHERE code = ?").get(code) as Record<string, string> | undefined;
+    const row = this.db.prepare("SELECT * FROM pending WHERE code = ?").get(code) as Record<string, unknown> | undefined;
     if (!row) return null;
     this.db.prepare("DELETE FROM pending WHERE code = ?").run(code);
-    if (new Date(row.expires_at!).getTime() < at.getTime()) return null;
-    return { code: row.code!, kind: row.kind as PendingKind, payload: row.payload!, expiresAt: row.expires_at! };
+    if (new Date(String(row.expires_at)).getTime() < at.getTime()) return null;
+    return toPending(row);
+  }
+
+  /** Codes still valid, oldest first. */
+  livePending(at = new Date()): PendingAction[] {
+    const rows = this.db.prepare("SELECT * FROM pending ORDER BY rowid").all() as Record<string, unknown>[];
+    return rows.filter((r) => new Date(String(r.expires_at)).getTime() >= at.getTime()).map(toPending);
   }
 
   /** The one code still waiting, when there is exactly one (a bare /ok approves it). */
   soleLivePending(at = new Date()): PendingAction | null {
-    const rows = this.db.prepare("SELECT * FROM pending").all() as Record<string, string>[];
-    const live = rows.filter((r) => new Date(r.expires_at!).getTime() >= at.getTime());
-    if (live.length !== 1) return null;
-    const r = live[0]!;
-    return { code: r.code!, kind: r.kind as PendingKind, payload: r.payload!, expiresAt: r.expires_at! };
+    const live = this.livePending(at);
+    return live.length === 1 ? live[0]! : null;
+  }
+
+  /** Delete codes that ran out and return them, so nothing keeps saying it waits for /ok. */
+  takeExpiredPending(at = new Date()): PendingAction[] {
+    const rows = this.db.prepare("SELECT * FROM pending ORDER BY rowid").all() as Record<string, unknown>[];
+    const gone = rows.filter((r) => new Date(String(r.expires_at)).getTime() < at.getTime()).map(toPending);
+    for (const p of gone) this.db.prepare("DELETE FROM pending WHERE code = ?").run(p.code);
+    return gone;
   }
 
   dropAllPending() {
@@ -362,4 +398,11 @@ function toStep(row: Record<string, unknown>): StepRecord {
     result: (row.result as string | null) ?? null,
     updatedAt: row.updated_at as string,
   };
+}
+
+function toPending(r: Record<string, unknown>): PendingAction {
+  const p: PendingAction = { code: String(r.code), kind: r.kind as PendingKind, payload: String(r.payload), expiresAt: String(r.expires_at) };
+  if (typeof r.label === "string" && r.label) p.label = r.label;
+  if (typeof r.usd === "number" && Number.isFinite(r.usd)) p.usd = r.usd;
+  return p;
 }

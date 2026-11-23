@@ -56,9 +56,9 @@ describe("evaluatePolicy", () => {
     const limits = Limits.parse({ maxLeverage: 100 });
     const d = evaluatePolicy([perpStep({ leverage: 100 })], limits, state);
     expect(d.verdict).toBe("reject");
-    expect(d.steps[0]!.reasons.join()).toMatch(/at most 40x/);
+    expect(d.steps[0]!.reasons.join()).toMatch(/at most a 40× boost/);
     const d2 = evaluatePolicy([perpStep({ leverage: 30 })], DEFAULT_LIMITS, state);
-    expect(d2.steps[0]!.reasons.join()).toMatch(/max leverage of 20x/);
+    expect(d2.steps[0]!.reasons.join()).toMatch(/over your limit of 20×/);
   });
 
   it("rejects everything when paused", () => {
@@ -76,10 +76,10 @@ describe("evaluatePolicy", () => {
 
   it("warns when the stop is past liquidation or missing at high leverage", () => {
     const d = evaluatePolicy([perpStep({ leverage: 20, stop: 90 })], DEFAULT_LIMITS, state);
-    expect(d.steps[0]!.warnings.join()).toMatch(/past liquidation/);
+    expect(d.steps[0]!.warnings.join()).toMatch(/closes the bet by itself/);
     const limits = Limits.parse({ maxLeverage: 40 });
     const d2 = evaluatePolicy([perpStep({ leverage: 40 })], limits, state);
-    expect(d2.steps[0]!.warnings.join()).toMatch(/No stop set at 40x/);
+    expect(d2.steps[0]!.warnings.join()).toMatch(/No stop with a 40× boost/);
   });
 
   it("does not re-ask for confirmation at fire time but still checks caps", () => {
@@ -92,7 +92,7 @@ describe("evaluatePolicy", () => {
   it("renders a readable summary", () => {
     const d = evaluatePolicy([perpStep({ margin: 300, stop: 5 })], DEFAULT_LIMITS, state);
     expect(describeDecision(d, [perpStep({ margin: 300, stop: 5 })])).toContain(
-      "Long BTC on Hyperliquid: $300 margin at 10x ($3,000 position), stop at -5% of margin, -$15.00 (0.50% price move)",
+      "Bet $300 that BTC goes up, 10× boost on Hyperliquid. Stop: if BTC falls ~0.5%, Fren closes it and you lose about $15",
     );
   });
 });
@@ -114,5 +114,16 @@ describe("limits", () => {
     expect(isTightening(DEFAULT_LIMITS, Limits.parse({ maxTradeUsd: 1000 }))).toBe(false);
     expect(isTightening(DEFAULT_LIMITS, Limits.parse({ mode: "live" }))).toBe(false);
     expect(isTightening(Limits.parse({ paused: true }), DEFAULT_LIMITS)).toBe(false);
+  });
+});
+
+describe("novice starting limits (default for new installs)", () => {
+  it("are stricter than the defaults on every dial, and FREN_NOVICE_DEFAULTS=0 brings back the wide ones", async () => {
+    const { DEFAULT_LIMITS, NOVICE_LIMITS, startingLimits } = await import("./limits.js");
+    expect(startingLimits({})).toBe(NOVICE_LIMITS);
+    expect(startingLimits({ FREN_NOVICE_DEFAULTS: "0" })).toBe(DEFAULT_LIMITS);
+    expect(isTightening(DEFAULT_LIMITS, NOVICE_LIMITS)).toBe(true);
+    expect(NOVICE_LIMITS).toMatchObject({ maxLeverage: 3, autoApproveUsd: 0, maxTradeUsd: 100, maxDailyUsd: 300, maxOpenPositions: 3 });
+    expect(NOVICE_LIMITS.allowedVenues).not.toContain("derive");
   });
 });
