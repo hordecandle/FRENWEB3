@@ -225,7 +225,7 @@ describe("VPS wizard", () => {
     u.rs.orderFails = 9;
     for (let i = 0; i < 4; i++) await poll(u, o.id);
     const v = await poll(u, o.id);
-    expect(v).toMatchObject({ stage: "failed", retryable: false, contact: "help@fren.example", error: expect.stringMatching(/got your payment/) });
+    expect(v).toMatchObject({ stage: "failed", retryable: true, retryKind: "order", contact: "help@fren.example", error: expect.stringMatching(/got your payment/) });
   });
 
   it("keeps the host's reason, and the operator orders again on the same payment", async () => {
@@ -236,12 +236,20 @@ describe("VPS wizard", () => {
     t.rs.orderRefusal = { error: "Location fi is not available for this plan" };
     for (let i = 0; i < 4; i++) await poll(t, id);
     const v = await poll(t, id);
-    expect(v).toMatchObject({ stage: "failed", retryable: false, paidTx: expect.any(String), detail: expect.stringMatching(/Location fi is not available/) });
-    expect(v.error).toMatch(/Don't pay again/);
+    expect(v).toMatchObject({ stage: "failed", retryable: true, retryKind: "order", paidTx: expect.any(String), detail: expect.stringMatching(/Location fi is not available/) });
+    expect(v.error).toMatch(/won't be charged again/);
+    expect(t.rs.services).toHaveLength(0);
+
+    // Try again while the host still refuses: failed again, reason kept, still no server.
+    await t.wizard.retry(id);
+    for (let i = 0; i < 4; i++) await poll(t, id);
+    expect(await poll(t, id)).toMatchObject({ stage: "failed", retryable: true, retryKind: "order" });
     expect(t.rs.services).toHaveLength(0);
 
     t.rs.orderRefusal = null; // the plan got Finland
-    const r = await t.wizard.reorder(id);
+    const r = await t.wizard.retry(id);
+    // A double click right after is harmless and orders nothing more.
+    expect(await t.wizard.retry(id)).toMatchObject({ stage: "provisioning" });
     expect(r).toMatchObject({ stage: "provisioning", paidTx: v.paidTx });
     expect(r.error).toBeUndefined();
     expect(t.rs.services).toHaveLength(1);

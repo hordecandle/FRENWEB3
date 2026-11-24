@@ -210,8 +210,9 @@ export function createWizard(deps) {
         rec.orderErrors = (rec.orderErrors ?? 0) + 1;
         if (rec.orderErrors >= ORDER_TRIES) {
           rec.stage = "failed";
-          rec.retryable = false;
-          rec.error = "We got your payment, but the server host didn't accept the order. Don't pay again: your payment stays with this order and the server will be ordered on it." + supportLine();
+          rec.retryable = true;
+          rec.retryKind = "order";
+          rec.error = "We got your payment, but the server host didn't accept the order. You won't be charged again: press Try again to order the server on the same payment." + supportLine();
           rec.detail = err.message;
         }
         await save(rec);
@@ -305,7 +306,7 @@ export function createWizard(deps) {
   async function reorder(id) {
     const rec = await load(id);
     if (rec.stage !== "failed" || !rec.paidTx || rec.serviceId) throw new UserError("This setup has no paid order waiting for a server.");
-    for (const k of ["error", "detail", "orderingAt", "orderErrors"]) delete rec[k];
+    for (const k of ["error", "detail", "orderingAt", "orderErrors", "retryKind"]) delete rec[k];
     rec.stage = "paid";
     rec.retryable = false;
     rec.progress = "Payment confirmed. Ordering your server…";
@@ -316,7 +317,10 @@ export function createWizard(deps) {
 
   async function retry(id) {
     const rec = await load(id);
+    // A second click (or a second tab) while the first retry runs is harmless.
+    if (rec.paidTx && ["paid", "provisioning", "installing"].includes(rec.stage)) return view(rec);
     if (rec.stage !== "failed" || !rec.retryable) throw new UserError("There's nothing to retry for this setup.");
+    if (rec.retryKind === "order") return reorder(id);
     await restart(rec);
     return view(rec);
   }
@@ -422,7 +426,7 @@ export function createWizard(deps) {
       v.paidTxUrl = NETWORKS[rec.network].explorer(rec.paidTx);
       v.paidAmount = fromUnits(rec.paidUnits);
     }
-    for (const k of ["progress", "setupUrl", "error", "detail", "retryable", "polymarket"]) if (rec[k] !== undefined) v[k] = rec[k];
+    for (const k of ["progress", "setupUrl", "error", "detail", "retryable", "retryKind", "polymarket"]) if (rec[k] !== undefined) v[k] = rec[k];
     if (rec.stage === "failed" && contact) v.contact = contact;
     return v;
   }

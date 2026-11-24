@@ -59,7 +59,15 @@
         this.save(db);
         return this.view(body.id, db[body.id]);
       }
-      if (path === "retry") return this.view(body.id, db[body.id]);
+      if (path === "retry") {
+        // ?mock&orderfail: the host refuses after payment. ?orderfail=always: refuses again on retry.
+        const r = db[body.id];
+        if (params.get("orderfail") !== "always") r.ok = true;
+        r.paidAt = Date.now();
+        r.tries = (r.tries || 0) + 1;
+        this.save(db);
+        return this.view(body.id, r);
+      }
       if (path === "status") {
         if (!db[body.id]) throw new Error("not found");
         return this.view(body.id, db[body.id]);
@@ -74,6 +82,10 @@
       }
       const s = (Date.now() - r.paidAt) / 1000;
       const paid = { ...base, paidTx: "0xabc", paidTxUrl: "https://basescan.org/", paidAmount: r.amount };
+      if (params.has("orderfail") && !r.ok) {
+        if (s < 3) return { ...paid, stage: "provisioning", progress: "Payment confirmed. Starting your server…" };
+        return { ...paid, stage: "failed", retryable: true, retryKind: "order", error: "We got your payment, but the server host didn't accept the order. You won't be charged again: press Try again to order the server on the same payment.", detail: "EQVPS reseller POST /orders failed (400): Location fi is not available for this plan" };
+      }
       if (s < 6) return { ...paid, stage: "provisioning", progress: "Starting your server…" };
       if (s < 14) return { ...paid, stage: "installing", progress: "Installing Fren…" };
       return { ...paid, stage: "ready", setupUrl: "https://51-75-123-45.sslip.io/setup?t=mocktoken", polymarket: { blocked: false, country: "FI" } };
@@ -216,7 +228,11 @@
       case "failed":
         show("s-failed", "build");
         // After payment the fix is a retry on the same server, never a new order.
-        if (d.retryable) {
+        if (d.retryable && d.retryKind === "order") {
+          $("fail-title").textContent = "Your server isn't ordered yet";
+          $("fail-msg").innerHTML =
+            "We got your payment, but the server host didn't accept the order. Press Try again: we order it on the same payment and <b>you won't be charged twice.</b>";
+        } else if (d.retryable) {
           $("fail-title").textContent = "The install got stuck";
           $("fail-msg").innerHTML =
             "Your server is fine and already paid for. Fren just didn't finish installing. Try again on the same server: <b>you won't be charged twice.</b>";
@@ -308,6 +324,7 @@
   }
 
   $("retry").addEventListener("click", async () => {
+    if ($("retry").disabled) return; // double click: one request
     busy($("retry"), true);
     try {
       renderStage(await api("retry", { id }));
