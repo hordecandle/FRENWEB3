@@ -56,6 +56,7 @@ function fakeReseller() {
     }
     if (path === "/services" && m === "GET") return json(200, { data: s.services });
     if (path === "/orders") {
+      if (s.orderRefusal) return json(400, s.orderRefusal);
       if (s.orderFails > 0) {
         s.orderFails--;
         return json(500, { message: "busy" });
@@ -225,6 +226,29 @@ describe("VPS wizard", () => {
     for (let i = 0; i < 4; i++) await poll(u, o.id);
     const v = await poll(u, o.id);
     expect(v).toMatchObject({ stage: "failed", retryable: false, contact: "help@fren.example", error: expect.stringMatching(/got your payment/) });
+  });
+
+  it("keeps the host's reason, and the operator orders again on the same payment", async () => {
+    const t = setup();
+    const { id, amount } = await t.wizard.start("bee@example.com", "base");
+    t.base.pay(amount);
+    // EQVPS's 400 has no "message" field: the reason must still reach the log.
+    t.rs.orderRefusal = { error: "Location fi is not available for this plan" };
+    for (let i = 0; i < 4; i++) await poll(t, id);
+    const v = await poll(t, id);
+    expect(v).toMatchObject({ stage: "failed", retryable: false, paidTx: expect.any(String), detail: expect.stringMatching(/Location fi is not available/) });
+    expect(v.error).toMatch(/Don't pay again/);
+    expect(t.rs.services).toHaveLength(0);
+
+    t.rs.orderRefusal = null; // the plan got Finland
+    const r = await t.wizard.reorder(id);
+    expect(r).toMatchObject({ stage: "provisioning", paidTx: v.paidTx });
+    expect(r.error).toBeUndefined();
+    expect(t.rs.services).toHaveLength(1);
+    // Nothing left to reorder: never a second server.
+    await expect(t.wizard.reorder(id)).rejects.toThrow(/no paid order waiting/);
+    expect(t.rs.calls.filter((c) => c === "POST /orders").length).toBeGreaterThan(1);
+    expect(t.rs.services).toHaveLength(1);
   });
 
   it("finds an order that went through even if the answer got lost", async () => {

@@ -8,6 +8,11 @@
 // "reinstall" wipes that order's server, puts a fresh OS on it and installs
 // the current Fren again. The buyer's order page then shows the progress and
 // a new setup link, as on the first install.
+//
+//   POST /api/vps/admin { key, action: "reorder", hostname: "fren-…" }
+//
+// "reorder": the host refused the order after payment. Fix the cause (plan,
+// location, balance), then order the server again on the same payment.
 import { timingSafeEqual } from "node:crypto";
 import { getStore } from "@netlify/blobs";
 import { handle, json, wizard } from "./lib/runtime.mjs";
@@ -33,9 +38,10 @@ export default async (req) => {
   const body = await req.json().catch(() => ({}));
   if (!keyOk(body.key)) return json(404, { error: "Not found." });
   return handle(async () => {
-    if (body.action !== "reinstall") throw new UserError("Unknown action.");
+    if (body.action !== "reinstall" && body.action !== "reorder") throw new UserError("Unknown action.");
     if (typeof body.hostname !== "string" || !/^fren-[a-z0-9]{1,12}$/.test(body.hostname)) throw new UserError("Give the server's hostname (fren-…).");
-    return wizard().reinstall(await orderIdFor(body.hostname));
+    const id = await orderIdFor(body.hostname);
+    return body.action === "reorder" ? wizard().reorder(id) : wizard().reinstall(id);
   });
 };
 

@@ -211,7 +211,7 @@ export function createWizard(deps) {
         if (rec.orderErrors >= ORDER_TRIES) {
           rec.stage = "failed";
           rec.retryable = false;
-          rec.error = "We got your payment, but the server host didn't accept the order." + supportLine();
+          rec.error = "We got your payment, but the server host didn't accept the order. Don't pay again: your payment stays with this order and the server will be ordered on it." + supportLine();
           rec.detail = err.message;
         }
         await save(rec);
@@ -295,6 +295,23 @@ export function createWizard(deps) {
     await save(rec);
     await deps.triggerInstall(rec.id);
     return rec;
+  }
+
+  /**
+   * Operator only (see vps-admin.mjs): the host refused the order after the
+   * buyer paid (e.g. the plan lacked the location). Once that's fixed, order
+   * again on the same payment. Still one server: ordering looks up the hostname first.
+   */
+  async function reorder(id) {
+    const rec = await load(id);
+    if (rec.stage !== "failed" || !rec.paidTx || rec.serviceId) throw new UserError("This setup has no paid order waiting for a server.");
+    for (const k of ["error", "detail", "orderingAt", "orderErrors"]) delete rec[k];
+    rec.stage = "paid";
+    rec.retryable = false;
+    rec.progress = "Payment confirmed. Ordering your server…";
+    await save(rec);
+    await provision(rec);
+    return view(rec);
   }
 
   async function retry(id) {
@@ -421,7 +438,7 @@ export function createWizard(deps) {
     return a.length === b.length && timingSafeEqual(a, b);
   }
 
-  return { plans, start, status, submitTx, install, retry, reinstall, view, mayDownload };
+  return { plans, start, status, submitTx, install, retry, reinstall, reorder, view, mayDownload };
 }
 
 const amountKey = (network, units) => `amt-${network}-${units}`;

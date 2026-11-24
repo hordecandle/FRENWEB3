@@ -23,7 +23,10 @@ export function resellerClient({ token, base = "https://b2b.eqvps.com/api/resell
       json = { message: text.slice(0, 200) };
     }
     if (!res.ok) {
-      const err = new Error(`EQVPS reseller ${method} ${path} failed (${res.status}): ${json.message ?? "no message"}`);
+      // EQVPS doesn't document its error shape: keep whatever reason it gave.
+      const why = json.message ?? json.error ?? json.errors ?? json.detail ?? (text ? text.slice(0, 300) : null);
+      const reason = why == null ? "no message" : typeof why === "string" ? why : JSON.stringify(why).slice(0, 300);
+      const err = new Error(`EQVPS reseller ${method} ${path} failed (${res.status}): ${reason}`);
       err.status = res.status;
       throw err;
     }

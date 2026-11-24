@@ -224,9 +224,10 @@
           $("fail-title").textContent = "Something went wrong";
           $("fail-msg").textContent = d.error || "The server didn't finish setting up. Press Start again to try once more.";
         }
+        // Paid already: a new order would mean paying twice, so no "Start again".
         $("retry").hidden = !d.retryable;
-        $("fail-paid").hidden = !d.retryable;
-        $("start-again").hidden = Boolean(d.retryable);
+        $("fail-paid").hidden = !(d.retryable || d.paidTx);
+        $("start-again").hidden = Boolean(d.retryable || d.paidTx);
         // Support line only when a contact is configured: no contact, no line.
         $("fail-contact").hidden = !d.contact;
         $("fail-contact").textContent = d.contact ? `Still stuck? Write to ${d.contact} and include this page's link.` : "";
