@@ -118,8 +118,23 @@ export function createWizard(deps) {
   }
 
   /** Called by the page every few seconds; moves things along. */
+  /**
+   * Orders that failed at the host before "Try again" existed were saved as
+   * failed + not retryable, with no server. Paid, no server, host refused the
+   * order: that's the same case, so make it retryable on the same payment.
+   */
+  function upgradeRefusedOrder(rec) {
+    if (rec.stage !== "failed" || rec.retryable || rec.retryKind || rec.serviceId || !rec.paidTx) return false;
+    if (!/POST \/orders|didn't accept the order/.test(`${rec.detail ?? ""} ${rec.error ?? ""}`)) return false;
+    rec.retryable = true;
+    rec.retryKind = "order";
+    rec.error = "We got your payment, but the server host didn't accept the order. You won't be charged again: press Try again to order the server on the same payment." + supportLine();
+    return true;
+  }
+
   async function status(id) {
     const rec = await load(id);
+    if (upgradeRefusedOrder(rec)) await save(rec);
     if (rec.stage === "awaiting_payment" || rec.stage === "expired") await watchPayment(rec);
     if (rec.stage === "paid" || rec.stage === "provisioning") await provision(rec);
     else if (rec.stage === "installing" && now() - rec.installStartedAt > INSTALL_TIMEOUT_MS) await fail(rec, "Installing took longer than expected.", "timeout");
@@ -317,6 +332,7 @@ export function createWizard(deps) {
 
   async function retry(id) {
     const rec = await load(id);
+    upgradeRefusedOrder(rec);
     // A second click (or a second tab) while the first retry runs is harmless.
     if (rec.paidTx && ["paid", "provisioning", "installing"].includes(rec.stage)) return view(rec);
     if (rec.stage !== "failed" || !rec.retryable) throw new UserError("There's nothing to retry for this setup.");

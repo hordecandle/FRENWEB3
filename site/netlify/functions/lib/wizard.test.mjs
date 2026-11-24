@@ -259,6 +259,30 @@ describe("VPS wizard", () => {
     expect(t.rs.services).toHaveLength(1);
   });
 
+  it("an order that failed before Try again existed (failed, not retryable, no retryKind) can be retried on the same payment", async () => {
+    const t = setup();
+    const { id, amount } = await t.wizard.start("bee@example.com", "base");
+    t.base.pay(amount);
+    t.rs.orderRefusal = { error: "no plan for fi" };
+    for (let i = 0; i < 5; i++) await poll(t, id);
+    // Rewrite it the way the old code saved it.
+    const rec = t.db.get(id);
+    rec.retryable = false;
+    delete rec.retryKind;
+    rec.error = "old text";
+    rec.detail = "EQVPS reseller POST /orders failed (400): no message";
+    t.db.set(id, rec);
+    expect(await t.wizard.status(id)).toMatchObject({ stage: "failed", retryable: true, retryKind: "order", paidTx: expect.any(String) });
+    t.rs.orderRefusal = null; // Bee added the Finland plan
+    expect(await t.wizard.retry(id)).toMatchObject({ stage: "provisioning" });
+    expect(t.rs.services).toHaveLength(1);
+    // A failed install on a real server is NOT mistaken for a refused order.
+    const r2 = t.db.get(id);
+    r2.stage = "failed"; r2.retryable = false; r2.detail = "install blew up";
+    t.db.set(id, r2);
+    expect((await t.wizard.status(id)).retryable).toBe(false);
+  });
+
   it("finds an order that went through even if the answer got lost", async () => {
     const t = setup();
     const { id, amount } = await t.wizard.start("bee@example.com", "base");
